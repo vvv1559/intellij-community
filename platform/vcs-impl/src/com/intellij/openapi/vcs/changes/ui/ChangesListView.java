@@ -52,6 +52,8 @@ import java.util.List;
 import java.util.Objects;
 import java.util.stream.Stream;
 
+import static com.intellij.openapi.vcs.changes.ChangesUtil.getAfterRevisionsFiles;
+import static com.intellij.openapi.vcs.changes.ChangesUtil.getNavigatableArray;
 import static com.intellij.openapi.vcs.changes.ui.ChangesBrowserNode.*;
 import static com.intellij.vcsUtil.VcsUtil.getIfSingle;
 import static com.intellij.vcsUtil.VcsUtil.toStream;
@@ -159,8 +161,7 @@ public class ChangesListView extends Tree implements TypeSafeDataProvider, DnDAw
       }
     }
     else if (key == CommonDataKeys.NAVIGATABLE_ARRAY) {
-      sink
-        .put(CommonDataKeys.NAVIGATABLE_ARRAY, ChangesUtil.getNavigatableArray(myProject, getSelectedFiles().toArray(VirtualFile[]::new)));
+      sink.put(CommonDataKeys.NAVIGATABLE_ARRAY, ChangesUtil.getNavigatableArray(myProject, getSelectedFiles()));
     }
     else if (key == PlatformDataKeys.DELETE_ELEMENT_PROVIDER) {
       if (getSelectionObjectsStream().anyMatch(userObject -> !(userObject instanceof ChangeList))) {
@@ -295,15 +296,10 @@ public class ChangesListView extends Tree implements TypeSafeDataProvider, DnDAw
 
   @NotNull
   protected Stream<VirtualFile> getSelectedFiles() {
-    Stream<VirtualFile> filesFromChanges = getSelectedChanges()
-      .map(Change::getAfterRevision)
-      .filter(Objects::nonNull)
-      .map(ContentRevision::getFile)
-      .map(FilePath::getVirtualFile)
-      .filter(Objects::nonNull)
-      .filter(VirtualFile::isValid);
-
-    return Stream.concat(filesFromChanges, getSelectedVirtualFiles(null)).distinct();
+    return Stream.concat(
+      getAfterRevisionsFiles(getSelectedChanges()),
+      getSelectedVirtualFiles(null)
+    ).distinct();
   }
 
   // TODO: Does not correspond to getSelectedChanges() - for instance, hijacked changes are not tracked here

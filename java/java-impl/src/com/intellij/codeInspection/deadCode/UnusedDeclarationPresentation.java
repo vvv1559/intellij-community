@@ -48,12 +48,14 @@ import com.intellij.ui.HyperlinkAdapter;
 import com.intellij.ui.ScrollPaneFactory;
 import com.intellij.util.ArrayUtil;
 import com.intellij.util.IncorrectOperationException;
+import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.HashMap;
 import com.intellij.util.containers.HashSet;
 import com.intellij.util.text.CharArrayUtil;
 import com.intellij.util.text.DateFormatUtil;
 import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.UIUtil;
+import gnu.trove.TObjectHashingStrategy;
 import org.jdom.Element;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
@@ -77,12 +79,28 @@ import java.util.function.Predicate;
 public class UnusedDeclarationPresentation extends DefaultInspectionToolPresentation {
   private final Map<String, Set<RefEntity>> myPackageContents = Collections.synchronizedMap(new HashMap<String, Set<RefEntity>>());
 
-  private final Set<RefEntity> myIgnoreElements = new HashSet<RefEntity>();
+  private final Set<RefEntity> myIgnoreElements = ContainerUtil.newConcurrentSet(TObjectHashingStrategy.IDENTITY);
+  private final Map<RefEntity, UnusedDeclarationHint> myFixedElements = ContainerUtil.newConcurrentMap(TObjectHashingStrategy.IDENTITY);
+
   private WeakUnreferencedFilter myFilter;
   private DeadHTMLComposer myComposer;
   @NonNls private static final String DELETE = "delete";
   @NonNls private static final String COMMENT = "comment";
-  @NonNls private static final String [] HINTS = {COMMENT, DELETE};
+
+  private enum UnusedDeclarationHint {
+    COMMENT("Commented out"),
+    DELETE("Deleted");
+
+    private final String myDescription;
+
+    UnusedDeclarationHint(String description) {
+      myDescription = description;
+    }
+
+    public String getDescription() {
+      return myDescription;
+    }
+  }
 
   public UnusedDeclarationPresentation(@NotNull InspectionToolWrapper toolWrapper, @NotNull GlobalInspectionContextImpl context) {
     super(toolWrapper, context);
@@ -150,9 +168,9 @@ public class UnusedDeclarationPresentation extends DefaultInspectionToolPresenta
 
       @NonNls Element hintsElement = new Element("hints");
 
-      for (String hint : HINTS) {
+      for (UnusedDeclarationHint hint : UnusedDeclarationHint.values()) {
         @NonNls Element hintElement = new Element("hint");
-        hintElement.setAttribute("value", hint);
+        hintElement.setAttribute("value", hint.toString().toLowerCase());
         hintsElement.addContent(hintElement);
       }
       element.addContent(hintsElement);
@@ -206,7 +224,12 @@ public class UnusedDeclarationPresentation extends DefaultInspectionToolPresenta
         final Project project = getContext().getProject();
         if (isDisposed() || project.isDisposed()) return;
         SafeDeleteHandler.invoke(project, psiElements, false,
-                                 () -> removeElements(refElements, project, myToolWrapper));
+                                 () -> {
+                                   removeElements(refElements, project, myToolWrapper);
+                                   for (RefEntity ref : refElements) {
+                                     myFixedElements.put(ref, UnusedDeclarationHint.DELETE);
+                                   }
+                                 });
       });
 
       return false; //refresh after safe delete dialog is closed
@@ -219,7 +242,7 @@ public class UnusedDeclarationPresentation extends DefaultInspectionToolPresenta
 
   class MoveToEntries extends QuickFixAction {
     MoveToEntries(@NotNull InspectionToolWrapper toolWrapper) {
-      super(InspectionsBundle.message("inspection.dead.code.entry.point.quickfix"), null, KeyStroke.getKeyStroke(KeyEvent.VK_INSERT, 0), toolWrapper);
+      super(InspectionsBundle.message("inspection.dead.code.entry.point.quickfix"), null, null, toolWrapper);
     }
 
     @Override
@@ -258,7 +281,7 @@ public class UnusedDeclarationPresentation extends DefaultInspectionToolPresenta
     @Override
     protected boolean applyFix(@NotNull RefEntity[] refElements) {
       if (!super.applyFix(refElements)) return false;
-      List<RefElement> deletedRefs = new ArrayList<RefElement>(1);
+      List<RefElement> deletedRefs = new ArrayList<>(1);
       final RefFilter filter = getFilter();
       for (RefEntity refElement : refElements) {
         PsiElement psiElement = refElement instanceof RefElement ? ((RefElement)refElement).getElement() : null;
@@ -278,6 +301,9 @@ public class UnusedDeclarationPresentation extends DefaultInspectionToolPresenta
         entryPointsManager.removeEntryPoint(refElement);
       }
 
+      for (RefElement ref : deletedRefs) {
+        myFixedElements.put(ref, UnusedDeclarationHint.COMMENT);
+      }
       return true;
     }
   }
@@ -375,6 +401,27 @@ public class UnusedDeclarationPresentation extends DefaultInspectionToolPresenta
     return entryPointsNode;
   }
 
+  @NotNull
+  @Override
+  public RefElementNode createRefNode(@Nullable RefEntity entity) {
+    return new RefElementNode(entity, this) {
+      @Nullable
+      @Override
+      public String getCustomizedTailText() {
+        final UnusedDeclarationHint hint = myFixedElements.get(getElement());
+        if (hint != null) {
+          return hint.getDescription();
+        }
+        return super.getCustomizedTailText();
+      }
+
+      @Override
+      public boolean isQuickFixAppliedFromView() {
+        return myFixedElements.containsKey(getElement());
+      }
+    };
+  }
+
   @Override
   public void updateContent() {
     getTool().checkForReachableRefs(getContext());
@@ -387,7 +434,7 @@ public class UnusedDeclarationPresentation extends DefaultInspectionToolPresenta
           String packageName = RefJavaUtil.getInstance().getPackageName(refEntity);
           Set<RefEntity> content = myPackageContents.get(packageName);
           if (content == null) {
-            content = new HashSet<RefEntity>();
+            content = new HashSet<>();
             myPackageContents.put(packageName, content);
           }
           content.add(refEntity);

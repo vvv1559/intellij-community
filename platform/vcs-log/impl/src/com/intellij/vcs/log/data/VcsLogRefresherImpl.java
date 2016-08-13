@@ -176,7 +176,7 @@ public class VcsLogRefresherImpl implements VcsLogRefresher {
   private GraphCommitImpl<Integer> compactCommit(@NotNull TimedVcsCommit commit, @NotNull final VirtualFile root) {
     List<Integer> parents = ContainerUtil.map(commit.getParents(),
                                               (NotNullFunction<Hash, Integer>)hash -> myHashMap.getCommitIndex(hash, root));
-    return new GraphCommitImpl<Integer>(myHashMap.getCommitIndex(commit.getId(), root), parents, commit.getTimestamp());
+    return new GraphCommitImpl<>(myHashMap.getCommitIndex(commit.getId(), root), parents, commit.getTimestamp());
   }
 
   private void storeUsersAndDetails(@NotNull List<? extends VcsCommitMetadata> metadatas) {
@@ -402,7 +402,7 @@ public class VcsLogRefresherImpl implements VcsLogRefresher {
     @NotNull
     Map<VirtualFile, VcsLogProvider.Requirements> asMap(@NotNull Collection<VirtualFile> roots) {
       return ContainerUtil
-        .map2Map(roots, root -> Pair.<VirtualFile, VcsLogProvider.Requirements>create(root, CommitCountRequirements.this));
+        .map2Map(roots, root -> Pair.<VirtualFile, VcsLogProvider.Requirements>create(root, this));
     }
   }
 

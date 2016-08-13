@@ -24,6 +24,7 @@ import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.xdebugger.impl.ui.tree.actions.XDebuggerTreeActionBase;
 import com.intellij.xdebugger.impl.ui.tree.nodes.XValueNodeImpl;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import java.util.List;
 
@@ -34,7 +35,7 @@ public class EditCustomFieldAction extends XDebuggerTreeActionBase {
   @Override
   protected void perform(XValueNodeImpl node, @NotNull String nodeName, AnActionEvent e) {
     ValueDescriptorImpl descriptor = ((JavaValue)node.getValueContainer()).getDescriptor();
-    EnumerationChildrenRenderer enumerationChildrenRenderer = EnumerationChildrenRenderer.getCurrent(descriptor);
+    EnumerationChildrenRenderer enumerationChildrenRenderer = getParentEnumerationRenderer(descriptor);
     if (enumerationChildrenRenderer != null) {
       new CustomFieldInplaceEditor(node, (UserExpressionDescriptorImpl)descriptor, enumerationChildrenRenderer).show();
     }
@@ -44,9 +45,16 @@ public class EditCustomFieldAction extends XDebuggerTreeActionBase {
     boolean enabled = false;
     List<JavaValue> values = ViewAsGroup.getSelectedValues(e);
     if (values.size() == 1) {
-      EnumerationChildrenRenderer enumerationChildrenRenderer = EnumerationChildrenRenderer.getCurrent(values.get(0).getDescriptor());
-      enabled = enumerationChildrenRenderer != null;
+      enabled = getParentEnumerationRenderer(values.get(0).getDescriptor()) != null;
     }
     e.getPresentation().setEnabledAndVisible(enabled);
+  }
+
+  @Nullable
+  static EnumerationChildrenRenderer getParentEnumerationRenderer(ValueDescriptorImpl descriptor) {
+    if (descriptor instanceof UserExpressionDescriptorImpl) {
+      return EnumerationChildrenRenderer.getCurrent(((UserExpressionDescriptorImpl)descriptor).getParentDescriptor());
+    }
+    return null;
   }
 }

@@ -22,7 +22,6 @@ import com.intellij.debugger.engine.evaluation.EvaluateException;
 import com.intellij.debugger.engine.evaluation.EvaluationContext;
 import com.intellij.debugger.engine.evaluation.TextWithImports;
 import com.intellij.debugger.impl.descriptors.data.UserExpressionData;
-import com.intellij.debugger.ui.impl.watch.UserExpressionDescriptorImpl;
 import com.intellij.debugger.ui.impl.watch.ValueDescriptorImpl;
 import com.intellij.debugger.ui.tree.*;
 import com.intellij.openapi.util.InvalidDataException;
@@ -115,11 +114,13 @@ public final class EnumerationChildrenRenderer extends TypeRenderer implements C
     NodeDescriptorFactory descriptorFactory = builder.getDescriptorManager();
 
     List<DebuggerTreeNode> children = new ArrayList<>();
+    int idx = 0;
     for (Pair<String, TextWithImports> pair : myChildren) {
-      children.add(nodeManager.createNode(descriptorFactory.getUserExpressionDescriptor(
-        builder.getParentDescriptor(),
-        new UserExpressionData((ValueDescriptorImpl)builder.getParentDescriptor(), getClassName(), pair.getFirst(), pair.getSecond())), evaluationContext)
-      );
+      UserExpressionData data =
+        new UserExpressionData((ValueDescriptorImpl)builder.getParentDescriptor(), getClassName(), pair.getFirst(), pair.getSecond());
+      data.setEnumerationIndex(idx++);
+      children.add(nodeManager.createNode(
+        descriptorFactory.getUserExpressionDescriptor(builder.getParentDescriptor(), data), evaluationContext));
     }
     builder.setChildren(children);
 
@@ -147,13 +148,11 @@ public final class EnumerationChildrenRenderer extends TypeRenderer implements C
 
   @Nullable
   public static EnumerationChildrenRenderer getCurrent(ValueDescriptorImpl valueDescriptor) {
-    if (valueDescriptor instanceof UserExpressionDescriptorImpl) {
-      Renderer renderer = ((UserExpressionDescriptorImpl)valueDescriptor).getParentDescriptor().getLastRenderer();
-      if (renderer instanceof CompoundNodeRenderer) {
-        ChildrenRenderer childrenRenderer = ((CompoundNodeRenderer)renderer).getChildrenRenderer();
-        if (childrenRenderer instanceof EnumerationChildrenRenderer) {
-          return (EnumerationChildrenRenderer)childrenRenderer;
-        }
+    Renderer renderer = valueDescriptor.getLastRenderer();
+    if (renderer instanceof CompoundNodeRenderer) {
+      ChildrenRenderer childrenRenderer = ((CompoundNodeRenderer)renderer).getChildrenRenderer();
+      if (childrenRenderer instanceof EnumerationChildrenRenderer) {
+        return (EnumerationChildrenRenderer)childrenRenderer;
       }
     }
     return null;

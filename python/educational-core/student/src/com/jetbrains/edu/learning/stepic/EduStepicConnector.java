@@ -67,6 +67,9 @@ public class EduStepicConnector {
   public static final String PYCHARM_PREFIX = "pycharm";
   private static BasicCookieStore ourCookieStore;
 
+  private static final String ADAPTIVE_NOTE =
+    "\n\nInitially, the adaptive system may behave somewhat randomly, but the more problems you solve, the smarter it become!";
+
   private EduStepicConnector() {
   }
 
@@ -198,7 +201,7 @@ public class EduStepicConnector {
   private static boolean postCredentials(String user, String password) {
     String url = EduStepicNames.STEPIC_URL + EduStepicNames.LOGIN;
     final HttpPost request = new HttpPost(url);
-    List <NameValuePair> nvps = new ArrayList <NameValuePair>();
+    List <NameValuePair> nvps = new ArrayList<>();
     nvps.add(new BasicNameValuePair("csrfmiddlewaretoken", ourCSRFToken));
     nvps.add(new BasicNameValuePair("login", user));
     nvps.add(new BasicNameValuePair("next", "/"));
@@ -213,12 +216,13 @@ public class EduStepicConnector {
       final CloseableHttpResponse response = ourClient.execute(request);
       saveCSRFToken();
       final StatusLine line = response.getStatusLine();
+      final HttpEntity responseEntity = response.getEntity();
+      final String responseString = responseEntity != null ? EntityUtils.toString(responseEntity) : "";
+      EntityUtils.consume(responseEntity);
       if (line.getStatusCode() != HttpStatus.SC_MOVED_TEMPORARILY) {
-        final HttpEntity responseEntity = response.getEntity();
-        final String responseString = responseEntity != null ? EntityUtils.toString(responseEntity) : "";
         LOG.warn("Failed to login: " + line.getStatusCode() + line.getReasonPhrase());
         LOG.debug("Failed to login " + responseString);
-        EntityUtils.consume(responseEntity);
+
         ourClient = null;
         return false;
       }
@@ -284,7 +288,7 @@ public class EduStepicConnector {
   @NotNull
   public static List<CourseInfo> getCourses() {
     try {
-      List<CourseInfo> result = new ArrayList<CourseInfo>();
+      List<CourseInfo> result = new ArrayList<>();
       int pageNumber = 1;
       while (addCoursesFromStepic(result, pageNumber)) {
         pageNumber += 1;
@@ -379,7 +383,7 @@ public class EduStepicConnector {
         }
         
         if (info.isAdaptive()) {
-          info.setDescription("This is a Stepik Adaptive course.\n\n" + info.getDescription());
+          info.setDescription("This is a Stepik Adaptive course.\n\n" + info.getDescription() + ADAPTIVE_NOTE);
         }
         
         result.add(info);
@@ -432,7 +436,7 @@ public class EduStepicConnector {
     final StepicWrappers.SectionContainer
       sectionContainer = getFromStepic(EduStepicNames.SECTIONS + String.valueOf(sectionId), StepicWrappers.SectionContainer.class);
     List<Integer> unitIds = sectionContainer.sections.get(0).units;
-    final List<Lesson> lessons = new ArrayList<Lesson>();
+    final List<Lesson> lessons = new ArrayList<>();
     for (Integer unitId : unitIds) {
       StepicWrappers.UnitContainer
         unit = getFromStepic(EduStepicNames.UNITS + "/" + String.valueOf(unitId), StepicWrappers.UnitContainer.class);
@@ -440,7 +444,7 @@ public class EduStepicConnector {
       StepicWrappers.LessonContainer
         lessonContainer = getFromStepic(EduStepicNames.LESSONS + String.valueOf(lessonID), StepicWrappers.LessonContainer.class);
       Lesson lesson = lessonContainer.lessons.get(0);
-      lesson.taskList = new ArrayList<Task>();
+      lesson.taskList = new ArrayList<>();
       for (Integer s : lesson.steps) {
         createTask(lesson, s);
       }
@@ -464,7 +468,7 @@ public class EduStepicConnector {
       task.addTestsTexts(wrapper.name, wrapper.text);
     }
 
-    task.taskFiles = new HashMap<String, TaskFile>();      // TODO: it looks like we don't need taskFiles as map anymore
+    task.taskFiles = new HashMap<>();      // TODO: it looks like we don't need taskFiles as map anymore
     if (block.options.files != null) {
       for (TaskFile taskFile : block.options.files) {
         task.taskFiles.put(taskFile.name, taskFile);
@@ -512,13 +516,22 @@ public class EduStepicConnector {
       final String attemptResponseString = responseEntity != null ? EntityUtils.toString(responseEntity) : "";
       final StatusLine statusLine = attemptResponse.getStatusLine();
       EntityUtils.consume(responseEntity);
+      if (statusLine.getStatusCode() == HttpStatus.SC_UNAUTHORIZED) {
+        if (StringUtil.isEmptyOrSpaces(login) || StringUtil.isEmptyOrSpaces(password)) {
+          return;
+        }
+        else {
+          login(login, password);
+          postAttempt(task, passed, login, password);
+        }
+      }
       if (statusLine.getStatusCode() != HttpStatus.SC_CREATED) {
-        LOG.error("Failed to make attempt " + attemptResponseString);
+        LOG.warn("Failed to make attempt " + attemptResponseString);
       }
       final StepicWrappers.AttemptWrapper.Attempt attempt = new Gson().fromJson(attemptResponseString, StepicWrappers.AttemptContainer.class).attempts.get(0);
 
       final Map<String, TaskFile> taskFiles = task.getTaskFiles();
-      final ArrayList<StepicWrappers.SolutionFile> files = new ArrayList<StepicWrappers.SolutionFile>();
+      final ArrayList<StepicWrappers.SolutionFile> files = new ArrayList<>();
       for (TaskFile fileEntry : taskFiles.values()) {
         files.add(new StepicWrappers.SolutionFile(fileEntry.name, fileEntry.text));
       }
@@ -750,6 +763,9 @@ public class EduStepicConnector {
 
       try {
         final CloseableHttpResponse response = ourClient.execute(request);
+        final HttpEntity responseEntity = response.getEntity();
+        final String responseString = responseEntity != null ? EntityUtils.toString(responseEntity) : "";
+        EntityUtils.consume(responseEntity);
         final StatusLine line = response.getStatusLine();
         if (line.getStatusCode() == HttpStatus.SC_FORBIDDEN) {
           if (login(project)) {
@@ -758,9 +774,6 @@ public class EduStepicConnector {
           }
         }
         if (line.getStatusCode() != HttpStatus.SC_OK) {
-          final HttpEntity responseEntity = response.getEntity();
-          final String responseString = responseEntity != null ? EntityUtils.toString(responseEntity) : "";
-          EntityUtils.consume(responseEntity);
           LOG.error("Failed to push " + responseString);
         }
       }
@@ -861,11 +874,11 @@ public class EduStepicConnector {
     ApplicationManager.getApplication().invokeLater(() -> {
       try {
         final CloseableHttpResponse response = ourClient.execute(request);
+        final HttpEntity responseEntity = response.getEntity();
+        final String responseString = responseEntity != null ? EntityUtils.toString(responseEntity) : "";
+        EntityUtils.consume(responseEntity);
         final StatusLine line = response.getStatusLine();
         if (line.getStatusCode() != HttpStatus.SC_NO_CONTENT) {
-          final HttpEntity responseEntity = response.getEntity();
-          final String responseString = responseEntity != null ? EntityUtils.toString(responseEntity) : "";
-          EntityUtils.consume(responseEntity);
           LOG.error("Failed to delete task " + responseString);
         }
       }

@@ -18,6 +18,7 @@ import com.intellij.openapi.module.ModuleManager;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.project.DumbAwareRunnable;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.startup.StartupManager;
 import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.vfs.VirtualFile;
@@ -58,14 +59,14 @@ public class StudyProjectComponent implements ProjectComponent {
   private static final Logger LOG = Logger.getInstance(StudyProjectComponent.class.getName());
   private final Project myProject;
   private FileCreatedByUserListener myListener;
-  private Map<Keymap, List<Pair<String, String>>> myDeletedShortcuts = new HashMap<Keymap, List<Pair<String, String>>>();
+  private Map<Keymap, List<Pair<String, String>>> myDeletedShortcuts = new HashMap<>();
   private StudyProjectComponent(@NotNull final Project project) {
     myProject = project;
   }
 
   @Override
   public void projectOpened() {
-    final Course course = StudyTaskManager.getInstance(myProject).getCourse();
+    Course course = StudyTaskManager.getInstance(myProject).getCourse();
     // Check if user has javafx lib in his JDK. Now bundled JDK doesn't have this lib inside.
     if (StudyUtils.hasJavaFx()) {
       Platform.setImplicitExit(false);
@@ -96,12 +97,13 @@ public class StudyProjectComponent implements ProjectComponent {
     }
 
     StudyUtils.registerStudyToolWindow(course, myProject);
-    ApplicationManager.getApplication().invokeLater(new DumbAwareRunnable() {
+    StartupManager.getInstance(myProject).runWhenProjectIsInitialized(() -> ApplicationManager.getApplication().invokeLater(new DumbAwareRunnable() {
       @Override
       public void run() {
         ApplicationManager.getApplication().runWriteAction(new DumbAwareRunnable() {
           @Override
           public void run() {
+            Course course = StudyTaskManager.getInstance(myProject).getCourse();
             if (course != null) {
               final UISettings instance = UISettings.getInstance();
               if (instance != null) {
@@ -114,7 +116,7 @@ public class StudyProjectComponent implements ProjectComponent {
           }
         });
       }
-    });
+    }));
   }
 
   private void registerShortcuts() {
@@ -242,7 +244,7 @@ public class StudyProjectComponent implements ProjectComponent {
     for (Keymap keymap : keymapManager.getAllKeymaps()) {
       List<Pair<String, String>> pairs = myDeletedShortcuts.get(keymap);
       if (pairs == null) {
-        pairs = new ArrayList<Pair<String, String>>();
+        pairs = new ArrayList<>();
         myDeletedShortcuts.put(keymap, pairs);
       }
       for (String shortcutString : shortcuts) {

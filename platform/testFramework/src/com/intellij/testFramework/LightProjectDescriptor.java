@@ -59,7 +59,7 @@ public class LightProjectDescriptor {
 
   @NotNull
   public Module createMainModule(@NotNull Project project) {
-    return createModule(project, "light_idea_test_case.iml");
+    return createModule(project, FileUtil.join(FileUtil.getTempDirectory(), "light_idea_test_case.iml"));
   }
 
   protected Module createModule(@NotNull Project project, @NotNull String moduleFilePath) {

@@ -69,7 +69,7 @@ public class VcsLogUiImpl implements VcsLogUi, Disposable {
     }
 
     myVisiblePackChangeListener = visiblePack -> UIUtil.invokeLaterIfNeeded(() -> {
-      if (!Disposer.isDisposed(VcsLogUiImpl.this)) {
+      if (!Disposer.isDisposed(this)) {
         setVisiblePack(visiblePack);
       }
     });
@@ -324,7 +324,7 @@ public class VcsLogUiImpl implements VcsLogUi, Disposable {
 
   private void fireFilterChangeEvent(@NotNull VisiblePack visiblePack, boolean refresh) {
     ApplicationManager.getApplication().assertIsDispatchThread();
-    Collection<VcsLogListener> logListeners = new ArrayList<VcsLogListener>(myLogListeners);
+    Collection<VcsLogListener> logListeners = new ArrayList<>(myLogListeners);
 
     for (VcsLogListener listener : logListeners) {
       listener.onChange(visiblePack, refresh);
