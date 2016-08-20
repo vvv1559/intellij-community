@@ -32,6 +32,7 @@ import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.wm.IdeFrame;
 import com.intellij.openapi.wm.WindowManager;
+import com.intellij.ui.FocusTrackback;
 import com.intellij.ui.UIBundle;
 import com.intellij.util.ArrayUtil;
 import com.intellij.util.Consumer;
@@ -42,6 +43,7 @@ import org.jetbrains.annotations.Nullable;
 import javax.swing.*;
 import java.awt.*;
 import java.io.File;
+import java.lang.ref.WeakReference;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Stream;
@@ -54,14 +56,16 @@ public class MacPathChooserDialog implements PathChooserDialog, FileChooserDialo
 
   private FileDialog myFileDialog;
   private final FileChooserDescriptor myFileChooserDescriptor;
-  private final Component myParent;
+  private final WeakReference<Component> myParent;
+  private final Project myProject;
   private final String myTitle;
   private VirtualFile [] virtualFiles;
 
   public MacPathChooserDialog(FileChooserDescriptor descriptor, Component parent, Project project) {
 
     myFileChooserDescriptor = descriptor;
-    myParent = parent;
+    myParent = new WeakReference<>(parent);
+    myProject = project;
     myTitle = getChooserTitle(descriptor);
 
     Consumer<Dialog> dialogConsumer = owner -> myFileDialog = new FileDialog(owner, myTitle, FileDialog.LOAD);
@@ -98,8 +102,12 @@ public class MacPathChooserDialog implements PathChooserDialog, FileChooserDialo
 
   @Override
   public void choose(@Nullable VirtualFile toSelect, @NotNull Consumer<List<VirtualFile>> callback) {
-    String path = toSelect != null ? toSelect.getCanonicalPath() : null;
-    myFileDialog.setFile(path);
+    if (toSelect != null && toSelect.getParent() != null) {
+      myFileDialog.setDirectory(toSelect.getParent().getCanonicalPath());
+      myFileDialog.setFile(toSelect.getPath());
+    }
+
+    myFileDialog.setMultipleMode(myFileChooserDescriptor.isChooseMultiple());
 
     final CommandProcessorEx commandProcessor =
       ApplicationManager.getApplication() != null ? (CommandProcessorEx)CommandProcessor.getInstance() : null;
@@ -111,6 +119,7 @@ public class MacPathChooserDialog implements PathChooserDialog, FileChooserDialo
       LaterInvocator.enterModal(myFileDialog);
     }
 
+    Component parent = myParent.get();
     try {
       myFileDialog.setVisible(true);
     }
@@ -118,6 +127,7 @@ public class MacPathChooserDialog implements PathChooserDialog, FileChooserDialo
       if (appStarted) {
         commandProcessor.leaveModal();
         LaterInvocator.leaveModal(myFileDialog);
+        if (parent != null) parent.requestFocus();
       }
     }
 
@@ -125,19 +135,30 @@ public class MacPathChooserDialog implements PathChooserDialog, FileChooserDialo
     List<VirtualFile> virtualFileList = getChosenFiles(Stream.of(files));
     virtualFiles = virtualFileList.toArray(VirtualFile.EMPTY_ARRAY);
 
-    try {
-      myFileChooserDescriptor.validateSelectedFiles(virtualFiles);
-    }
-    catch (Exception e) {
-      Messages.showErrorDialog(myParent, e.getMessage(), myTitle);
-      return;
-    }
+    if (!virtualFileList.isEmpty()) {
+      try {
+        if (virtualFileList.size() == 1) {
+          myFileChooserDescriptor.isFileSelectable(virtualFileList.get(0));
+        }
+        myFileChooserDescriptor.validateSelectedFiles(virtualFiles);
+      }
+      catch (Exception e) {
+        if (parent == null) {
+          Messages.showErrorDialog(myProject, e.getMessage(), myTitle);
+        }
+        else {
+          Messages.showErrorDialog(parent, e.getMessage(), myTitle);
+        }
 
-    if (!ArrayUtil.isEmpty(files)) {
-      callback.consume(virtualFileList);
-    }
-    else if (callback instanceof FileChooser.FileChooserConsumer) {
-      ((FileChooser.FileChooserConsumer)callback).cancelled();
+        return;
+      }
+
+      if (!ArrayUtil.isEmpty(files)) {
+        callback.consume(virtualFileList);
+      }
+      else if (callback instanceof FileChooser.FileChooserConsumer) {
+        ((FileChooser.FileChooserConsumer)callback).cancelled();
+      }
     }
   }
 

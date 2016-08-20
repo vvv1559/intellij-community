@@ -39,7 +39,7 @@ class PasswordSafeImpl(/* public - backward compatibility */val settings: Passwo
     get() = currentProvider !is FileCredentialStore
 
   init {
-    if (settings.providerType == ProviderType.MEMORY_ONLY) {
+    if (settings.providerType == ProviderType.MEMORY_ONLY || ApplicationManager.getApplication().isUnitTestMode) {
       currentProvider = FileCredentialStore(memoryOnly = true)
     }
     else {
@@ -112,6 +112,8 @@ class PasswordSafeImpl(/* public - backward compatibility */val settings: Passwo
     finally {
       (currentProvider as? FileCredentialStore)?.let { it.clear() }
     }
+
+    ApplicationManager.getApplication().messageBus.syncPublisher(PasswordSafeSettings.TOPIC).credentialStoreCleared()
   }
 
   // public - backward compatibility

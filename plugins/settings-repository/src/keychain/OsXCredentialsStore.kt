@@ -15,6 +15,7 @@
  */
 package org.jetbrains.keychain
 
+import com.intellij.credentialStore.Credentials
 import com.intellij.credentialStore.macOs.deleteGenericPassword
 import com.intellij.credentialStore.macOs.findGenericPassword
 import com.intellij.credentialStore.macOs.saveGenericPassword
@@ -35,7 +36,7 @@ class OsXCredentialsStore(serviceName: String) : CredentialsStore {
       return null
     }
 
-    val accountName: String = sshKeyFile ?: host
+    val accountName = sshKeyFile ?: host
     var credentials = accountToCredentials.get(accountName)
     if (credentials != null) {
       return credentials
@@ -57,7 +58,7 @@ class OsXCredentialsStore(serviceName: String) : CredentialsStore {
       credentials = Credentials(sshKeyFile, data)
     }
 
-    accountToCredentials[accountName] = credentials
+    accountToCredentials.set(accountName, credentials)
     return credentials
   }
 
@@ -74,7 +75,7 @@ class OsXCredentialsStore(serviceName: String) : CredentialsStore {
       return
     }
 
-    val data = if (sshKeyFile == null) "${PasswordUtil.encodePassword(credentials.id)}@${PasswordUtil.encodePassword(credentials.token)}" else credentials.token!!
+    val data = if (sshKeyFile == null) credentials.toString() else credentials.password!!
     saveGenericPassword(getServiceName(sshKeyFile), accountName, data.toByteArray())
   }
 
