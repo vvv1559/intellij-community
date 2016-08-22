@@ -77,7 +77,6 @@ import java.util.*;
 import java.util.function.Predicate;
 
 public class UnusedDeclarationPresentation extends DefaultInspectionToolPresentation {
-  private final Map<String, Set<RefEntity>> myPackageContents = Collections.synchronizedMap(new HashMap<String, Set<RefEntity>>());
 
   private final Set<RefEntity> myIgnoreElements = ContainerUtil.newConcurrentSet(TObjectHashingStrategy.IDENTITY);
   private final Map<RefEntity, UnusedDeclarationHint> myFixedElements = ContainerUtil.newConcurrentMap(TObjectHashingStrategy.IDENTITY);
@@ -425,7 +424,7 @@ public class UnusedDeclarationPresentation extends DefaultInspectionToolPresenta
   @Override
   public void updateContent() {
     getTool().checkForReachableRefs(getContext());
-    myPackageContents.clear();
+    myContents.clear();
     final UnusedSymbolLocalInspectionBase localInspectionTool = getTool().getSharedLocalInspectionTool();
     getContext().getRefManager().iterate(new RefJavaVisitor() {
       @Override public void visitElement(@NotNull RefEntity refEntity) {
@@ -433,21 +432,16 @@ public class UnusedDeclarationPresentation extends DefaultInspectionToolPresenta
         RefJavaElement refElement = (RefJavaElement)refEntity;
         if (!compareVisibilities(refElement, localInspectionTool)) return;
         if (!(getContext().getUIOptions().FILTER_RESOLVED_ITEMS && getIgnoredRefElements().contains(refElement)) && refElement.isValid() && getFilter().accepts(refElement)) {
-          String packageName = RefJavaUtil.getInstance().getPackageName(refEntity);
-          Set<RefEntity> content = myPackageContents.get(packageName);
-          if (content == null) {
-            content = new HashSet<>();
-            myPackageContents.put(packageName, content);
-          }
-          content.add(refEntity);
+          registerContentEntry(refEntity, RefJavaUtil.getInstance().getPackageName(refEntity));
         }
       }
     });
+    updateProblemElements();
   }
 
   @PsiModifier.ModifierConstant
   private static String getAcceptedVisibility(UnusedSymbolLocalInspectionBase tool, RefJavaElement element) {
-    if (element instanceof RefClass) {
+    if (element instanceof RefClass || element instanceof RefImplicitConstructor) {
       return tool.getClassVisibility();
     }
     if (element instanceof RefField) {
@@ -471,7 +465,7 @@ public class UnusedDeclarationPresentation extends DefaultInspectionToolPresenta
     return PsiModifier.PUBLIC;
   }
 
-  private static boolean compareVisibilities(RefJavaElement listOwner, UnusedSymbolLocalInspectionBase localInspectionTool) {
+  protected static boolean compareVisibilities(RefJavaElement listOwner, UnusedSymbolLocalInspectionBase localInspectionTool) {
     final String visibility = getAcceptedVisibility(localInspectionTool, listOwner);
     if (visibility != null) {
       while (listOwner != null) {
@@ -492,13 +486,7 @@ public class UnusedDeclarationPresentation extends DefaultInspectionToolPresenta
 
   @Override
   public boolean hasReportedProblems() {
-    return !myPackageContents.isEmpty();
-  }
-
-  @NotNull
-  @Override
-  public Map<String, Set<RefEntity>> getContent() {
-    return myPackageContents;
+    return !myContents.isEmpty() || super.hasReportedProblems();
   }
 
   @Override
@@ -515,7 +503,6 @@ public class UnusedDeclarationPresentation extends DefaultInspectionToolPresenta
   @Override
   public void cleanup() {
     super.cleanup();
-    myPackageContents.clear();
     myIgnoreElements.clear();
   }
 
@@ -558,6 +545,7 @@ public class UnusedDeclarationPresentation extends DefaultInspectionToolPresenta
       if (COMMENT.equals(hint)) {
         return new CommentOutFix(((ProblemDescriptor)descriptor).getPsiElement());
       }
+      return super.findQuickFixes(descriptor, hint);
     }
     return null;
   }
