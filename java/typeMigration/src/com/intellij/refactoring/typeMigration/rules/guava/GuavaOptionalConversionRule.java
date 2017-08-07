@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -61,7 +61,7 @@ public class GuavaOptionalConversionRule extends BaseGuavaTypeConversionRule {
             TypeConversionDescriptor descriptor =
               new TypeConversionDescriptor(null, "java.util.Optional.ofNullable($val$.orElseGet($o$::get))") {
                 @Override
-                public PsiExpression replace(PsiExpression expression, TypeEvaluator evaluator) {
+                public PsiExpression replace(PsiExpression expression, @NotNull TypeEvaluator evaluator) {
                   setStringToReplace("$val$.or(" +
                                      GuavaOptionalConversionUtil.simplifyParameterPattern((PsiMethodCallExpression)expression)
                                      + ")");
@@ -74,7 +74,7 @@ public class GuavaOptionalConversionRule extends BaseGuavaTypeConversionRule {
             return descriptor;
           }
           return GuavaLambda.SUPPLIER.getClassQName().equals(qName)
-                 ? new GuavaTypeConversionDescriptor("$val$.or($other$)", "$val$.orElseGet($other$)")
+                 ? new GuavaTypeConversionDescriptor("$val$.or($other$)", "$val$.orElseGet($other$)", context)
                  : new TypeConversionDescriptor("$val$.or($other$)", "$val$.orElse($other$)");
         }
         return null;
@@ -86,7 +86,7 @@ public class GuavaOptionalConversionRule extends BaseGuavaTypeConversionRule {
           return null;
         }
         final PsiExpression functionArgument = arguments[0];
-        final TypeConversionDescriptor descriptor = new GuavaTypeConversionDescriptor("$val$.transform($fun$)", "$val$.map($fun$)");
+        final TypeConversionDescriptor descriptor = new GuavaTypeConversionDescriptor("$val$.transform($fun$)", "$val$.map($fun$)", context);
         final PsiType typeParameter = GuavaConversionUtil.getFunctionReturnType(functionArgument);
         if (typeParameter == null) {
           return descriptor;
@@ -112,16 +112,14 @@ public class GuavaOptionalConversionRule extends BaseGuavaTypeConversionRule {
 
   @Nullable
   @Override
-  protected TypeConversionDescriptorBase findConversionForVariableReference(@NotNull PsiReferenceExpression referenceExpression,
-                                                                            @NotNull PsiVariable psiVariable,
-                                                                            @Nullable PsiExpression context) {
+  protected TypeConversionDescriptorBase findConversionForVariableReference(@Nullable PsiExpression context) {
     if (GuavaOptionalConversionUtil.isOptionalOrContext(context)) {
       return new TypeConversionDescriptor("$o$", "com.google.common.base." + OPTIONAL_CONVERTOR_PATTERN);
     }
     return new TypeConversionDescriptor("$o$", "$o$::get");
   }
 
-  private PsiClass getParameterClass(PsiMethod method) {
+  private static PsiClass getParameterClass(PsiMethod method) {
     final PsiParameter[] parameters = method.getParameterList().getParameters();
     if (parameters.length != 1) {
       return null;
@@ -133,7 +131,7 @@ public class GuavaOptionalConversionRule extends BaseGuavaTypeConversionRule {
   protected void fillSimpleDescriptors(Map<String, TypeConversionDescriptorBase> descriptorsMap) {
     descriptorsMap.put("absent", new TypeConversionDescriptor("'Optional*.absent()", "java.util.Optional.empty()") {
       @Override
-      public PsiExpression replace(PsiExpression expression, TypeEvaluator evaluator) {
+      public PsiExpression replace(PsiExpression expression, @NotNull TypeEvaluator evaluator) {
         LOG.assertTrue(expression instanceof PsiMethodCallExpression);
 
         final PsiReferenceParameterList typeArguments = ((PsiMethodCallExpression)expression).getTypeArgumentList();
@@ -157,7 +155,7 @@ public class GuavaOptionalConversionRule extends BaseGuavaTypeConversionRule {
     descriptorsMap.put("isPresent", identity);
     descriptorsMap.put("orNull", new TypeConversionDescriptor("$val$.orNull()", "$val$.orElse(null)"));
     descriptorsMap.put("asSet", new TypeConversionDescriptor("$val$.asSet()",
-                                                             "$val$.isPresent() ? java.util.Collections.singleton($val$.get()) : java.util.Collections.emptySet()"));
+                                                             "$val$.map(java.util.Collections::singleton).orElse(java.util.Collections.emptySet())"));
   }
 
   @NotNull
@@ -170,5 +168,10 @@ public class GuavaOptionalConversionRule extends BaseGuavaTypeConversionRule {
   @Override
   public String ruleToClass() {
     return JAVA_OPTIONAL;
+  }
+
+  @Override
+  protected TypeConversionDescriptorBase getUnknownMethodConversion() {
+    return null;
   }
 }

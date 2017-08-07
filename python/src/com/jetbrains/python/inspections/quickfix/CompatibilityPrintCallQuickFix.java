@@ -21,7 +21,6 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.util.PsiTreeUtil;
-import com.intellij.util.Function;
 import com.jetbrains.python.PyBundle;
 import com.jetbrains.python.psi.*;
 import org.jetbrains.annotations.NotNull;
@@ -33,13 +32,8 @@ import org.jetbrains.annotations.NotNull;
  */
 public class CompatibilityPrintCallQuickFix implements LocalQuickFix {
   @NotNull
-  public String getName() {
-    return PyBundle.message("QFIX.statement.effect");
-  }
-
-  @NotNull
   public String getFamilyName() {
-    return getName();
+    return PyBundle.message("QFIX.statement.effect");
   }
 
   public void applyFix(@NotNull Project project, @NotNull ProblemDescriptor descriptor) {
@@ -56,7 +50,7 @@ public class CompatibilityPrintCallQuickFix implements LocalQuickFix {
       stringBuilder.append(StringUtil.join(target, o -> o.getText(), ", "));
     }
     stringBuilder.append(")");
-    expression.replace(elementGenerator.createFromText(LanguageLevel.forElement(expression), PyExpression.class,
+    expression.replace(elementGenerator.createFromText(LanguageLevel.forElement(expression), PyElement.class,
                                                        stringBuilder.toString()));
 
     final PyFromImportStatement statement = elementGenerator.createFromText(LanguageLevel.forElement(expression), PyFromImportStatement.class,

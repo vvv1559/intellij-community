@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
  */
 package com.intellij.execution.application;
 
-import com.intellij.application.options.ModulesComboBox;
+import com.intellij.application.options.ModuleDescriptionsComboBox;
 import com.intellij.execution.ExecutionBundle;
 import com.intellij.execution.JavaExecutionUtil;
 import com.intellij.execution.configurations.ConfigurationUtil;
@@ -42,7 +42,7 @@ import java.awt.event.ActionListener;
 public class ApplicationConfigurable extends SettingsEditor<ApplicationConfiguration> implements PanelWithAnchor {
   private CommonJavaParametersPanel myCommonProgramParameters;
   private LabeledComponent<EditorTextFieldWithBrowseButton> myMainClass;
-  private LabeledComponent<ModulesComboBox> myModule;
+  private LabeledComponent<ModuleDescriptionsComboBox> myModule;
   private JPanel myWholePanel;
 
   private final ConfigurationModuleSelector myModuleSelector;
@@ -68,7 +68,7 @@ public class ApplicationConfigurable extends SettingsEditor<ApplicationConfigura
     myAnchor = UIUtil.mergeComponentsWithAnchor(myMainClass, myCommonProgramParameters, myJrePathEditor, myModule);
   }
 
-  public void applyEditorTo(final ApplicationConfiguration configuration) throws ConfigurationException {
+  public void applyEditorTo(@NotNull final ApplicationConfiguration configuration) throws ConfigurationException {
     myCommonProgramParameters.applyTo(configuration);
     myModuleSelector.applyTo(configuration);
     final String className = getMainClassField().getText();
@@ -81,7 +81,7 @@ public class ApplicationConfigurable extends SettingsEditor<ApplicationConfigura
     updateShowSwingInspector(configuration);
   }
 
-  public void resetEditorFrom(final ApplicationConfiguration configuration) {
+  public void resetEditorFrom(@NotNull final ApplicationConfiguration configuration) {
     myCommonProgramParameters.reset(configuration);
     myModuleSelector.reset(configuration);
     getMainClassField().setText(configuration.MAIN_CLASS_NAME != null ? configuration.MAIN_CLASS_NAME.replaceAll("\\$", "\\.") : "");

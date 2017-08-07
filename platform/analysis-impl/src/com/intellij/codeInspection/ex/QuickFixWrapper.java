@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@ import com.intellij.codeInsight.daemon.DaemonCodeAnalyzer;
 import com.intellij.codeInsight.intention.IntentionAction;
 import com.intellij.codeInspection.LocalQuickFix;
 import com.intellij.codeInspection.ProblemDescriptor;
+import com.intellij.codeInspection.ProblemHighlightType;
 import com.intellij.codeInspection.QuickFix;
 import com.intellij.openapi.command.undo.UndoUtil;
 import com.intellij.openapi.diagnostic.Logger;
@@ -29,6 +30,8 @@ import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
 import com.intellij.util.IncorrectOperationException;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.TestOnly;
 
 /**
  * @author max
@@ -37,8 +40,7 @@ public class QuickFixWrapper implements IntentionAction {
   private static final Logger LOG = Logger.getInstance("com.intellij.codeInspection.ex.QuickFixWrapper");
 
   private final ProblemDescriptor myDescriptor;
-  private final int myFixNumber;
-
+  private final LocalQuickFix myFix;
 
   @NotNull
   public static IntentionAction wrap(@NotNull ProblemDescriptor descriptor, int fixNumber) {
@@ -47,12 +49,12 @@ public class QuickFixWrapper implements IntentionAction {
     LOG.assertTrue(fixes != null && fixes.length > fixNumber);
 
     final QuickFix fix = fixes[fixNumber];
-    return fix instanceof IntentionAction ? (IntentionAction)fix : new QuickFixWrapper(descriptor, fixNumber);
+    return fix instanceof IntentionAction ? (IntentionAction)fix : new QuickFixWrapper(descriptor, (LocalQuickFix)fix);
   }
 
-  private QuickFixWrapper(@NotNull ProblemDescriptor descriptor, int fixNumber) {
+  private QuickFixWrapper(@NotNull ProblemDescriptor descriptor, @NotNull LocalQuickFix fix) {
     myDescriptor = descriptor;
-    myFixNumber = fixNumber;
+    myFix = fix;
   }
 
   @Override
@@ -64,7 +66,7 @@ public class QuickFixWrapper implements IntentionAction {
   @Override
   @NotNull
   public String getFamilyName() {
-    return myDescriptor.getFixes()[myFixNumber].getName();
+    return getFix().getName();
   }
 
   @Override
@@ -95,8 +97,20 @@ public class QuickFixWrapper implements IntentionAction {
     return getFix().startInWriteAction();
   }
 
+  @Nullable
+  @Override
+  public PsiElement getElementToMakeWritable(@NotNull PsiFile file) {
+    return getFix().getElementToMakeWritable(file);
+  }
+
+  @NotNull
   public LocalQuickFix getFix() {
-    return (LocalQuickFix)myDescriptor.getFixes()[myFixNumber];
+    return myFix;
+  }
+
+  @TestOnly
+  public ProblemHighlightType getHighlightType() {
+    return myDescriptor.getHighlightType();
   }
 
   public String toString() {

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -30,9 +30,6 @@ import javax.swing.*;
 import java.util.HashMap;
 import java.util.Map;
 
-/**
- * User: Sergey.Vasiliev
- */
 public class DomElementsToggleAction extends ToggleAction {
   private final DomModelTreeView myTreeView;
   private final Class myClass;
@@ -55,7 +52,7 @@ public class DomElementsToggleAction extends ToggleAction {
     if(getHiders() == null) DomUtil.getFile(myTreeView.getRootElement()).putUserData(AbstractDomElementNode.TREE_NODES_HIDERS_KEY,
                                                                                      new HashMap<>());
 
-    if(getHiders().get(myClass) == null) getHiders().put(myClass, true);
+    getHiders().putIfAbsent(myClass, true);
   }
 
   @Override

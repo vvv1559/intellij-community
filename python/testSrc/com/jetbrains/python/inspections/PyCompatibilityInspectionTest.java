@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -183,6 +183,53 @@ public class PyCompatibilityInspectionTest extends PyTestCase {
 
   // PY-18880
   public void testBackportedTyping() {
+    doTest();
+  }
+
+  public void testUnderscoresInNumericLiterals() {
+    doTest(LanguageLevel.PYTHON36);
+  }
+
+  public void testVariableAnnotations() {
+    doTest(LanguageLevel.PYTHON36);
+  }
+
+  // PY-20770
+  public void testYieldInsideAsyncDef() {
+    doTest(LanguageLevel.PYTHON36);
+  }
+
+  // PY-20770
+  public void testAsyncComprehensions() {
+    doTest(LanguageLevel.PYTHON36);
+  }
+
+  // PY-20770
+  public void testAwaitInComprehensions() {
+    doTest(LanguageLevel.PYTHON36);
+  }
+
+  // PY-16098
+  public void testWarningAboutAsyncAndAwaitInPy35() {
+    doTest(LanguageLevel.PYTHON35);
+  }
+
+  // PY-16098
+  public void testWarningAboutAsyncAndAwaitInPy36() {
+    doTest(LanguageLevel.PYTHON36);
+  }
+
+  // PY-22302
+  public void testNoWarningAboutEllipsisInFunctionTypeComments() {
+    doTest();
+  }
+
+  // PY-23355
+  public void testNoWarningAboutStarredExpressionsInFunctionTypeComments() {
+    doTest();
+  }
+
+  public void testBuiltinLong() {
     doTest();
   }
 

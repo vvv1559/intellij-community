@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@ import com.intellij.codeInsight.editorActions.DeclarationJoinLinesHandler;
 import com.intellij.codeInsight.intention.PsiElementBaseIntentionAction;
 import com.intellij.codeInspection.RemoveInitializerFix;
 import com.intellij.lang.java.JavaLanguage;
+import com.intellij.openapi.application.WriteAction;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Pair;
@@ -79,7 +80,7 @@ public class JoinDeclarationAndAssignmentAction extends PsiElementBaseIntentionA
   }
 
   private static PsiAssignmentExpression getAssignmentStatement(PsiDeclarationStatement statement) {
-    final PsiElement element = PsiTreeUtil.skipSiblingsForward(statement, PsiWhiteSpace.class);
+    final PsiElement element = PsiTreeUtil.skipWhitespacesForward(statement);
     if (element instanceof PsiExpressionStatement) {
       final PsiExpression expression = ((PsiExpressionStatement)element).getExpression();
       if (expression instanceof PsiAssignmentExpression) {
@@ -88,16 +89,21 @@ public class JoinDeclarationAndAssignmentAction extends PsiElementBaseIntentionA
     }
     return null;
   }
- 
+
   private static PsiDeclarationStatement getDeclarationStatement(PsiAssignmentExpression assignmentExpression) {
     final PsiElement parent = assignmentExpression.getParent();
     if (parent instanceof PsiExpressionStatement) {
-      final PsiElement element = PsiTreeUtil.skipSiblingsBackward(parent, PsiWhiteSpace.class);
+      final PsiElement element = PsiTreeUtil.skipWhitespacesBackward(parent);
       if (element instanceof PsiDeclarationStatement) {
         return (PsiDeclarationStatement)element;
       }
     }
     return null;
+  }
+
+  @Override
+  public boolean startInWriteAction() {
+    return false;
   }
 
   @Override
@@ -112,8 +118,10 @@ public class JoinDeclarationAndAssignmentAction extends PsiElementBaseIntentionA
     if (initializer != null && assignmentExpression.getOperationTokenType() == JavaTokenType.EQ) {
       RemoveInitializerFix.sideEffectAwareRemove(project, initializer, initializer, variable);
     }
-    final PsiExpression initializerExpression = DeclarationJoinLinesHandler.getInitializerExpression(variable, assignmentExpression);
-    variable.setInitializer(initializerExpression);
-    assignmentExpression.delete();
+    WriteAction.run(() -> {
+      final PsiExpression initializerExpression = DeclarationJoinLinesHandler.getInitializerExpression(variable, assignmentExpression);
+      variable.setInitializer(initializerExpression);
+      assignmentExpression.delete();
+    });
   }
 }

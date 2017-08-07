@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,17 +27,14 @@ import com.intellij.ide.wizard.StepWithSubSteps;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.components.StorageScheme;
 import com.intellij.openapi.options.ConfigurationException;
-import com.intellij.openapi.project.DumbModePermission;
-import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectManager;
 import com.intellij.openapi.projectRoots.Sdk;
 import com.intellij.openapi.roots.ProjectRootManager;
 import com.intellij.openapi.ui.Messages;
-import com.intellij.openapi.util.Ref;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.ui.IdeBorderFactory;
+import com.intellij.util.ui.JBUI;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -71,7 +68,7 @@ public abstract class AbstractProjectWizard extends AbstractWizard<ModuleWizardS
   @Override
   protected String addStepComponent(Component component) {
     if (component instanceof JComponent) {
-      ((JComponent)component).setBorder(IdeBorderFactory.createEmptyBorder(0, 0, 0, 0));
+      ((JComponent)component).setBorder(JBUI.Borders.empty());
     }
     return super.addStepComponent(component);
   }
@@ -164,9 +161,7 @@ public abstract class AbstractProjectWizard extends AbstractWizard<ModuleWizardS
 
   @Override
   protected final void doOKAction() {
-    final Ref<Boolean> result = Ref.create(false);
-    DumbService.allowStartingDumbModeInside(DumbModePermission.MAY_START_BACKGROUND, () -> result.set(doFinishAction()));
-    if (!result.get()) return;
+    if (!doFinishAction()) return;
     
     super.doOKAction();
   }

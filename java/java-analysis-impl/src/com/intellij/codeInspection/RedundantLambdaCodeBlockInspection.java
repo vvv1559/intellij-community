@@ -15,7 +15,6 @@
  */
 package com.intellij.codeInspection;
 
-import com.intellij.codeInsight.FileModificationService;
 import com.intellij.codeInsight.daemon.GroupNames;
 import com.intellij.codeInsight.intention.HighPriorityAction;
 import com.intellij.openapi.diagnostic.Logger;
@@ -28,11 +27,8 @@ import org.jetbrains.annotations.NotNull;
 
 import java.util.Collection;
 
-/**
- * User: anna
- */
 public class RedundantLambdaCodeBlockInspection extends BaseJavaBatchLocalInspectionTool {
-  public static final Logger LOG = Logger.getInstance("#" + RedundantLambdaCodeBlockInspection.class.getName());
+  public static final Logger LOG = Logger.getInstance(RedundantLambdaCodeBlockInspection.class);
 
   @Nls
   @NotNull
@@ -91,7 +87,8 @@ public class RedundantLambdaCodeBlockInspection extends BaseJavaBatchLocalInspec
       if (psiExpression != null && !findCommentsOutsideExpression(body, psiExpression)) {
         if (LambdaUtil.isExpressionStatementExpression(psiExpression)) {
           final PsiCall call = LambdaUtil.treeWalkUp(body);
-          if (call != null && call.resolveMethod() != null) {
+          PsiMethod oldTarget;
+          if (call != null && (oldTarget = call.resolveMethod()) != null) {
             final int offsetInTopCall = body.getTextRange().getStartOffset() - call.getTextRange().getStartOffset();
             PsiCall copyCall = LambdaUtil.copyTopLevelCall(call);
             if (copyCall == null) return null;
@@ -100,7 +97,7 @@ public class RedundantLambdaCodeBlockInspection extends BaseJavaBatchLocalInspec
               final PsiElement parent = codeBlock.getParent();
               if (parent instanceof PsiLambdaExpression) {
                 codeBlock.replace(psiExpression);
-                if (copyCall.resolveMethod() == null || ((PsiLambdaExpression)parent).getFunctionalInterfaceType() == null) {
+                if (copyCall.resolveMethod() != oldTarget || ((PsiLambdaExpression)parent).getFunctionalInterfaceType() == null) {
                   return null;
                 }
               }
@@ -126,21 +123,14 @@ public class RedundantLambdaCodeBlockInspection extends BaseJavaBatchLocalInspec
   private static class ReplaceWithExprFix implements LocalQuickFix, HighPriorityAction {
     @NotNull
     @Override
-    public String getName() {
-      return "Replace with expression lambda";
-    }
-
-    @NotNull
-    @Override
     public String getFamilyName() {
-      return getName();
+      return "Replace with expression lambda";
     }
 
     @Override
     public void applyFix(@NotNull Project project, @NotNull ProblemDescriptor descriptor) {
       final PsiElement element = descriptor.getPsiElement();
       if (element != null) {
-        if (!FileModificationService.getInstance().preparePsiElementForWrite(element)) return;
         final PsiLambdaExpression lambdaExpression = PsiTreeUtil.getParentOfType(element, PsiLambdaExpression.class);
         if (lambdaExpression != null) {
           final PsiElement body = lambdaExpression.getBody();

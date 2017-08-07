@@ -27,6 +27,7 @@ import com.siyeh.InspectionGadgetsBundle;
 import com.siyeh.ig.BaseInspection;
 import com.siyeh.ig.BaseInspectionVisitor;
 import com.siyeh.ig.InspectionGadgetsFix;
+import com.siyeh.ig.psiutils.CommentTracker;
 import com.siyeh.ig.psiutils.ExpressionUtils;
 import com.siyeh.ig.psiutils.ParenthesesUtils;
 import org.jetbrains.annotations.NonNls;
@@ -64,15 +65,10 @@ public class StringConcatenationInsideStringBufferAppendInspection extends BaseI
   }
 
   private static class ReplaceWithChainedAppendFix extends InspectionGadgetsFix {
-    @Override
-    @NotNull
-    public String getFamilyName() {
-      return getName();
-    }
 
     @Override
     @NotNull
-    public String getName() {
+    public String getFamilyName() {
       return InspectionGadgetsBundle.message(
         "string.concatenation.inside.string.buffer.append.replace.quickfix");
     }
@@ -94,12 +90,13 @@ public class StringConcatenationInsideStringBufferAppendInspection extends BaseI
       }
       final PsiExpressionList argumentList = methodCallExpression.getArgumentList();
       final PsiExpression[] arguments = argumentList.getExpressions();
-      final PsiExpression argument = arguments[0];
+      CommentTracker ct = new CommentTracker();
+      final PsiExpression argument = ct.markUnchanged(arguments[0]);
       final PsiExpression appendExpression = ChangeToAppendUtil.buildAppendExpression(qualifier, argument);
       if (appendExpression == null) {
         return;
       }
-      methodCallExpression.replace(appendExpression);
+      ct.replaceAndRestoreComments(methodCallExpression, appendExpression);
     }
   }
 

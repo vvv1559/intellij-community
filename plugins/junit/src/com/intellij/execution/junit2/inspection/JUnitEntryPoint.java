@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,30 +14,26 @@
  * limitations under the License.
  */
 
-/*
- * User: anna
- * Date: 28-May-2007
- */
 package com.intellij.execution.junit2.inspection;
 
+import com.intellij.codeInsight.AnnotationUtil;
 import com.intellij.codeInspection.reference.EntryPoint;
 import com.intellij.codeInspection.reference.RefElement;
+import com.intellij.codeInspection.visibility.EntryPointWithVisibilityLevel;
 import com.intellij.execution.junit.JUnitUtil;
 import com.intellij.openapi.util.DefaultJDOMExternalizer;
 import com.intellij.openapi.util.InvalidDataException;
 import com.intellij.openapi.util.WriteExternalException;
-import com.intellij.psi.PsiClass;
-import com.intellij.psi.PsiElement;
-import com.intellij.psi.PsiMethod;
-import com.intellij.psi.PsiModifier;
+import com.intellij.psi.*;
 import com.intellij.psi.search.searches.ClassInheritorsSearch;
 import com.intellij.psi.util.PsiClassUtil;
 import com.intellij.psi.util.PsiTreeUtil;
+import com.intellij.psi.util.PsiUtil;
 import com.intellij.util.CommonProcessors;
 import org.jdom.Element;
 import org.jetbrains.annotations.NotNull;
 
-public class JUnitEntryPoint extends EntryPoint {
+public class JUnitEntryPoint extends EntryPointWithVisibilityLevel {
   public boolean ADD_JUNIT_TO_ENTRIES = true;
 
   @NotNull
@@ -78,7 +74,36 @@ public class JUnitEntryPoint extends EntryPoint {
       }
       if (JUnitUtil.isTestMethodOrConfig(method)) return true;
     }
+    else if (psiElement instanceof PsiField) {
+      return AnnotationUtil.isAnnotated((PsiField)psiElement, JUnitUtil.PARAMETRIZED_PARAMETER_ANNOTATION_NAME, false);
+    }
     return false;
+  }
+
+  @Override
+  public int getMinVisibilityLevel(PsiMember member) {
+    PsiClass container = null;
+    if (member instanceof PsiClass) {
+      container = (PsiClass)member;
+    }
+    else if (member instanceof PsiMethod) {
+      container = member.getContainingClass();
+    }
+    if (container != null && JUnitUtil.isJUnit5TestClass(container, false)) {
+      return PsiUtil.ACCESS_LEVEL_PACKAGE_LOCAL;
+    }
+
+    return -1;
+  }
+
+  @Override
+  public String getTitle() {
+    return "Suggest package-private visibility level for junit 5 tests";
+  }
+
+  @Override
+  public String getId() {
+    return "junit";
   }
 
   public boolean isSelected() {
@@ -103,6 +128,7 @@ public class JUnitEntryPoint extends EntryPoint {
   public String[] getIgnoreAnnotations() {
     return new String[]{"org.junit.Rule",
                         "org.junit.ClassRule",
-                        "org.junit.experimental.theories.DataPoint"};
+                        "org.junit.experimental.theories.DataPoint",
+                        "org.junit.experimental.theories.DataPoints"};
   }
 }

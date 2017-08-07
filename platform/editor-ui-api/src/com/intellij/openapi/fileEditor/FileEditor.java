@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@ import com.intellij.codeHighlighting.BackgroundEditorHighlighter;
 import com.intellij.ide.structureView.StructureViewBuilder;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.util.UserDataHolder;
+import com.intellij.openapi.vfs.VirtualFile;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -44,7 +45,7 @@ public interface FileEditor extends UserDataHolder, Disposable {
 
   /**
    * @return component which represents editor in the UI.
-   * The method should never return <code>null</code>.
+   * The method should never return {@code null}.
    */
   @NotNull
   JComponent getComponent();
@@ -59,13 +60,13 @@ public interface FileEditor extends UserDataHolder, Disposable {
    * @return editor's name, a string that identifies editor among
    * other editors. For example, UI form might have two editor: "GUI Designer"
    * and "Text". So "GUI Designer" can be a name of one editor and "Text"
-   * can be a name of other editor. The method should never return <code>null</code>.
+   * can be a name of other editor. The method should never return {@code null}.
    */
   @NonNls @NotNull
   String getName();
 
   /**
-   * @return editor's internal state. Method should never return <code>null</code>.
+   * @return editor's internal state. Method should never return {@code null}.
    */
   @NotNull
   default FileEditorState getState(@NotNull FileEditorStateLevel level) {
@@ -117,7 +118,7 @@ public interface FileEditor extends UserDataHolder, Disposable {
 
   /**
    * @return highlighter object to perform background analysis and highlighting activities.
-   * Return <code>null</code> if no background highlighting activity necessary for this file editor.
+   * Return {@code null} if no background highlighting activity necessary for this file editor.
    */
   @Nullable
   BackgroundEditorHighlighter getBackgroundHighlighter();
@@ -133,4 +134,7 @@ public interface FileEditor extends UserDataHolder, Disposable {
   default StructureViewBuilder getStructureViewBuilder() {
     return null;
   }
+
+  @Nullable 
+  default VirtualFile getFile() { return null; }
 }

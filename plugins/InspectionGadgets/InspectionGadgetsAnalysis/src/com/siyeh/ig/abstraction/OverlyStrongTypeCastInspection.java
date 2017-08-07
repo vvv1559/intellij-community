@@ -1,5 +1,5 @@
 /*
- * Copyright 2003-2015 Dave Griffith, Bas Leijdekkers
+ * Copyright 2003-2017 Dave Griffith, Bas Leijdekkers
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,6 +27,7 @@ import com.siyeh.ig.InspectionGadgetsFix;
 import com.siyeh.ig.PsiReplacementUtil;
 import com.siyeh.ig.psiutils.ExpectedTypeUtils;
 import com.siyeh.ig.psiutils.InstanceOfUtils;
+import com.siyeh.ig.psiutils.MethodCallUtils;
 import com.siyeh.ig.psiutils.TypeUtils;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
@@ -66,15 +67,10 @@ public class OverlyStrongTypeCastInspection extends BaseInspection {
   }
 
   private static class OverlyStrongCastFix extends InspectionGadgetsFix {
-    @Override
-    @NotNull
-    public String getFamilyName() {
-      return getName();
-    }
 
     @Override
     @NotNull
-    public String getName() {
+    public String getFamilyName() {
       return InspectionGadgetsBundle.message("overly.strong.type.cast.weaken.quickfix");
     }
 
@@ -122,18 +118,15 @@ public class OverlyStrongTypeCastInspection extends BaseInspection {
         return;
       }
       final PsiType expectedType = ExpectedTypeUtils.findExpectedType(expression, true);
-      if (expectedType == null) {
-        return;
-      }
-      if (expectedType.equals(type)) {
+      if (expectedType == null || expectedType.equals(type)) {
         return;
       }
       final PsiClass resolved = PsiUtil.resolveClassInType(expectedType);
       if (resolved != null && !resolved.isPhysical()) {
         return;
       }
-      if (expectedType.isAssignableFrom(operandType)) {
-        //then it's redundant, and caught by the built-in inspection
+      if (expectedType.isAssignableFrom(operandType) && !MethodCallUtils.isNecessaryForSurroundingMethodCall(expression, operand)) {
+        //then it's redundant, and caught by the "Redundant type cast" inspection
         return;
       }
       if (TypeUtils.isTypeParameter(expectedType)) {

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@
 
 package com.intellij.lang;
 
+import com.intellij.lang.folding.CustomFoldingBuilder;
 import com.intellij.lang.folding.FoldingBuilder;
 import com.intellij.lang.folding.FoldingDescriptor;
 import com.intellij.lang.folding.LanguageFolding;
@@ -23,6 +24,7 @@ import com.intellij.lang.xml.XMLLanguage;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.project.DumbAware;
+import com.intellij.openapi.project.IndexNotReadyException;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.util.UnfairTextRange;
 import com.intellij.openapi.util.text.StringUtil;
@@ -40,17 +42,18 @@ import com.intellij.xml.util.XmlTagUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.ArrayList;
 import java.util.List;
 
-public abstract class XmlCodeFoldingBuilder implements FoldingBuilder, DumbAware {
+public abstract class XmlCodeFoldingBuilder extends CustomFoldingBuilder implements DumbAware {
   private static final TokenSet XML_ATTRIBUTE_SET = TokenSet.create(XmlElementType.XML_ATTRIBUTE);
   private static final int MIN_TEXT_RANGE_LENGTH = 3;
 
   @Override
-  @NotNull
-  public FoldingDescriptor[] buildFoldRegions(@NotNull ASTNode node, @NotNull Document document) {
-    final PsiElement psiElement = node.getPsi();
+  public void buildLanguageFoldRegions(@NotNull List<FoldingDescriptor> foldings,
+                                       @NotNull PsiElement psiElement,
+                                       @NotNull Document document,
+                                       boolean quick
+  ) {
     XmlDocument xmlDocument = null;
 
     if (psiElement instanceof XmlFile) {
@@ -65,15 +68,11 @@ public abstract class XmlCodeFoldingBuilder implements FoldingBuilder, DumbAware
     if (rootTag == null) {
       rootTag = xmlDocument;
     }
-    List<FoldingDescriptor> foldings = null;
 
     if (rootTag != null) {
-      foldings = new ArrayList<>();
 
       doAddForChildren(xmlDocument, foldings, document);
     }
-
-    return foldings != null ? foldings.toArray(new FoldingDescriptor[foldings.size()]):FoldingDescriptor.EMPTY;
   }
 
   protected void addElementsToFold(List<FoldingDescriptor> foldings, XmlElement tag, Document document) {
@@ -224,7 +223,7 @@ public abstract class XmlCodeFoldingBuilder implements FoldingBuilder, DumbAware
   }
 
   @Override
-  public String getPlaceholderText(@NotNull ASTNode node) {
+  public String getLanguagePlaceholderText(@NotNull ASTNode node, @NotNull TextRange range) {
     final PsiElement psi = node.getPsi();
     if (psi instanceof XmlAttribute && "src".equalsIgnoreCase(((XmlAttribute)psi).getName())) {
       return "data:";
@@ -235,7 +234,19 @@ public abstract class XmlCodeFoldingBuilder implements FoldingBuilder, DumbAware
         psi instanceof XmlConditionalSection
       ) return "...";
     if (isEntity(psi)) {
-      final XmlEntityDecl resolve = XmlEntityRefImpl.resolveEntity((XmlElement)psi, psi.getText(), psi.getContainingFile());
+      final String value = getEntityPlaceholder(psi);
+      if (value != null) return value;
+    }
+    return null;
+  }
+
+  @Nullable
+  protected String getEntityPlaceholder(PsiElement psi) {
+    String text = psi.getText();
+    String fastPath = StringUtil.unescapeXml(text);
+    if (!StringUtil.equals(fastPath, text)) return fastPath;
+    if (psi.isValid()) {
+      final XmlEntityDecl resolve = XmlEntityRefImpl.resolveEntity((XmlElement)psi, text, psi.getContainingFile());
       final XmlAttributeValue value = resolve != null ? resolve.getValueElement() : null;
       if (value != null) {
         return getEntityValue(value);
@@ -255,12 +266,21 @@ public abstract class XmlCodeFoldingBuilder implements FoldingBuilder, DumbAware
   }
 
   @Override
-  public boolean isCollapsedByDefault(@NotNull ASTNode node) {
+  public boolean isRegionCollapsedByDefault(@NotNull ASTNode node) {
     final PsiElement psi = node.getPsi();
     final XmlCodeFoldingSettings foldingSettings = getFoldingSettings();
     return (psi instanceof XmlTag && foldingSettings.isCollapseXmlTags())
            || (psi instanceof XmlAttribute && (foldStyle((XmlAttribute)psi, foldingSettings) || foldSrc((XmlAttribute)psi, foldingSettings)))
-           || isEntity(psi) && foldingSettings.isCollapseEntities();
+           || isEntity(psi) && foldingSettings.isCollapseEntities() && hasEntityPlaceholder(psi);
+  }
+
+  private boolean hasEntityPlaceholder(PsiElement psi) {
+    try {
+      return getEntityPlaceholder(psi) != null;
+    }
+    catch (IndexNotReadyException e) {
+      return false;
+    }
   }
 
   private static boolean foldSrc(XmlAttribute psi, XmlCodeFoldingSettings settings) {
@@ -283,4 +303,14 @@ public abstract class XmlCodeFoldingBuilder implements FoldingBuilder, DumbAware
   }
 
   protected abstract XmlCodeFoldingSettings getFoldingSettings();
+
+  @Override
+  protected boolean isCustomFoldingRoot(@NotNull ASTNode node) {
+    return node.getElementType() == XmlElementType.XML_TAG;
+  }
+
+  @Override
+  protected boolean isCustomFoldingCandidate(@NotNull ASTNode node) {
+    return node.getElementType() == XmlTokenType.XML_COMMENT_CHARACTERS;
+  }
 }

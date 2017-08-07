@@ -25,6 +25,7 @@ import com.intellij.openapi.components.ComponentManager;
 import com.intellij.openapi.components.NamedComponent;
 import com.intellij.openapi.components.ex.ComponentManagerEx;
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.extensions.Extensions;
 import com.intellij.openapi.extensions.PluginId;
 import com.intellij.openapi.progress.ProcessCanceledException;
 import com.intellij.openapi.progress.ProgressIndicator;
@@ -52,8 +53,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-import static com.intellij.openapi.extensions.Extensions.isComponentSuitableForOs;
-
 public abstract class ComponentManagerImpl extends UserDataHolderBase implements ComponentManagerEx, Disposable {
   private static final Logger LOG = Logger.getInstance("#com.intellij.components.ComponentManager");
 
@@ -63,7 +62,7 @@ public abstract class ComponentManagerImpl extends UserDataHolderBase implements
 
   private MessageBus myMessageBus;
 
-  private final Map<String, BaseComponent> myNameToComponent = new THashMap<String, BaseComponent>(); // contents guarded by this
+  private final Map<String, BaseComponent> myNameToComponent = new THashMap<>(); // contents guarded by this
 
   @SuppressWarnings("FieldAccessedSynchronizedAndUnsynchronized")
   private int myComponentConfigCount;
@@ -71,15 +70,10 @@ public abstract class ComponentManagerImpl extends UserDataHolderBase implements
   private int myInstantiatedComponentCount = -1;
   private boolean myComponentsCreated;
 
-  private final List<BaseComponent> myBaseComponents = new ArrayList<BaseComponent>();
+  private final List<BaseComponent> myBaseComponents = new ArrayList<>();
 
   private final ComponentManager myParentComponentManager;
-  private final Condition myDisposedCondition = new Condition() {
-    @Override
-    public boolean value(final Object o) {
-      return isDisposed();
-    }
-  };
+  private final Condition myDisposedCondition = o -> isDisposed();
 
   protected ComponentManagerImpl(@Nullable ComponentManager parentComponentManager) {
     myParentComponentManager = parentComponentManager;
@@ -96,7 +90,7 @@ public abstract class ComponentManagerImpl extends UserDataHolderBase implements
   }
 
   protected final void init(@Nullable ProgressIndicator indicator, @Nullable Runnable componentsRegistered) {
-    List<ComponentConfig> componentConfigs = getComponentConfigs();
+    List<ComponentConfig> componentConfigs = getComponentConfigs(indicator);
     for (ComponentConfig config : componentConfigs) {
       registerComponents(config);
     }
@@ -163,7 +157,6 @@ public abstract class ComponentManagerImpl extends UserDataHolderBase implements
     myComponentConfigCount = -1;
   }
 
-  @SuppressWarnings("unchecked")
   @Override
   public final <T> T getComponent(@NotNull Class<T> interfaceClass) {
     if (myDisposeCompleted) {
@@ -172,15 +165,16 @@ public abstract class ComponentManagerImpl extends UserDataHolderBase implements
     }
 
     ComponentAdapter adapter = getPicoContainer().getComponentAdapter(interfaceClass);
-    //noinspection unchecked
     if (!(adapter instanceof ComponentConfigComponentAdapter)) {
       return null;
     }
 
     if (myDisposed) {
       // getComponent could be called during some component.dispose() call, in this case we don't attempt to instantiate component
+      //noinspection unchecked
       return (T)((ComponentConfigComponentAdapter)adapter).myInitializedComponentInstance;
     }
+    //noinspection unchecked
     return (T)adapter.getComponentInstance(getPicoContainer());
   }
 
@@ -236,7 +230,6 @@ public abstract class ComponentManagerImpl extends UserDataHolderBase implements
   }
 
   @NotNull
-  @Override
   public final <T> List<T> getComponentInstancesOfType(@NotNull Class<T> baseClass) {
     List<T> result = null;
     // we must use instances only from our adapter (could be service or extension point or something else)
@@ -246,7 +239,7 @@ public abstract class ComponentManagerImpl extends UserDataHolderBase implements
         T instance = (T)((ComponentConfigComponentAdapter)componentAdapter).myInitializedComponentInstance;
         if (instance != null) {
           if (result == null) {
-            result = new ArrayList<T>();
+            result = new ArrayList<>();
           }
           result.add(instance);
         }
@@ -273,7 +266,7 @@ public abstract class ComponentManagerImpl extends UserDataHolderBase implements
 
   protected boolean isComponentSuitable(@Nullable Map<String, String> options) {
     return options == null ||
-           isComponentSuitableForOs(options.get("os")) &&
+           Extensions.isComponentSuitableForOs(options.get("os")) &&
            (!Boolean.parseBoolean(options.get("internal")) || ApplicationManager.getApplication().isInternal());
   }
 
@@ -300,11 +293,11 @@ public abstract class ComponentManagerImpl extends UserDataHolderBase implements
   }
 
   @NotNull
-  private List<ComponentConfig> getComponentConfigs() {
-    ArrayList<ComponentConfig> componentConfigs = new ArrayList<ComponentConfig>();
+  private List<ComponentConfig> getComponentConfigs(final ProgressIndicator indicator) {
+    ArrayList<ComponentConfig> componentConfigs = new ArrayList<>();
     boolean isDefaultProject = this instanceof Project && ((Project)this).isDefault();
     boolean headless = ApplicationManager.getApplication().isHeadlessEnvironment();
-    for (IdeaPluginDescriptor plugin : PluginManagerCore.getPlugins()) {
+    for (IdeaPluginDescriptor plugin : PluginManagerCore.getPlugins((message, progress) -> indicator.setFraction(progress))) {
       if (PluginManagerCore.shouldSkipPlugin(plugin)) {
         continue;
       }
@@ -365,7 +358,7 @@ public abstract class ComponentManagerImpl extends UserDataHolderBase implements
 
   @Override
   @NotNull
-  public final Condition getDisposed() {
+  public final Condition<?> getDisposed() {
     return myDisposedCondition;
   }
 
@@ -384,11 +377,10 @@ public abstract class ComponentManagerImpl extends UserDataHolderBase implements
   private void registerComponents(@NotNull ComponentConfig config) {
     ClassLoader loader = config.getClassLoader();
     try {
-      final Class<?> interfaceClass = Class.forName(config.getInterfaceClass(), true, loader);
-      final Class<?> implementationClass = Comparing.equal(config.getInterfaceClass(), config.getImplementationClass())
-                                           ?
-                                           interfaceClass
-                                           : StringUtil.isEmpty(config.getImplementationClass()) ? null : Class.forName(config.getImplementationClass(), true, loader);
+      Class<?> interfaceClass = Class.forName(config.getInterfaceClass(), true, loader);
+      Class<?> implementationClass = Comparing.equal(config.getInterfaceClass(), config.getImplementationClass()) ? interfaceClass :
+                                     StringUtil.isEmpty(config.getImplementationClass()) ? null :
+                                     Class.forName(config.getImplementationClass(), true, loader);
       MutablePicoContainer picoContainer = getPicoContainer();
       if (config.options != null && Boolean.parseBoolean(config.options.get("overrides"))) {
         ComponentAdapter oldAdapter = picoContainer.getComponentAdapterOfType(interfaceClass);
@@ -399,8 +391,8 @@ public abstract class ComponentManagerImpl extends UserDataHolderBase implements
       }
       // implementationClass == null means we want to unregister this component
       if (implementationClass != null) {
-        picoContainer.registerComponent(new ComponentConfigComponentAdapter(interfaceClass, implementationClass, config.getPluginId(),
-                                                                            config.options != null && Boolean.parseBoolean(config.options.get("workspace"))));
+        boolean ws = config.options != null && Boolean.parseBoolean(config.options.get("workspace"));
+        picoContainer.registerComponent(new ComponentConfigComponentAdapter(interfaceClass, implementationClass, config.getPluginId(), ws));
       }
     }
     catch (Throwable t) {
@@ -447,7 +439,10 @@ public abstract class ComponentManagerImpl extends UserDataHolderBase implements
 
     final boolean isWorkspaceComponent;
 
-    public ComponentConfigComponentAdapter(@NotNull Class<?> interfaceClass, @NotNull Class<?> implementationClass, @Nullable PluginId pluginId, boolean isWorkspaceComponent) {
+    ComponentConfigComponentAdapter(@NotNull Class<?> interfaceClass,
+                                    @NotNull Class<?> implementationClass,
+                                    @Nullable PluginId pluginId,
+                                    boolean isWorkspaceComponent) {
       super(interfaceClass, implementationClass, null, true);
 
       myPluginId = pluginId;

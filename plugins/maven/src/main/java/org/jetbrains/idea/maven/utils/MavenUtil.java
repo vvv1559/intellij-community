@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,7 +28,8 @@ import com.intellij.notification.NotificationType;
 import com.intellij.notification.Notifications;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ModalityState;
-import com.intellij.openapi.application.PathManager;
+import com.intellij.openapi.application.PathManagerEx;
+import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.application.impl.ApplicationInfoImpl;
 import com.intellij.openapi.application.impl.LaterInvocator;
 import com.intellij.openapi.editor.Editor;
@@ -46,24 +47,26 @@ import com.intellij.openapi.roots.ModuleRootManager;
 import com.intellij.openapi.startup.StartupManager;
 import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.Pair;
+import com.intellij.openapi.util.Ref;
 import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.util.io.FileUtil;
+import com.intellij.openapi.util.io.FileUtilRt;
 import com.intellij.openapi.util.io.JarUtil;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.openapi.vfs.JarFileSystem;
-import com.intellij.openapi.vfs.LocalFileSystem;
-import com.intellij.openapi.vfs.VfsUtil;
-import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.openapi.vfs.*;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiManager;
+import com.intellij.util.ArrayUtil;
 import com.intellij.util.DisposeAwareRunnable;
 import com.intellij.util.SystemProperties;
 import com.intellij.util.concurrency.Semaphore;
 import com.intellij.util.containers.ContainerUtil;
+import com.intellij.util.xml.NanoXmlUtil;
 import gnu.trove.THashSet;
 import icons.MavenIcons;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.idea.maven.dom.MavenDomUtil;
 import org.jetbrains.idea.maven.model.MavenConstants;
 import org.jetbrains.idea.maven.model.MavenId;
 import org.jetbrains.idea.maven.model.MavenPlugin;
@@ -79,9 +82,7 @@ import org.xml.sax.helpers.DefaultHandler;
 import javax.xml.parsers.ParserConfigurationException;
 import javax.xml.parsers.SAXParser;
 import javax.xml.parsers.SAXParserFactory;
-import java.io.File;
-import java.io.IOException;
-import java.io.InputStream;
+import java.io.*;
 import java.net.URL;
 import java.util.*;
 import java.util.concurrent.ExecutionException;
@@ -89,6 +90,7 @@ import java.util.concurrent.Future;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
+import java.util.stream.Stream;
 import java.util.zip.CRC32;
 
 public class MavenUtil {
@@ -223,17 +225,38 @@ public class MavenUtil {
     Notifications.Bus.notify(new Notification(MAVEN_NOTIFICATION_GROUP, title, e.getMessage(), NotificationType.ERROR), project);
   }
 
-  public static File getPluginSystemDir(String folder) {
-    // PathManager.getSystemPath() may return relative path
-    return new File(PathManager.getSystemPath(), "Maven" + "/" + folder).getAbsoluteFile();
+  @NotNull
+  public static java.nio.file.Path getPluginSystemDir(@NotNull String folder) {
+    return PathManagerEx.getAppSystemDir().resolve("Maven").resolve(folder);
   }
 
+  public static File getBaseDir(@NotNull VirtualFile file) {
+    File baseDir = VfsUtilCore.virtualToIoFile(file.isDirectory() || file.getParent() == null ? file : file.getParent());
+    File dir = baseDir;
+    do {
+      if (new File(dir, ".mvn").isDirectory()) {
+        baseDir = dir;
+        break;
+      }
+    }
+    while ((dir = dir.getParentFile()) != null);
+    return baseDir;
+  }
+
+  @Nullable
   public static VirtualFile findProfilesXmlFile(VirtualFile pomFile) {
-    return pomFile.getParent().findChild(MavenConstants.PROFILES_XML);
+    if (pomFile == null) return null;
+    VirtualFile parent = pomFile.getParent();
+    if (parent == null) return null;
+    return parent.findChild(MavenConstants.PROFILES_XML);
   }
 
+  @Nullable
   public static File getProfilesXmlIoFile(VirtualFile pomFile) {
-    return new File(pomFile.getParent().getPath(), MavenConstants.PROFILES_XML);
+    if (pomFile == null) return null;
+    VirtualFile parent = pomFile.getParent();
+    if (parent == null) return null;
+    return new File(parent.getPath(), MavenConstants.PROFILES_XML);
   }
 
   public static <T, U> List<T> collectFirsts(List<Pair<T, U>> pairs) {
@@ -287,7 +310,7 @@ public class MavenUtil {
                                                         VirtualFile file,
                                                         @NotNull MavenId projectId,
                                                         MavenId parentId,
-                                                        VirtualFile parentFile,
+                                                        @Nullable VirtualFile parentFile,
                                                         boolean interactive) throws IOException {
     Properties properties = new Properties();
     Properties conditions = new Properties();
@@ -406,10 +429,7 @@ public class MavenUtil {
         try {
           task.run(new MavenProgressIndicator(i));
         }
-        catch (MavenProcessCanceledException e) {
-          canceledEx[0] = e;
-        }
-        catch (ProcessCanceledException e) {
+        catch (MavenProcessCanceledException | ProcessCanceledException e) {
           canceledEx[0] = e;
         }
         catch (RuntimeException e) {
@@ -439,10 +459,7 @@ public class MavenUtil {
       try {
         task.run(indicator);
       }
-      catch (MavenProcessCanceledException ignore) {
-        indicator.cancel();
-      }
-      catch (ProcessCanceledException ignore) {
+      catch (MavenProcessCanceledException | ProcessCanceledException ignore) {
         indicator.cancel();
       }
     };
@@ -461,10 +478,7 @@ public class MavenUtil {
           try {
             future.get();
           }
-          catch (InterruptedException e) {
-            MavenLog.LOG.error(e);
-          }
-          catch (ExecutionException e) {
+          catch (InterruptedException | ExecutionException e) {
             MavenLog.LOG.error(e);
           }
         }
@@ -700,14 +714,17 @@ public class MavenUtil {
     }
   }
 
-  public static String expandProperties(String text) {
+  public static String expandProperties(String text, Properties props) {
     if (StringUtil.isEmptyOrSpaces(text)) return text;
-    Properties props = MavenServerUtil.collectSystemProperties();
     for (Map.Entry<Object, Object> each : props.entrySet()) {
       Object val = each.getValue();
       text = text.replace("${" + each.getKey() + "}", val instanceof CharSequence ? (CharSequence)val : val.toString());
     }
     return text;
+  }
+
+  public static String expandProperties(String text) {
+    return expandProperties(text, MavenServerUtil.collectSystemProperties());
   }
 
   @Nullable
@@ -777,7 +794,7 @@ public class MavenUtil {
       final CRC32 crc = new CRC32();
 
       SAXParser parser = SAXParserFactory.newInstance().newSAXParser();
-
+      parser.getXMLReader().setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
       parser.parse(in, new DefaultHandler(){
 
         boolean textContentOccur = false;
@@ -940,5 +957,63 @@ public class MavenUtil {
 
   public static String getIdeaVersionToPassToMavenProcess() {
     return ApplicationInfoImpl.getShadowInstance().getMajorVersion() + "." + ApplicationInfoImpl.getShadowInstance().getMinorVersion();
+  }
+
+  public static boolean isPomFileName(String fileName) {
+    return fileName.equals(MavenConstants.POM_XML) ||
+           fileName.endsWith(".pom") || fileName.startsWith("pom.") ||
+           fileName.equals(MavenConstants.SUPER_POM_XML);
+  }
+
+  public static boolean isPotentialPomFile(String path) {
+    return ArrayUtil.contains(FileUtilRt.getExtension(path), MavenConstants.POM_EXTENSIONS);
+  }
+
+  public static boolean isPomFile(@Nullable VirtualFile file) {
+    return isPomFile(null, file);
+  }
+
+  public static boolean isPomFile(@Nullable Project project, @Nullable VirtualFile file) {
+    if (file == null) return false;
+
+    if (isPomFileName(file.getName())) return true;
+    if (!isPotentialPomFile(file.getPath())) return false;
+
+    if (project == null || !project.isInitialized()) {
+      if (!FileUtil.extensionEquals(file.getName(), "xml")) return false;
+      try {
+        try (InputStream in = file.getInputStream()) {
+          Ref<Boolean> isPomFile = Ref.create(false);
+          Reader reader = new BufferedReader(new InputStreamReader(in, CharsetToolkit.UTF8_CHARSET));
+          NanoXmlUtil.parse(reader, new NanoXmlUtil.IXMLBuilderAdapter() {
+
+            @Override
+            public void startElement(String name, String nsPrefix, String nsURI, String systemID, int lineNr) throws Exception {
+              if ("project".equals(name)) {
+                isPomFile.set(nsURI.startsWith("http://maven.apache.org/POM/"));
+              }
+              stop();
+            }
+          });
+          return isPomFile.get();
+        }
+      }
+      catch (IOException ignore) {
+        return false;
+      }
+    }
+
+    MavenProjectsManager mavenProjectsManager = MavenProjectsManager.getInstance(project);
+    if (mavenProjectsManager.findProject(file) != null) return true;
+
+    return ReadAction.compute(() -> {
+      PsiFile psiFile = PsiManager.getInstance(project).findFile(file);
+      if (psiFile == null) return false;
+      return MavenDomUtil.isProjectFile(psiFile);
+    });
+  }
+
+  public static Stream<VirtualFile> streamPomFiles(@Nullable Project project, @NotNull VirtualFile root) {
+    return Stream.of(root.getChildren()).filter(file -> isPomFile(project, file));
   }
 }

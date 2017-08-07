@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -43,7 +43,6 @@ import com.intellij.ui.treeStructure.treetable.TreeTableTree;
 import com.intellij.util.IncorrectOperationException;
 import com.intellij.util.NullableFunction;
 import com.intellij.util.containers.ContainerUtil;
-import com.intellij.util.containers.Convertor;
 import com.intellij.util.ui.AbstractTableCellEditor;
 import com.intellij.util.ui.ColumnInfo;
 import com.intellij.util.ui.JBUI;
@@ -76,10 +75,6 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Set;
 
-/**
- * User: Dmitry.Krasilschikov
- * Date: 09.01.2008
- */
 public class DynamicToolWindowWrapper {
   private static final Logger LOG = Logger.getInstance(DynamicToolWindowWrapper.class);
 
@@ -158,8 +153,6 @@ public class DynamicToolWindowWrapper {
   }
 
   private void rebuildTreeView(DefaultMutableTreeNode root, boolean expandAll) {
-    PsiDocumentManager.getInstance(myProject).commitAllDocuments();
-
     myTreeTablePanel.removeAll();
 
     final JScrollPane treeTable = createTable(root);
@@ -217,18 +210,15 @@ public class DynamicToolWindowWrapper {
 
     myTreeTable = new MyTreeTable(myTreeTableModel);
 
-    new TreeTableSpeedSearch(myTreeTable, new Convertor<TreePath, String>() {
-      @Override
-      public String convert(TreePath o) {
-        final Object node = o.getLastPathComponent();
-        if (node instanceof DefaultMutableTreeNode) {
-          final Object object = ((DefaultMutableTreeNode)node).getUserObject();
-          if (object instanceof DNamedElement) {
-            return ((DNamedElement)object).getName();
-          }
+    new TreeTableSpeedSearch(myTreeTable, o -> {
+      final Object node = o.getLastPathComponent();
+      if (node instanceof DefaultMutableTreeNode) {
+        final Object object = ((DefaultMutableTreeNode)node).getUserObject();
+        if (object instanceof DNamedElement) {
+          return ((DNamedElement)object).getName();
         }
-        return "";
       }
+      return "";
     });
 
     DefaultActionGroup group = new DefaultActionGroup();
@@ -559,7 +549,7 @@ public class DynamicToolWindowWrapper {
 
   private static class MyColoredTreeCellRenderer extends ColoredTreeCellRenderer {
     @Override
-    public void customizeCellRenderer(JTree tree,
+    public void customizeCellRenderer(@NotNull JTree tree,
                                       Object value,
                                       boolean selected,
                                       boolean expanded,

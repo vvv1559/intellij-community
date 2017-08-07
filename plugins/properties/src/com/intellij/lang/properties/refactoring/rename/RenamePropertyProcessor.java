@@ -35,24 +35,26 @@ import java.util.List;
 import java.util.Map;
 
 public class RenamePropertyProcessor extends RenamePsiElementProcessor {
+  @Override
   public boolean canProcessElement(@NotNull final PsiElement element) {
     return element instanceof IProperty ||
            (element instanceof PomTargetPsiElement && ((PomTargetPsiElement)element).getTarget() instanceof XmlProperty);
   }
 
+  @Override
   public void prepareRenaming(final PsiElement element, final String newName,
                               final Map<PsiElement, String> allRenames) {
     ResourceBundle resourceBundle = PropertiesImplUtil.getProperty(element).getPropertiesFile().getResourceBundle();
 
     final Map<PsiElement, String> allRenamesCopy = new LinkedHashMap<>(allRenames);
     allRenames.clear();
-    for (final Map.Entry<PsiElement, String> e : allRenamesCopy.entrySet()) {
-      final IProperty property = PropertiesImplUtil.getProperty(e.getKey());
+    allRenamesCopy.forEach((key, value) -> {
+      final IProperty property = PropertiesImplUtil.getProperty(key);
       final List<IProperty> properties = PropertiesUtil.findAllProperties(resourceBundle, property.getUnescapedKey());
       for (final IProperty toRename : properties) {
-        allRenames.put(toRename.getPsiElement(), e.getValue());
+        allRenames.put(toRename.getPsiElement(), value);
       }
-    }
+    });
   }
 
   @Override
@@ -60,18 +62,18 @@ public class RenamePropertyProcessor extends RenamePsiElementProcessor {
                              final String newName,
                              Map<? extends PsiElement, String> allRenames,
                              List<UsageInfo> result) {
-    for (final Map.Entry<? extends PsiElement, String> e: allRenames.entrySet()) {
-      for (IProperty property : ((PropertiesFile)e.getKey().getContainingFile()).getProperties()) {
-        if (Comparing.strEqual(e.getValue(), property.getKey())) {
-          result.add(new UnresolvableCollisionUsageInfo(property.getPsiElement(), e.getKey()) {
+    allRenames.forEach((key, value) -> {
+      for (IProperty property : ((PropertiesFile)key.getContainingFile()).getProperties()) {
+        if (Comparing.strEqual(value, property.getKey())) {
+          result.add(new UnresolvableCollisionUsageInfo(property.getPsiElement(), key) {
             @Override
             public String getDescription() {
-              return "New property name \'" + e.getValue() + "\' hides existing property";
+              return "New property name \'" + value + "\' hides existing property";
             }
           });
         }
       }
-    }
+    });
   }
 
   @Override

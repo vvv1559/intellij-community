@@ -2,7 +2,8 @@ from _pydev_bundle import pydev_log
 import traceback
 from _pydevd_bundle import pydevd_resolver
 import sys
-from _pydevd_bundle.pydevd_constants import * #@UnusedWildImport
+from _pydevd_bundle.pydevd_constants import dict_contains, dict_iter_items, dict_keys, IS_PY3K, \
+    MAXIMUM_VARIABLE_REPRESENTATION_SIZE, RETURN_VALUES_DICT
 
 from _pydev_bundle.pydev_imports import quote
 
@@ -77,20 +78,27 @@ def _update_type_map():
         try:
             from django.utils.datastructures import MultiValueDict
             _TYPE_MAP.insert(0, (MultiValueDict, pydevd_resolver.multiValueDictResolver))
-            #we should put it before dict
+            # we should put it before dict
         except:
             pass  #django may not be installed
 
         try:
             from django.forms import BaseForm
             _TYPE_MAP.insert(0, (BaseForm, pydevd_resolver.djangoFormResolver))
-            #we should put it before instance resolver
+            # we should put it before instance resolver
         except:
             pass  #django may not be installed
 
         try:
             from collections import deque
             _TYPE_MAP.append((deque, pydevd_resolver.dequeResolver))
+        except:
+            pass
+
+        try:
+            from collections import OrderedDict
+            _TYPE_MAP.insert(0, (OrderedDict, pydevd_resolver.orderedDictResolver))
+            # we should put it before dict
         except:
             pass
 
@@ -156,13 +164,12 @@ def get_type(o):
 
 def return_values_from_dict_to_xml(return_dict):
     res = ""
-    for name in dict_keys(return_dict):
-        val = return_dict[name]
-        res += var_to_xml(val, name, return_value=True)
+    for name, val in dict_iter_items(return_dict):
+        res += var_to_xml(val, name, additionalInXml=' isRetVal="True"')
     return res
 
 
-def frame_vars_to_xml(frame_f_locals):
+def frame_vars_to_xml(frame_f_locals, hidden_ns=None):
     """ dumps frame variables to XML
     <var name="var_name" scope="local" type="type" value="value"/>
     """
@@ -180,7 +187,10 @@ def frame_vars_to_xml(frame_f_locals):
             if k == RETURN_VALUES_DICT:
                 xml += return_values_from_dict_to_xml(v)
             else:
-                xml += var_to_xml(v, str(k))
+                if hidden_ns is not None and dict_contains(hidden_ns, k):
+                    xml += var_to_xml(v, str(k), additionalInXml=' isIPythonHidden="True"')
+                else:
+                    xml += var_to_xml(v, str(k))
         except Exception:
             traceback.print_exc()
             pydev_log.error("Unexpected error, recovered safely.\n")
@@ -188,10 +198,7 @@ def frame_vars_to_xml(frame_f_locals):
     return xml
 
 
-def get_type_qualifier(type):
-    return getattr(type, "__module__", "")
-
-def var_to_xml(val, name, doTrim=True, additionalInXml='', return_value=False):
+def var_to_xml(val, name, doTrim=True, additionalInXml='', return_value=False, ipython_hidden=False):
     """ single variable or dictionary to xml representation """
 
     is_exception_on_eval = isinstance(val, ExceptionOnEvaluate)
@@ -202,13 +209,8 @@ def var_to_xml(val, name, doTrim=True, additionalInXml='', return_value=False):
         v = val
 
     _type, typeName, resolver = get_type(v)
-    type_qualifier = get_type_qualifier(_type)
-
-
-    do_not_call_value_str = False
-    if isinstance(resolver, pydevd_resolver.djangoFormResolver.__class__):
-        # do not call str() of Django form objects because has side effects and breaks self.errors
-        do_not_call_value_str = True
+    type_qualifier = getattr(_type, "__module__", "")
+    do_not_call_value_str = resolver is not None and resolver.use_value_repr_instead_of_str
 
     try:
         if hasattr(v, '__class__'):
@@ -251,15 +253,10 @@ def var_to_xml(val, name, doTrim=True, additionalInXml='', return_value=False):
     except:
         pass
 
-    if return_value:
-        xmlRetVal = ' isRetVal="True"'
-    else:
-        xmlRetVal = ''
-
     xml = '<var name="%s" type="%s" ' % (make_valid_xml_value(name), make_valid_xml_value(typeName))
 
     if type_qualifier:
-        xmlQualifier = ' qualifier="%s" ' % make_valid_xml_value(type_qualifier)
+        xmlQualifier = 'qualifier="%s"' % make_valid_xml_value(type_qualifier)
     else:
         xmlQualifier = ''
 
@@ -292,5 +289,5 @@ def var_to_xml(val, name, doTrim=True, additionalInXml='', return_value=False):
         else:
             xmlCont = ''
 
-    return ''.join((xml, xmlQualifier, xmlValue, xmlCont, xmlRetVal, additionalInXml, ' />\n'))
+    return ''.join((xml, xmlQualifier, xmlValue, xmlCont, additionalInXml, ' />\n'))
 

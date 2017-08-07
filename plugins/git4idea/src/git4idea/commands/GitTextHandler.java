@@ -17,10 +17,7 @@ package git4idea.commands;
 
 import com.intellij.execution.ExecutionException;
 import com.intellij.execution.configurations.GeneralCommandLine;
-import com.intellij.execution.process.OSProcessHandler;
-import com.intellij.execution.process.ProcessEvent;
-import com.intellij.execution.process.ProcessHandler;
-import com.intellij.execution.process.ProcessListener;
+import com.intellij.execution.process.*;
 import com.intellij.openapi.progress.ProcessCanceledException;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.ProgressManager;
@@ -34,6 +31,8 @@ import org.jetbrains.annotations.Nullable;
 
 import java.io.File;
 import java.nio.charset.Charset;
+import java.util.Collections;
+import java.util.List;
 
 /**
  * The handler for git commands with text outputs
@@ -45,11 +44,15 @@ public abstract class GitTextHandler extends GitHandler {
   private final Object myProcessStateLock = new Object();
 
   protected GitTextHandler(@NotNull Project project, @NotNull File directory, @NotNull GitCommand command) {
-    super(project, directory, command);
+    super(project, directory, command, Collections.emptyList());
   }
 
   protected GitTextHandler(final Project project, final VirtualFile vcsRoot, final GitCommand command) {
-    super(project, vcsRoot, command);
+    super(project, vcsRoot, command, Collections.emptyList());
+  }
+
+  protected GitTextHandler(final Project project, final VirtualFile vcsRoot, final GitCommand command, List<String> configParameters) {
+    super(project, vcsRoot, command, configParameters);
   }
 
   @Nullable
@@ -80,7 +83,8 @@ public abstract class GitTextHandler extends GitHandler {
           setExitCode(exitCode);
           cleanupEnv();
           GitTextHandler.this.processTerminated(exitCode);
-        } finally {
+        }
+        finally {
           listeners().processTerminated(exitCode);
         }
       }
@@ -142,9 +146,9 @@ public abstract class GitTextHandler extends GitHandler {
     return new MyOSProcessHandler(commandLine);
   }
 
-  private static class MyOSProcessHandler extends OSProcessHandler {
+  private static class MyOSProcessHandler extends KillableProcessHandler {
     private MyOSProcessHandler(@NotNull GeneralCommandLine commandLine) throws ExecutionException {
-      super(commandLine);
+      super(commandLine, true);
     }
 
     @NotNull
@@ -159,5 +163,4 @@ public abstract class GitTextHandler extends GitHandler {
       return Registry.is("git.blocking.read") ? BaseOutputReader.Options.BLOCKING : BaseOutputReader.Options.NON_BLOCKING;
     }
   }
-
 }

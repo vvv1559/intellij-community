@@ -30,9 +30,6 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Arrays;
 
-/**
- * Created by Maxim.Mossienko on 4/4/2014.
- */
 public class ContentHashesUtil {
   public static final ThreadLocalCachedValue<MessageDigest> HASHER_CACHE = new ThreadLocalCachedValue<MessageDigest>() {
     @Override
@@ -46,13 +43,15 @@ public class ContentHashesUtil {
     }
   };
 
-  public static MessageDigest createHashDigest() {
+  @NotNull
+  static MessageDigest createHashDigest() {
     try {
       return MessageDigest.getInstance("SHA1");
-    } catch (NoSuchAlgorithmException ex) {
-      assert false:"Every Java implementation should have SHA1 support"; // http://docs.oracle.com/javase/7/docs/api/java/security/MessageDigest.html
     }
-    return null;
+    catch (NoSuchAlgorithmException ex) {
+      assert false:"Every Java implementation should have SHA1 support"; // http://docs.oracle.com/javase/7/docs/api/java/security/MessageDigest.html
+      return null;
+    }
   }
 
   private static final int SIGNATURE_LENGTH = 20;

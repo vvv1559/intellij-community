@@ -17,10 +17,12 @@
 package com.intellij.ide.util.scopeChooser;
 
 import com.intellij.ide.IdeBundle;
+import com.intellij.openapi.Disposable;
 import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.NamedConfigurable;
 import com.intellij.openapi.util.Comparing;
+import com.intellij.openapi.util.Disposer;
 import com.intellij.packageDependencies.DependencyValidationManager;
 import com.intellij.psi.search.scope.packageSet.NamedScope;
 import com.intellij.psi.search.scope.packageSet.NamedScopeManager;
@@ -34,11 +36,8 @@ import java.awt.*;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 
-/**
- * User: anna
- * Date: 01-Jul-2006
- */
 public class ScopeConfigurable extends NamedConfigurable<NamedScope> {
+  private final Disposable myDisposable = Disposer.newDisposable();
   private NamedScope myScope;
   private ScopeEditorPanel myPanel;
   private String myPackageSet;
@@ -147,6 +146,7 @@ public class ScopeConfigurable extends NamedConfigurable<NamedScope> {
     if (myPanel != null){
       myPanel.cancelCurrentProgress();
       myPanel.clearCaches();
+      Disposer.dispose(myDisposable);
       myPanel = null;
     }
   }

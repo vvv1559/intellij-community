@@ -17,6 +17,7 @@
 package com.intellij.execution;
 
 import com.intellij.openapi.extensions.ExtensionPointName;
+import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.util.text.StringUtil;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
@@ -41,6 +42,7 @@ public abstract class Executor {
    * {@link com.intellij.openapi.wm.ToolWindowId#DEBUG}).
    */
   public abstract String getToolWindowId();
+
   public abstract Icon getToolWindowIcon();
 
   /**
@@ -70,6 +72,7 @@ public abstract class Executor {
 
   /**
    * Returns the unique ID of the executor.
+   *
    * @return the ID of the executor.
    */
   @NotNull
@@ -86,6 +89,13 @@ public abstract class Executor {
   public abstract String getHelpId();
 
   public String getStartActionText(String configurationName) {
-    return getStartActionText() + (StringUtil.isEmpty(configurationName) ? "" : " '" + StringUtil.first(configurationName, 30, true) + "'");
+    return getStartActionText() + (StringUtil.isEmpty(configurationName) ? "" : " '" + shortenNameIfNeed(configurationName) + "'");
+  }
+
+  /**
+   * Too long names don't fit into UI controls and have to be trimmed
+   */
+  public static String shortenNameIfNeed(@NotNull String name) {
+    return StringUtil.first(name, Registry.intValue("run.configuration.max.name.length", 40), true);
   }
 }

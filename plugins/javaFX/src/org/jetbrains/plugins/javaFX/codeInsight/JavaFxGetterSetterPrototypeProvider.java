@@ -27,16 +27,13 @@ import com.intellij.psi.util.PropertyUtil;
 import org.jetbrains.plugins.javaFX.fxml.JavaFxCommonNames;
 import org.jetbrains.plugins.javaFX.fxml.JavaFxPsiUtil;
 
-/**
- * User: anna
- * Date: 3/4/13
- */
 public class JavaFxGetterSetterPrototypeProvider extends GetterSetterPrototypeProvider {
-  private static final Logger LOG = Logger.getInstance("#" + JavaFxGetterSetterPrototypeProvider.class.getName());
+  private static final Logger LOG = Logger.getInstance(JavaFxGetterSetterPrototypeProvider.class);
 
   @Override
   public boolean canGeneratePrototypeFor(PsiField field) {
-    return InheritanceUtil.isInheritor(field.getType(), JavaFxCommonNames.JAVAFX_BEANS_VALUE_OBSERVABLE_VALUE);
+    return InheritanceUtil.isInheritor(field.getType(), JavaFxCommonNames.JAVAFX_BEANS_VALUE_OBSERVABLE_VALUE) &&
+           JavaFxPsiUtil.getWrappedPropertyType(field, field.getProject(), JavaFxCommonNames.ourReadOnlyMap) != null;
   }
 
   @Override
@@ -46,6 +43,7 @@ public class JavaFxGetterSetterPrototypeProvider extends GetterSetterPrototypePr
     final PsiMethod getter = GenerateMembersUtil.generateSimpleGetterPrototype(field);
 
     final PsiType wrappedType = JavaFxPsiUtil.getWrappedPropertyType(field, project, JavaFxCommonNames.ourReadOnlyMap);
+    LOG.assertTrue(wrappedType != null, field.getType());
     getter.setName(PropertyUtil.suggestGetterName(PropertyUtil.suggestPropertyName(field), wrappedType));
 
     final PsiTypeElement returnTypeElement = getter.getReturnTypeElement();
@@ -70,7 +68,7 @@ public class JavaFxGetterSetterPrototypeProvider extends GetterSetterPrototypePr
     final Project project = field.getProject();
 
     final PsiType wrappedType = JavaFxPsiUtil.getWrappedPropertyType(field, project, JavaFxCommonNames.ourWritableMap);
-    
+    LOG.assertTrue(wrappedType != null, field.getType());
     final PsiElementFactory elementFactory = JavaPsiFacade.getElementFactory(project);
     final PsiTypeElement newTypeElement = elementFactory.createTypeElement(wrappedType);
     final PsiParameter[] parameters = setter.getParameterList().getParameters();

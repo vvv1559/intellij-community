@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,17 +15,20 @@
  */
 package com.intellij.codeInspection.ui;
 
-import com.intellij.codeInsight.daemon.HighlightDisplayKey;
 import com.intellij.codeInspection.InspectionsBundle;
 import com.intellij.codeInspection.actions.RunInspectionAction;
-import com.intellij.codeInspection.ex.DisableInspectionToolAction;
 import com.intellij.codeInspection.ex.InspectionProfileImpl;
 import com.intellij.codeInspection.ex.InspectionToolWrapper;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.profile.codeInspection.InspectionProjectProfileManager;
 import com.intellij.profile.codeInspection.ui.SingleInspectionProfilePanel;
-import com.intellij.ui.*;
+import com.intellij.profile.codeInspection.ui.inspectionsTree.InspectionsConfigTreeTable;
+import com.intellij.ui.BrowserHyperlinkListener;
+import com.intellij.ui.ClickListener;
+import com.intellij.ui.JBColor;
+import com.intellij.ui.ScrollPaneFactory;
 import com.intellij.ui.components.JBLabel;
 import com.intellij.ui.components.JBLabelDecorator;
 import com.intellij.ui.components.panels.StatelessCardLayout;
@@ -47,13 +50,11 @@ public class InspectionNodeInfo extends JPanel {
   public InspectionNodeInfo(@NotNull final InspectionTree tree,
                             @NotNull final Project project) {
     setLayout(new GridBagLayout());
-    setBorder(IdeBorderFactory.createEmptyBorder(11, 0, 0, 0));
+    setBorder(JBUI.Borders.emptyTop(11));
     final InspectionToolWrapper toolWrapper = tree.getSelectedToolWrapper(false);
     LOG.assertTrue(toolWrapper != null);
-    InspectionProfileImpl currentProfile =
-      (InspectionProfileImpl)InspectionProjectProfileManager.getInstance(project).getCurrentProfile();
-    HighlightDisplayKey key = HighlightDisplayKey.find(toolWrapper.getShortName());
-    boolean enabled = currentProfile.isToolEnabled(key);
+    InspectionProfileImpl currentProfile = InspectionProjectProfileManager.getInstance(project).getCurrentProfile();
+    boolean enabled = currentProfile.getTools(toolWrapper.getShortName(), project).isEnabled();
 
     JPanel titlePanel = new JPanel();
     titlePanel.setLayout(new BoxLayout(titlePanel, BoxLayout.LINE_AXIS));
@@ -78,7 +79,10 @@ public class InspectionNodeInfo extends JPanel {
     description.setOpaque(false);
     description.setBackground(UIUtil.getLabelBackground());
     description.addHyperlinkListener(BrowserHyperlinkListener.INSTANCE);
-    final String toolDescription = toolWrapper.loadDescription();
+    String descriptionText = toolWrapper.loadDescription();
+    LOG.assertTrue(descriptionText != null, "Inspection '" + toolWrapper.getShortName() + "' has no description");
+    final String toolDescription =
+      DefaultInspectionToolPresentation.stripUIRefsFromInspectionDescription(StringUtil.notNullize(descriptionText));
     SingleInspectionProfilePanel.readHTML(description, SingleInspectionProfilePanel.toHTML(description, toolDescription == null ? "" : toolDescription, false));
     JScrollPane pane = ScrollPaneFactory.createScrollPane(description, true);
     int maxWidth = getFontMetrics(UIUtil.getLabelFont()).charWidth('f') * 110 - pane.getMinimumSize().width;
@@ -92,15 +96,8 @@ public class InspectionNodeInfo extends JPanel {
     new ClickListener() {
       @Override
       public boolean onClick(@NotNull MouseEvent event, int clickCount) {
-        DisableInspectionToolAction.modifyAndCommitProjectProfile(model -> {
-          final String toolId = key.toString();
-          if (enabled) {
-            model.disableTool(toolId, project);
-          }
-          else {
-            ((InspectionProfileImpl)model).enableTool(toolId, project);
-          }
-        }, project);
+        InspectionsConfigTreeTable.setToolEnabled(!enabled, currentProfile, toolWrapper.getShortName(), project);
+        tree.getContext().getView().profileChanged();
         return true;
       }
     }.installOn(enableButton);

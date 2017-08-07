@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,6 +19,8 @@ import org.apache.log4j.FileAppender;
 import org.apache.log4j.Level;
 import org.apache.log4j.Logger;
 import org.apache.log4j.PatternLayout;
+import org.apache.log4j.spi.NOPLogger;
+import org.apache.log4j.spi.NOPLoggerRepository;
 
 import java.io.*;
 import java.net.URI;
@@ -30,14 +32,24 @@ import java.util.zip.ZipFile;
 import java.util.zip.ZipInputStream;
 
 public class Runner {
-  public static Logger logger = null;
-
   private static final String PATCH_FILE_NAME = "patch-file.zip";
 
-  public static void main(String[] args) throws Exception {
+  private static Logger logger = null;
+  private static boolean ourCaseSensitiveFs;
 
+  public static Logger logger() {
+    return logger;
+  }
+
+  public static boolean isCaseSensitiveFs() {
+    return ourCaseSensitiveFs;
+  }
+
+  public static void main(String[] args) throws Exception {
     String jarFile = getArgument(args, "jar");
-    jarFile = jarFile == null ? resolveJarFile() : jarFile;
+    if (jarFile == null) {
+      jarFile = resolveJarFile();
+    }
 
     if (args.length >= 6 && "create".equals(args[0])) {
       String oldVersionDesc = args[1];
@@ -45,6 +57,8 @@ public class Runner {
       String oldFolder = args[3];
       String newFolder = args[4];
       String patchFile = args[5];
+
+      checkCaseSensitivity(newFolder);
       initLogger();
 
       // See usage for an explanation of these flags
@@ -53,7 +67,12 @@ public class Runner {
       boolean normalized = Arrays.asList(args).contains("--normalized");
 
       String root = getArgument(args, "root");
-      root = root == null ? "" : (root.endsWith("/") ? root : root + "/");
+      if (root == null) {
+        root = "";
+      }
+      else if (!root.endsWith("/")) {
+        root += "/";
+      }
 
       List<String> ignoredFiles = extractArguments(args, "ignored");
       List<String> criticalFiles = extractArguments(args, "critical");
@@ -82,18 +101,26 @@ public class Runner {
     }
     else if (args.length >= 2 && ("install".equals(args[0]) || "apply".equals(args[0]))) {
       String destFolder = args[1];
+      checkCaseSensitivity(destFolder);
+
       initLogger();
-      logger.info("destFolder: " + destFolder);
+      logger().info("destFolder: " + destFolder + ", case-sensitive: " + ourCaseSensitiveFs);
 
       if ("install".equals(args[0])) {
         install(jarFile, destFolder);
-      } else {
-        apply(jarFile, destFolder);
+      }
+      else {
+        apply(jarFile, destFolder, Arrays.asList(args).contains("--toolbox-ui"));
       }
     }
     else {
       printUsage();
     }
+  }
+
+  public static void checkCaseSensitivity(String path) {
+    boolean orig = new File(path).exists();
+    ourCaseSensitiveFs = orig != new File(path.toUpperCase()).exists() || orig != new File(path.toLowerCase()).exists();
   }
 
   private static Map<String, String> buildWarningMap(List<String> warnings) {
@@ -155,7 +182,7 @@ public class Runner {
   }
 
   public static void printStackTrace(Throwable e){
-    logger.error(e.getMessage(), e);
+    logger().error(e.getMessage(), e);
   }
 
   public static String getArgument(String[] args, String name) {
@@ -170,12 +197,12 @@ public class Runner {
 
   public static List<String> extractArguments(String[] args, String paramName) {
     List<String> result = new ArrayList<>();
+    String prefix = paramName + '=';
     for (String param : args) {
-      if (param.startsWith(paramName + "=")) {
-        param = param.substring((paramName + "=").length());
-        for (StringTokenizer tokenizer = new StringTokenizer(param, ";"); tokenizer.hasMoreTokens();) {
-          String each = tokenizer.nextToken();
-          result.add(each);
+      if (param.startsWith(prefix)) {
+        StringTokenizer tokenizer = new StringTokenizer(param.substring(prefix.length()), ";");
+        while (tokenizer.hasMoreTokens()) {
+          result.add(tokenizer.nextToken());
         }
       }
     }
@@ -219,31 +246,21 @@ public class Runner {
   private static void create(PatchSpec spec) throws IOException, OperationCancelledException {
     UpdaterUI ui = new ConsoleUpdaterUI();
     try {
-      File tempPatchFile = Utils.createTempFile();
+      File tempPatchFile = Utils.getTempFile("patch");
       PatchFileCreator.create(spec, tempPatchFile, ui);
 
-      logger.info("Packing JAR file: " + spec.getPatchFile() );
+      logger().info("Packing JAR file: " + spec.getPatchFile() );
       ui.startProcess("Packing JAR file '" + spec.getPatchFile() + "'...");
 
-      FileOutputStream fileOut = new FileOutputStream(spec.getPatchFile());
-      try {
-        ZipOutputWrapper out = new ZipOutputWrapper(fileOut);
-        ZipInputStream in = new ZipInputStream(new FileInputStream(new File(spec.getJarFile())));
-        try {
-          ZipEntry e;
-          while ((e = in.getNextEntry()) != null) {
-            out.zipEntry(e, in);
-          }
-        }
-        finally {
-          in.close();
+      try (ZipOutputWrapper out = new ZipOutputWrapper(new FileOutputStream(spec.getPatchFile()));
+           ZipInputStream in = new ZipInputStream(new FileInputStream(new File(spec.getJarFile())))) {
+        ZipEntry e;
+        while ((e = in.getNextEntry()) != null) {
+          out.zipEntry(e, in);
         }
 
         out.zipFile(PATCH_FILE_NAME, tempPatchFile);
         out.finish();
-      }
-      finally {
-        fileOut.close();
       }
     }
     finally {
@@ -252,60 +269,54 @@ public class Runner {
   }
 
   private static void cleanup(UpdaterUI ui) throws IOException {
-    logger.info("Cleaning up...");
+    logger().info("Cleaning up...");
     ui.startProcess("Cleaning up...");
     ui.setProgressIndeterminate();
     Utils.cleanup();
   }
 
-  private static void install(final String jarFile, final String destFolder) throws Exception {
-    new SwingUpdaterUI(new SwingUpdaterUI.InstallOperation() {
-                         public boolean execute(UpdaterUI ui) throws OperationCancelledException {
-                           logger.info("installing patch to the " + destFolder);
-                           return doInstall(jarFile, ui, destFolder);
-                         }
-                       });
+  private static void install(String jarFile, String destFolder) throws Exception {
+    new SwingUpdaterUI(ui -> {
+      logger().info("Installing patch to the " + destFolder);
+      return doInstall(jarFile, ui, destFolder);
+    });
   }
 
-  private static void apply(final String jarFile, final String destFolder) throws Exception {
-     logger.info("Applying patch to the " + destFolder);
-     doInstall(jarFile, new ConsoleUpdaterUI(), destFolder);
+  private static void apply(String jarFile, String destFolder, boolean toolboxUi) throws Exception {
+    logger().info("Applying patch to the " + destFolder);
+    UpdaterUI ui = toolboxUi ? new ToolboxUpdaterUI() : new ConsoleUpdaterUI();
+    boolean success = doInstall(jarFile, ui, destFolder);
+    if (!success) {
+      System.exit(1);
+    }
   }
 
   private static boolean doInstall(String jarFile, UpdaterUI ui, String destFolder) throws OperationCancelledException {
     try {
       try {
-        File patchFile = Utils.createTempFile();
-        ZipFile zipFile = new ZipFile(jarFile);
+        File patchFile = Utils.getTempFile("patch");
 
-        logger.info("Extracting patch file...");
+        logger().info("Extracting patch file...");
         ui.startProcess("Extracting patch file...");
         ui.setProgressIndeterminate();
-        try {
-          InputStream in = Utils.getEntryInputStream(zipFile, PATCH_FILE_NAME);
-          OutputStream out = new BufferedOutputStream(new FileOutputStream(patchFile));
-          try {
-            Utils.copyStream(in, out);
-          }
-          finally {
-            in.close();
-            out.close();
-          }
-        }
-        finally {
-          zipFile.close();
+        try (ZipFile zipFile = new ZipFile(jarFile);
+             InputStream in = Utils.getEntryInputStream(zipFile, PATCH_FILE_NAME);
+             OutputStream out = new BufferedOutputStream(new FileOutputStream(patchFile))) {
+          Utils.copyStream(in, out);
         }
 
         ui.checkCancelled();
 
         File destDir = new File(destFolder);
         PatchFileCreator.PreparationResult result = PatchFileCreator.prepareAndValidate(patchFile, destDir, ui);
-        Map<String, ValidationResult.Option> options = ui.askUser(result.validationResults);
-        return PatchFileCreator.apply(result, options, ui);
+        List<ValidationResult> problems = result.validationResults;
+        Map<String, ValidationResult.Option> resolutions = problems.isEmpty() ? Collections.emptyMap() : ui.askUser(problems);
+        return PatchFileCreator.apply(result, resolutions, ui);
       }
-      catch (IOException e) {
-        ui.showError(e);
+      catch (OperationCancelledException ignored) { }
+      catch (Throwable e) {
         printStackTrace(e);
+        ui.showError(e);
       }
     }
     finally {
@@ -313,9 +324,9 @@ public class Runner {
         System.gc();
         cleanup(ui);
       }
-      catch (IOException e) {
-        ui.showError(e);
+      catch (Throwable e) {
         printStackTrace(e);
+        ui.showError(e);
       }
     }
 
@@ -341,6 +352,15 @@ public class Runner {
     catch (URISyntaxException e) {
       printStackTrace(e);
       throw new IOException(e.getMessage());
+    }
+  }
+
+  static void initTestLogger() {
+    if (logger == null) {
+      logger = new NOPLogger(new NOPLoggerRepository(), "root");
+    }
+    else if (!(logger instanceof NOPLogger)) {
+      throw new IllegalStateException("Non-test logger already defined");
     }
   }
 }

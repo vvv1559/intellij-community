@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,8 +17,8 @@ package org.jetbrains.plugins.gradle.codeInsight;
 
 import com.intellij.ProjectTopics;
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.externalSystem.ExternalSystemModulePropertyManager;
 import com.intellij.openapi.externalSystem.service.execution.ProgressExecutionMode;
-import com.intellij.openapi.externalSystem.util.ExternalSystemConstants;
 import com.intellij.openapi.externalSystem.util.ExternalSystemUtil;
 import com.intellij.openapi.fileEditor.FileEditor;
 import com.intellij.openapi.module.Module;
@@ -27,14 +27,15 @@ import com.intellij.openapi.progress.ProcessCanceledException;
 import com.intellij.openapi.project.DumbAware;
 import com.intellij.openapi.project.IndexNotReadyException;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.roots.ModuleRootAdapter;
 import com.intellij.openapi.roots.ModuleRootEvent;
+import com.intellij.openapi.roots.ModuleRootListener;
 import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.ui.EditorNotificationPanel;
 import com.intellij.ui.EditorNotifications;
+import com.intellij.ui.LightColors;
 import org.gradle.util.GUtil;
 import org.gradle.wrapper.WrapperConfiguration;
 import org.gradle.wrapper.WrapperExecutor;
@@ -61,7 +62,7 @@ import java.util.regex.Pattern;
 public class UseDistributionWithSourcesNotificationProvider extends EditorNotifications.Provider<EditorNotificationPanel> implements
                                                                                                                           DumbAware {
   public static final Pattern GRADLE_SRC_DISTRIBUTION_PATTERN;
-  private static final Logger LOG = Logger.getInstance("#" + UseDistributionWithSourcesNotificationProvider.class.getName());
+  private static final Logger LOG = Logger.getInstance(UseDistributionWithSourcesNotificationProvider.class);
   private static final Key<EditorNotificationPanel> KEY = Key.create("gradle.notifications.use.distribution.with.sources");
   private static final String ALL_ZIP_DISTRIBUTION_URI_SUFFIX = "-all.zip";
   private final Project myProject;
@@ -72,7 +73,7 @@ public class UseDistributionWithSourcesNotificationProvider extends EditorNotifi
 
   public UseDistributionWithSourcesNotificationProvider(Project project, final EditorNotifications notifications) {
     myProject = project;
-    project.getMessageBus().connect(project).subscribe(ProjectTopics.PROJECT_ROOTS, new ModuleRootAdapter() {
+    project.getMessageBus().connect(project).subscribe(ProjectTopics.PROJECT_ROOTS, new ModuleRootListener() {
       @Override
       public void rootsChanged(ModuleRootEvent event) {
         notifications.updateAllNotifications();
@@ -101,7 +102,7 @@ public class UseDistributionWithSourcesNotificationProvider extends EditorNotifi
         if (settings.isDisableWrapperSourceDistributionNotification()) return null;
         if (!showUseDistributionWithSourcesTip(rootProjectPath)) return null;
 
-        final EditorNotificationPanel panel = new EditorNotificationPanel();
+        final EditorNotificationPanel panel = new EditorNotificationPanel(LightColors.SLIGHTLY_GREEN);
         panel.setText(GradleBundle.message("gradle.notifications.use.distribution.with.sources"));
         panel.createActionLabel(GradleBundle.message("gradle.notifications.hide.tip"), () -> {
           settings.setDisableWrapperSourceDistributionNotification(true);
@@ -111,15 +112,13 @@ public class UseDistributionWithSourcesNotificationProvider extends EditorNotifi
           updateDefaultWrapperConfiguration(rootProjectPath);
           EditorNotifications.getInstance(module.getProject()).updateAllNotifications();
           ExternalSystemUtil.refreshProject(
-            module.getProject(), GradleConstants.SYSTEM_ID, settings.getExternalProjectPath(), true,
+            module.getProject(), GradleConstants.SYSTEM_ID, settings.getExternalProjectPath(), false,
             ProgressExecutionMode.START_IN_FOREGROUND_ASYNC);
         });
         return panel;
       }
     }
-    catch (ProcessCanceledException ignored) {
-    }
-    catch (IndexNotReadyException ignored) {
+    catch (ProcessCanceledException | IndexNotReadyException ignored) {
     }
 
     return null;
@@ -159,7 +158,7 @@ public class UseDistributionWithSourcesNotificationProvider extends EditorNotifi
     String distributionUri = wrapperConfiguration.getDistribution().toString();
     try {
       String host = new URI(distributionUri).getHost();
-      return host.endsWith("gradle.org") && !GRADLE_SRC_DISTRIBUTION_PATTERN.matcher(distributionUri).matches();
+      return host != null && host.endsWith("gradle.org") && !GRADLE_SRC_DISTRIBUTION_PATTERN.matcher(distributionUri).matches();
     }
     catch (URISyntaxException ignore) {
     }
@@ -168,12 +167,13 @@ public class UseDistributionWithSourcesNotificationProvider extends EditorNotifi
 
   @Nullable
   private static String getRootProjectPath(@NotNull Module module) {
-    String externalSystemId = module.getOptionValue(ExternalSystemConstants.EXTERNAL_SYSTEM_ID_KEY);
+    ExternalSystemModulePropertyManager modulePropertyManager = ExternalSystemModulePropertyManager.getInstance(module);
+    String externalSystemId = modulePropertyManager.getExternalSystemId();
     if (externalSystemId == null || !GradleConstants.SYSTEM_ID.toString().equals(externalSystemId)) {
       return null;
     }
 
-    String path = module.getOptionValue(ExternalSystemConstants.ROOT_PROJECT_PATH_KEY);
+    String path = modulePropertyManager.getRootProjectPath();
     return StringUtil.isEmpty(path) ? null : path;
   }
 }

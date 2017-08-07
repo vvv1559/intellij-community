@@ -14,10 +14,6 @@
  * limitations under the License.
  */
 
-/*
- * User: anna
- * Date: 01-Jul-2009
- */
 package org.testng;
 
 import com.beust.jcommander.JCommander;
@@ -115,7 +111,7 @@ public class RemoteTestNGStarter {
 
     if (commandFileName != null) {
       if (workingDirs != null && new File(workingDirs).length() > 0) {
-        System.exit(new TestNGForkedSplitter(workingDirs, System.out, System.err, newArgs)
+        System.exit(new TestNGForkedSplitter(workingDirs, newArgs)
                       .startSplitting(args, param, commandFileName, null));
         return;
       }

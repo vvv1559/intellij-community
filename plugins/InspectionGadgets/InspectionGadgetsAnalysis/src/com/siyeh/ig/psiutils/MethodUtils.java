@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,6 +26,7 @@ import com.intellij.psi.util.PsiUtil;
 import com.intellij.util.IncorrectOperationException;
 import com.intellij.util.Query;
 import com.siyeh.HardcodedMethodConstants;
+import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -37,22 +38,37 @@ public class MethodUtils {
 
   private MethodUtils() {}
 
+  @Contract("null -> false")
   public static boolean isComparatorCompare(@Nullable PsiMethod method) {
     return method != null && methodMatches(method, CommonClassNames.JAVA_UTIL_COMPARATOR, PsiType.INT, "compare", null, null);
   }
 
+  @Contract("null -> false")
   public static boolean isCompareTo(@Nullable PsiMethod method) {
-    return method != null && methodMatches(method, null, PsiType.INT, HardcodedMethodConstants.COMPARE_TO, PsiType.NULL);
+    return method != null && methodMatches(method, null, PsiType.INT, HardcodedMethodConstants.COMPARE_TO, PsiType.NULL)
+      && InheritanceUtil.isInheritor(method.getContainingClass(), CommonClassNames.JAVA_LANG_COMPARABLE);
   }
 
+  @Contract("null -> false")
+  public static boolean isCompareToIgnoreCase(@Nullable PsiMethod method) {
+    if (method == null) {
+      return false;
+    }
+    final PsiClassType stringType = TypeUtils.getStringType(method);
+    return methodMatches(method, "java.lang.String", PsiType.INT, "compareToIgnoreCase", stringType);
+  }
+
+  @Contract("null -> false")
   public static boolean isHashCode(@Nullable PsiMethod method) {
     return method != null && methodMatches(method, null, PsiType.INT, HardcodedMethodConstants.HASH_CODE);
   }
 
+  @Contract("null -> false")
   public static boolean isFinalize(@Nullable PsiMethod method) {
     return method != null && methodMatches(method, null, PsiType.VOID, HardcodedMethodConstants.FINALIZE);
   }
 
+  @Contract("null -> false")
   public static boolean isToString(@Nullable PsiMethod method) {
     if (method == null) {
       return false;
@@ -61,12 +77,22 @@ public class MethodUtils {
     return methodMatches(method, null, stringType, HardcodedMethodConstants.TO_STRING);
   }
 
+  @Contract("null -> false")
   public static boolean isEquals(@Nullable PsiMethod method) {
     if (method == null) {
       return false;
     }
     final PsiClassType objectType = TypeUtils.getObjectType(method);
     return methodMatches(method, null, PsiType.BOOLEAN, HardcodedMethodConstants.EQUALS, objectType);
+  }
+
+  @Contract("null -> false")
+  public static boolean isEqualsIgnoreCase(@Nullable PsiMethod method) {
+    if (method == null) {
+      return false;
+    }
+    final PsiClassType stringType = TypeUtils.getStringType(method);
+    return methodMatches(method, "java.lang.String", PsiType.BOOLEAN, HardcodedMethodConstants.EQUALS_IGNORE_CASE, stringType);
   }
 
   /**
@@ -354,5 +380,12 @@ public class MethodUtils {
     final PsiReturnStatement returnStatement = (PsiReturnStatement)lastStatement;
     final PsiExpression returnValue = returnStatement.getReturnValue();
     return returnValue instanceof PsiThisExpression;
+  }
+
+  @Contract("null -> false")
+  public static boolean isStringLength(@Nullable PsiMethod method) {
+    if (method == null || !method.getName().equals("length") || method.getParameterList().getParametersCount() != 0) return false;
+    PsiClass aClass = method.getContainingClass();
+    return aClass != null && CommonClassNames.JAVA_LANG_STRING.equals(aClass.getQualifiedName());
   }
 }

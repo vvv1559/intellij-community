@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2011 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,23 +16,25 @@
 package com.intellij.codeInspection;
 
 import com.intellij.codeInsight.intention.IntentionAction;
+import com.intellij.codeInsight.intention.IntentionActionDelegate;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.fileEditor.FileEditor;
 import com.intellij.openapi.fileEditor.FileEditorManager;
 import com.intellij.openapi.fileEditor.TextEditor;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
 import com.intellij.util.IncorrectOperationException;
+import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
-/**
- * Created by IntelliJ IDEA.
- * User: angus
- * Date: 4/20/11
- * Time: 9:27 PM
- */
-public class IntentionWrapper implements LocalQuickFix, IntentionAction, ActionClassHolder {
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+
+public class IntentionWrapper implements LocalQuickFix, IntentionAction, ActionClassHolder, IntentionActionDelegate {
   private final IntentionAction myAction;
   private final PsiFile myFile;
 
@@ -69,6 +71,12 @@ public class IntentionWrapper implements LocalQuickFix, IntentionAction, ActionC
     myAction.invoke(project, editor, file);
   }
 
+  @Nullable
+  @Override
+  public PsiElement getElementToMakeWritable(@NotNull PsiFile file) {
+    return myAction.getElementToMakeWritable(file);
+  }
+
   @Override
   public boolean startInWriteAction() {
     return myAction.startInWriteAction();
@@ -85,7 +93,7 @@ public class IntentionWrapper implements LocalQuickFix, IntentionAction, ActionC
 
     if (virtualFile != null) {
       FileEditor editor = FileEditorManager.getInstance(project).getSelectedEditor(virtualFile);
-      myAction.invoke(project, editor instanceof TextEditor ? ((TextEditor) editor).getEditor() : null, myFile);
+      myAction.invoke(project, editor instanceof TextEditor ? ((TextEditor)editor).getEditor() : null, myFile);
     }
   }
 
@@ -94,5 +102,37 @@ public class IntentionWrapper implements LocalQuickFix, IntentionAction, ActionC
   public Class getActionClass() {
     return getAction().getClass();
   }
-}
 
+  @NotNull
+  @Override
+  public IntentionAction getDelegate() {
+    return myAction;
+  }
+
+  @Contract("null, _ -> null")
+  public static LocalQuickFix wrapToQuickFix(@Nullable IntentionAction action, @NotNull PsiFile file) {
+    if (action == null) return null;
+    if (action instanceof LocalQuickFix) return (LocalQuickFix)action;
+    return new IntentionWrapper(action, file);
+  }
+
+  @NotNull
+  public static LocalQuickFix[] wrapToQuickFixes(@NotNull IntentionAction[] actions, @NotNull PsiFile file) {
+    if (actions.length == 0) return LocalQuickFix.EMPTY_ARRAY;
+    LocalQuickFix[] fixes = new LocalQuickFix[actions.length];
+    for (int i = 0; i < actions.length; i++) {
+      fixes[i] = wrapToQuickFix(actions[i], file);
+    }
+    return fixes;
+  }
+
+  @NotNull
+  public static List<LocalQuickFix> wrapToQuickFixes(@NotNull List<IntentionAction> actions, @NotNull PsiFile file) {
+    if (actions.isEmpty()) return Collections.emptyList();
+    List<LocalQuickFix> fixes = new ArrayList<>(actions.size());
+    for (IntentionAction action : actions) {
+      fixes.add(wrapToQuickFix(action, file));
+    }
+    return fixes;
+  }
+}

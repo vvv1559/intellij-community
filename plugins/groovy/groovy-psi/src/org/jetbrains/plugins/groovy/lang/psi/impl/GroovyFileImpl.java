@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -40,8 +40,9 @@ import org.jetbrains.plugins.groovy.lang.lexer.GroovyTokenTypes;
 import org.jetbrains.plugins.groovy.lang.parser.GroovyElementTypes;
 import org.jetbrains.plugins.groovy.lang.psi.GroovyFile;
 import org.jetbrains.plugins.groovy.lang.psi.GroovyPsiElementFactory;
-import org.jetbrains.plugins.groovy.lang.psi.api.statements.GrTopLevelDefinition;
+import org.jetbrains.plugins.groovy.lang.psi.api.statements.GrVariableDeclaration;
 import org.jetbrains.plugins.groovy.lang.psi.api.statements.expressions.GrAssignmentExpression;
+import org.jetbrains.plugins.groovy.lang.psi.api.statements.expressions.GrTupleAssignmentExpression;
 import org.jetbrains.plugins.groovy.lang.psi.api.statements.params.GrParameter;
 import org.jetbrains.plugins.groovy.lang.psi.api.statements.typedef.GrTypeDefinition;
 import org.jetbrains.plugins.groovy.lang.psi.api.statements.typedef.members.GrMember;
@@ -60,6 +61,7 @@ import org.jetbrains.plugins.groovy.lang.resolve.MethodTypeInferencer;
 import org.jetbrains.plugins.groovy.lang.resolve.PackageSkippingProcessor;
 import org.jetbrains.plugins.groovy.lang.resolve.ResolveUtil;
 import org.jetbrains.plugins.groovy.lang.resolve.processors.ClassHint;
+import org.jetbrains.plugins.groovy.lang.resolve.processors.GroovyResolverProcessor;
 
 import java.util.concurrent.ConcurrentMap;
 
@@ -68,7 +70,8 @@ import java.util.concurrent.ConcurrentMap;
  *
  * @author ilyas
  */
-public class GroovyFileImpl extends GroovyFileBaseImpl implements GroovyFile {
+public class GroovyFileImpl extends GroovyFileBaseImpl implements GroovyFile, PsiModifiableCodeBlock {
+
   private static final Logger LOG = Logger.getInstance("org.jetbrains.plugins.groovy.lang.psi.impl.GroovyFileImpl");
 
   private static final String SYNTHETIC_PARAMETER_NAME = "args";
@@ -144,10 +147,15 @@ public class GroovyFileImpl extends GroovyFileBaseImpl implements GroovyFile {
   private static boolean processCachedDeclarations(@NotNull PsiScopeProcessor processor,
                                                    @NotNull ResolveState state,
                                                    MostlySingularMultiMap<String, ResultWithContext> cache) {
-    String name = ResolveUtil.getNameHint(processor);
-    Processor<ResultWithContext> cacheProcessor = res ->
-      processor.execute(res.getElement(), state.put(ClassHint.RESOLVE_CONTEXT, res.getFileContext()));
-    return name != null ? cache.processForKey(name, cacheProcessor) : cache.processAllValues(cacheProcessor);
+    for (PsiScopeProcessor each : GroovyResolverProcessor.allProcessors(processor)) {
+      String name = ResolveUtil.getNameHint(each);
+      Processor<ResultWithContext> cacheProcessor = res -> each.execute(
+        res.getElement(), state.put(ClassHint.RESOLVE_CONTEXT, res.getFileContext())
+      );
+      boolean result = name != null ? cache.processForKey(name, cacheProcessor) : cache.processAllValues(cacheProcessor);
+      if (!result) return false;
+    }
+    return true;
   }
 
   @NotNull
@@ -311,8 +319,8 @@ public class GroovyFileImpl extends GroovyFileBaseImpl implements GroovyFile {
   }
 
   private static boolean shouldProcess(@Nullable PsiElement lastParent, @NotNull PsiElement run) {
-    return run instanceof GrAssignmentExpression // binding variables
-           || !(run instanceof GrTopLevelDefinition || run instanceof GrImportStatement || lastParent instanceof GrMember);
+    return run instanceof GrAssignmentExpression || run instanceof GrTupleAssignmentExpression || // binding variables
+           run instanceof GrVariableDeclaration && !(lastParent instanceof GrMember);             // local variables
   }
 
   @Override
@@ -432,7 +440,8 @@ public class GroovyFileImpl extends GroovyFileBaseImpl implements GroovyFile {
     if (currentPackage != null) {
       final ASTNode currNode = currentPackage.getNode();
       fileNode.replaceChild(currNode, newNode);
-    } else {
+    }
+    else {
       ASTNode anchor = fileNode.getFirstChildNode();
       if (anchor != null && anchor.getElementType() == GroovyTokenTypes.mSH_COMMENT) {
         anchor = anchor.getTreeNext();
@@ -528,9 +537,25 @@ public class GroovyFileImpl extends GroovyFileBaseImpl implements GroovyFile {
     return this;
   }
 
+  @NotNull
+  @Override
+  public GrVariableDeclaration[] getScriptDeclarations(boolean topLevelOnly) {
+    return PsiImplUtilKt.getScriptDeclarations(this, topLevelOnly);
+  }
+
+  @Override
+  public boolean shouldChangeModificationCount(PsiElement place) {
+    if (!isContentsLoaded()) return true;
+    // 1. We actually should never get GrTypeDefinition as a parent, because it is a PsiClass,
+    //    and PsiClasses prevent to go up in a tree any further
+    // 2. If place is under a variable then @BaseScript or @Field may be changed,
+    //    which actually is a change in Java Structure
+    return !isScript() || PsiTreeUtil.getParentOfType(place, GrTypeDefinition.class, GrVariableDeclaration.class) != null;
+  }
+
   @Override
   public String toString() {
-    if (ApplicationManager.getApplication().isUnitTestMode()){
+    if (ApplicationManager.getApplication().isUnitTestMode()) {
       return super.toString();
     }
     return "GroovyFileImpl:" + getName();

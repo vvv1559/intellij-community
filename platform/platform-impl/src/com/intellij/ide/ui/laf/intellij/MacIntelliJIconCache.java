@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@ package com.intellij.ide.ui.laf.intellij;
 import com.intellij.ide.ui.laf.IntelliJLaf;
 import com.intellij.openapi.util.IconLoader;
 import com.intellij.util.containers.HashMap;
+import com.intellij.util.ui.UIUtil;
 
 import javax.swing.*;
 
@@ -27,12 +28,18 @@ import javax.swing.*;
 public class MacIntelliJIconCache {
   private static final HashMap<String, Icon> cache = new HashMap<>();
 
-  public static Icon getIcon(String name, boolean selected, boolean focused, boolean enabled) {
+  public static Icon getIcon(String name, boolean editable, boolean selected, boolean focused, boolean enabled, boolean pressed) {
     String key = name;
+    if (editable) key += "Editable";
     if (selected) key+= "Selected";
-    if (focused) key+= "Focused";
+
+    if (pressed) key += "Pressed";
+    else if (focused) key+= "Focused";
     else if (!enabled) key+="Disabled";
+
     if (IntelliJLaf.isGraphite()) key= "graphite/" + key;
+    if (UIUtil.isUnderWin10LookAndFeel()) key = "win10/" + key;
+
     Icon icon = cache.get(key);
     if (icon == null) {
       icon = IconLoader.findIcon("/com/intellij/ide/ui/laf/icons/" + key + ".png", MacIntelliJIconCache.class, true);
@@ -41,10 +48,18 @@ public class MacIntelliJIconCache {
     return icon;
   }
 
+  public static Icon getIcon(String name, boolean editable, boolean selected, boolean focused, boolean enabled) {
+    return getIcon(name, editable, selected, focused, enabled, false);
+  }
+
+  public static Icon getIcon(String name, boolean selected, boolean focused, boolean enabled) {
+    return getIcon(name, false, selected, focused, enabled);
+  }
+
   public static Icon getIcon(String name, boolean selected, boolean focused) {
-    return getIcon(name, selected, focused, true);
+    return getIcon(name, false, selected, focused, true);
   }
   public static Icon getIcon(String name) {
-    return getIcon(name, false, false, true);
+    return getIcon(name, false, false, false, true);
   }
 }

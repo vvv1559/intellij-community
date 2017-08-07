@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@
 package com.intellij.testIntegration.createTest;
 
 import com.intellij.codeInsight.CodeInsightBundle;
+import com.intellij.codeInsight.TestFrameworks;
 import com.intellij.codeInsight.intention.PsiElementBaseIntentionAction;
 import com.intellij.ide.util.PropertiesComponent;
 import com.intellij.openapi.command.CommandProcessor;
@@ -33,8 +34,8 @@ import com.intellij.openapi.roots.TestModuleProperties;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.*;
-import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.testIntegration.TestFramework;
+import com.intellij.testIntegration.TestIntegrationUtils;
 import com.intellij.util.IncorrectOperationException;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -87,14 +88,15 @@ public class CreateTestAction extends PsiElementBaseIntentionAction {
 
     if (psiClass == null) return false;
 
-    Module srcModule = ModuleUtilCore.findModuleForPsiElement(psiClass);
-    if (srcModule == null) return false;
+    PsiFile file = psiClass.getContainingFile();
+    if (file.getContainingDirectory() == null || JavaProjectRootsUtil.isOutsideJavaSourceRoot(file)) return false;
 
     if (psiClass.isAnnotationType() ||
         psiClass instanceof PsiAnonymousClass) {
       return false;
     }
-    return true;
+    
+    return TestFrameworks.detectFramework(psiClass) == null;
   }
 
   @Override
@@ -109,7 +111,7 @@ public class CreateTestAction extends PsiElementBaseIntentionAction {
     PsiDirectory srcDir = element.getContainingFile().getContainingDirectory();
     PsiPackage srcPackage = JavaDirectoryService.getInstance().getPackage(srcDir);
 
-    final PropertiesComponent propertiesComponent = PropertiesComponent.getInstance();
+    final PropertiesComponent propertiesComponent = PropertiesComponent.getInstance(project);
     Module testModule = suggestModuleForTests(project, srcModule);
     final List<VirtualFile> testRootUrls = computeTestRoots(testModule);
     if (testRootUrls.isEmpty() && computeSuitableTestRootUrls(testModule).isEmpty()) {
@@ -136,12 +138,24 @@ public class CreateTestAction extends PsiElementBaseIntentionAction {
   }
 
   @NotNull
-  private static Module suggestModuleForTests(@NotNull Project project, @NotNull Module productionModule) {
+  public static Module suggestModuleForTests(@NotNull Project project, @NotNull Module productionModule) {
     for (Module module : ModuleManager.getInstance(project).getModules()) {
       if (productionModule.equals(TestModuleProperties.getInstance(module).getProductionModule())) {
         return module;
       }
     }
+
+    if (computeSuitableTestRootUrls(productionModule).isEmpty()) {
+      final HashSet<Module> modules = new HashSet<>();
+      ModuleUtilCore.collectModulesDependsOn(productionModule, modules);
+      modules.remove(productionModule);
+      List<Module> modulesWithTestRoot = modules.stream()
+        .filter(module -> !computeSuitableTestRootUrls(module).isEmpty())
+        .limit(2)
+        .collect(Collectors.toList());
+      if (modulesWithTestRoot.size() == 1) return modulesWithTestRoot.get(0);
+    }
+
     return productionModule;
   }
 
@@ -189,17 +203,7 @@ public class CreateTestAction extends PsiElementBaseIntentionAction {
 
     @Nullable
   protected static PsiClass getContainingClass(PsiElement element) {
-    final PsiClass psiClass = PsiTreeUtil.getParentOfType(element, PsiClass.class, false);
-    if (psiClass == null) {
-      final PsiFile containingFile = element.getContainingFile();
-      if (containingFile instanceof PsiClassOwner){
-        final PsiClass[] classes = ((PsiClassOwner)containingFile).getClasses();
-        if (classes.length == 1) {
-          return classes[0];
-        }
-      }
-    }
-    return psiClass;
+    return TestIntegrationUtils.findOuterClass(element);
   }
 
   @Override

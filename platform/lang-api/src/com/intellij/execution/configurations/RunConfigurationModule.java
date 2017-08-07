@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,13 +17,12 @@
 package com.intellij.execution.configurations;
 
 import com.intellij.execution.ExecutionBundle;
-import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.roots.ModuleRootManager;
-import com.intellij.openapi.util.Computable;
+import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.JDOMExternalizable;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.util.xmlb.annotations.Attribute;
@@ -55,7 +54,6 @@ public class RunConfigurationModule implements JDOMExternalizable {
   }
 
   @Override
-  @SuppressWarnings({"unchecked"})
   public void readExternal(@NotNull Element element) {
     List<Element> modules = element.getChildren(ELEMENT);
     if (!modules.isEmpty()) {
@@ -97,7 +95,8 @@ public class RunConfigurationModule implements JDOMExternalizable {
   @Nullable
   @Transient
   public Module getModule() {
-    if (myModuleName != null) { //caching
+    //caching
+    if (myModuleName != null) {
       myModule = findModule(myModuleName);
     }
     if (myModule != null && myModule.isDisposed()) {
@@ -107,18 +106,11 @@ public class RunConfigurationModule implements JDOMExternalizable {
   }
 
   @Nullable
-  public Module findModule(final String moduleName) {
+  public Module findModule(@NotNull String moduleName) {
     if (myProject.isDisposed()) {
       return null;
     }
-
-    return ApplicationManager.getApplication().runReadAction(new Computable<Module>() {
-      @Nullable
-      @Override
-      public Module compute() {
-        return getModuleManager().findModuleByName(moduleName);
-      }
-    });
+    return getModuleManager().findModuleByName(moduleName);
   }
 
   public void setModule(final Module module) {
@@ -126,6 +118,14 @@ public class RunConfigurationModule implements JDOMExternalizable {
     myModuleName = module != null ? module.getName() : null;
   }
 
+  public void setModuleName(@Nullable String moduleName) {
+    if (!Comparing.equal(myModuleName, moduleName)) {
+      myModuleName = moduleName;
+      myModule = null;
+    }
+  }
+
+  @NotNull
   public String getModuleName() {
     return StringUtil.notNullize(myModuleName);
   }
@@ -143,7 +143,9 @@ public class RunConfigurationModule implements JDOMExternalizable {
     }
     else {
       if (myModuleName != null) {
-        //noinspection SpellCheckingInspection
+        if (ModuleManager.getInstance(myProject).getUnloadedModuleDescription(myModuleName) != null) {
+          throw new RuntimeConfigurationError(ExecutionBundle.message("module.is.unloaded.from.project.error.text", myModuleName));
+        }
         throw new RuntimeConfigurationError(ExecutionBundle.message("module.doesn.t.exist.in.project.error.text", myModuleName));
       }
       throw new RuntimeConfigurationError(ExecutionBundle.message("module.not.specified.error.text"));

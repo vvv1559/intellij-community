@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -31,12 +31,11 @@ import java.io.*;
  * @author Eugene Zhuravlev
  *         Date: Feb 12, 2008
  */
-public class ID<K, V> {
+public class ID<K, V> extends IndexId<K,V> {
   private static final ConcurrentIntObjectMap<ID> ourRegistry = ContainerUtil.createConcurrentIntObjectMap();
   private static final TObjectIntHashMap<String> ourNameToIdRegistry = new TObjectIntHashMap<String>();
   static final int MAX_NUMBER_OF_INDICES = Short.MAX_VALUE;
 
-  private final String myName;
   private final short myUniqueId;
 
   static {
@@ -83,11 +82,11 @@ public class ID<K, V> {
   }
 
   protected ID(String name) {
-    myName = name;
+    super(name);
     myUniqueId = stringToId(name);
 
     final ID old = ourRegistry.put(myUniqueId, this);
-    assert old == null;
+    assert old == null : "ID with name '" + name + "' is already registered";
   }
 
   private static short stringToId(String name) {
@@ -140,6 +139,7 @@ public class ID<K, V> {
     }
   }
 
+  @NotNull
   public static <K, V> ID<K, V> create(@NonNls @NotNull String name) {
     final ID<K, V> found = findByName(name);
     return found != null ? found : new ID<K, V>(name);
@@ -154,8 +154,11 @@ public class ID<K, V> {
     return (int)myUniqueId;
   }
 
+  /**
+   * Consider to use {@link ID#getName()} instead of this method
+   */
   public String toString() {
-    return myName;
+    return getName();
   }
 
   public int getUniqueId() {

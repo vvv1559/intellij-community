@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
  */
 package com.intellij.util.net;
 
+import com.intellij.openapi.Disposable;
 import com.intellij.openapi.application.Application;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ModalityState;
@@ -32,11 +33,9 @@ import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.ui.popup.util.PopupUtil;
 import com.intellij.openapi.util.*;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.openapi.vfs.CharsetToolkit;
 import com.intellij.openapi.vfs.VfsUtil;
 import com.intellij.openapi.wm.IdeFocusManager;
 import com.intellij.openapi.wm.IdeFrame;
-import com.intellij.util.Base64;
 import com.intellij.util.SystemProperties;
 import com.intellij.util.WaitForProgressToShow;
 import com.intellij.util.containers.ContainerUtil;
@@ -61,6 +60,7 @@ import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.net.*;
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -74,7 +74,7 @@ import static com.intellij.openapi.util.Pair.pair;
     @Storage(value = "other.xml", deprecated = true)
   }
 )
-public class HttpConfigurable implements PersistentStateComponent<HttpConfigurable>, ApplicationComponent {
+public class HttpConfigurable implements PersistentStateComponent<HttpConfigurable>, Disposable, ApplicationComponent {
   private static final Logger LOG = Logger.getInstance("#com.intellij.util.net.HttpConfigurable");
   private static final File PROXY_CREDENTIALS_FILE = new File(PathManager.getOptionsPath(), "proxy.settings.pwd");
   public static final int CONNECTION_TIMEOUT = SystemProperties.getIntProperty("idea.connection.timeout", 10000);
@@ -183,16 +183,10 @@ public class HttpConfigurable implements PersistentStateComponent<HttpConfigurab
   }
 
   @Override
-  public void disposeComponent() {
+  public void dispose() {
     final String name = getClass().getName();
     CommonProxy.getInstance().removeCustom(name);
     CommonProxy.getInstance().removeCustomAuth(name);
-  }
-
-  @NotNull
-  @Override
-  public String getComponentName() {
-    return getClass().getName();
   }
 
   private void correctPasswords(@NotNull HttpConfigurable to) {
@@ -269,11 +263,11 @@ public class HttpConfigurable implements PersistentStateComponent<HttpConfigurab
 
 
   private static String decode(String value) {
-    return new String(Base64.decode(value), CharsetToolkit.UTF8_CHARSET);
+    return new String(Base64.getDecoder().decode(value), StandardCharsets.UTF_8);
   }
 
   private static String encode(String password) {
-    return Base64.encode(password.getBytes(CharsetToolkit.UTF8_CHARSET));
+    return Base64.getEncoder().encodeToString(password.getBytes(StandardCharsets.UTF_8));
   }
 
   public PasswordAuthentication getGenericPromptedAuthentication(final String prefix, final String host, final String prompt, final int port, final boolean remember) {
@@ -634,7 +628,12 @@ public class HttpConfigurable implements PersistentStateComponent<HttpConfigurab
     return null;
   }
 
-  private void storeSecure(String key, String value) {
+  private void storeSecure(String key, @Nullable String value) {
+    if (value == null) {
+      removeSecure(key);
+      return;
+    }
+
     try {
       //PasswordSafe.getInstance().storePassword(null, HttpConfigurable.class, key, value);
       synchronized (myProxyCredentials) {

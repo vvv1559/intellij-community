@@ -43,11 +43,6 @@ import java.util.Collections;
 import java.util.Enumeration;
 import java.util.List;
 
-/**
- * User: lex
- * Date: Sep 26, 2003
- * Time: 5:57:58 PM
- */
 public class ThreadsDebuggerTree extends DebuggerTree {
   private static final Logger LOG = Logger.getInstance("#com.intellij.debugger.ui.impl.ThreadsDebuggerTree");
 
@@ -144,7 +139,7 @@ public class ThreadsDebuggerTree extends DebuggerTree {
             root.insert(nodeManager.createNode(nodeManager.getThreadDescriptor(null, currentThread), evaluationContext), 0);
           }
           List<ThreadReferenceProxyImpl> allThreads = new ArrayList<>(vm.allThreads());
-          Collections.sort(allThreads, ThreadReferenceProxyImpl.ourComparator);
+          allThreads.sort(ThreadReferenceProxyImpl.ourComparator);
 
           for (ThreadReferenceProxyImpl threadProxy : allThreads) {
             if (threadProxy.equals(currentThread)) {

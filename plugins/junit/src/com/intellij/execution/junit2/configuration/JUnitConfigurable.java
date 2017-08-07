@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@
 
 package com.intellij.execution.junit2.configuration;
 
-import com.intellij.application.options.ModulesComboBox;
+import com.intellij.application.options.ModuleDescriptionsComboBox;
 import com.intellij.execution.ExecutionBundle;
 import com.intellij.execution.MethodBrowser;
 import com.intellij.execution.configuration.BrowseModuleValueActionListener;
@@ -50,6 +50,7 @@ import com.intellij.psi.*;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.rt.execution.junit.RepeatCount;
 import com.intellij.ui.*;
+import com.intellij.ui.components.ExpandableTextField;
 import com.intellij.ui.components.JBLabel;
 import com.intellij.util.IconUtil;
 import com.intellij.util.ui.UIUtil;
@@ -66,8 +67,6 @@ import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Optional;
-import java.util.concurrent.atomic.AtomicReference;
 
 public class JUnitConfigurable<T extends JUnitConfiguration> extends SettingsEditor<T> implements PanelWithAnchor {
   private static final List<TIntArrayList> ourEnabledFields = Arrays.asList(
@@ -96,7 +95,7 @@ public class JUnitConfigurable<T extends JUnitConfiguration> extends SettingsEdi
   private LabeledComponent<EditorTextFieldWithBrowseButton> myCategory;
   // Fields
   private JPanel myWholePanel;
-  private LabeledComponent<ModulesComboBox> myModule;
+  private LabeledComponent<ModuleDescriptionsComboBox> myModule;
   private CommonJavaParametersPanel myCommonJavaParameters;
   private JRadioButton myWholeProjectScope;
   private JRadioButton mySingleModuleScope;
@@ -220,17 +219,9 @@ public class JUnitConfigurable<T extends JUnitConfiguration> extends SettingsEdi
 
     final JPanel panel = myPattern.getComponent();
     panel.setLayout(new BorderLayout());
-    myPatternTextField = new TextFieldWithBrowseButton();
+    myPatternTextField = new TextFieldWithBrowseButton(new ExpandableTextField());
     myPatternTextField.setButtonIcon(IconUtil.getAddIcon());
     panel.add(myPatternTextField, BorderLayout.CENTER);
-    final FixedSizeButton editBtn = new FixedSizeButton();
-    editBtn.setIcon(AllIcons.Actions.ShowViewer);
-    editBtn.addActionListener(new ActionListener() {
-      public void actionPerformed(ActionEvent e) {
-        Messages.showTextAreaDialog(myPatternTextField.getTextField(), "Configure suite tests", "EditParametersPopupWindow");
-      }
-    });
-    panel.add(editBtn, BorderLayout.EAST);
     myTestLocations[JUnitConfigurationModel.PATTERN] = myPattern;
 
     final FileChooserDescriptor dirFileChooser = FileChooserDescriptorFactory.createSingleFolderDescriptor();
@@ -294,7 +285,14 @@ public class JUnitConfigurable<T extends JUnitConfiguration> extends SettingsEdi
     if (group.getSelection() == null) group.setSelected(radioButtons[0].getModel(), true);
   }
 
-  public void applyEditorTo(final JUnitConfiguration configuration) {
+  public void applyEditorTo(@NotNull final JUnitConfiguration configuration) {
+    configuration.setRepeatMode((String)myRepeatCb.getSelectedItem());
+    try {
+      configuration.setRepeatCount(Integer.parseInt(myRepeatCountField.getText()));
+    }
+    catch (NumberFormatException e) {
+      configuration.setRepeatCount(1);
+    }
     myModel.apply(getModuleSelector().getModule(), configuration);
     configuration.getPersistentData().setChangeList((String)myChangeListLabeledComponent.getComponent().getSelectedItem());
     applyHelpersTo(configuration);
@@ -313,16 +311,9 @@ public class JUnitConfigurable<T extends JUnitConfiguration> extends SettingsEdi
 
     myCommonJavaParameters.applyTo(configuration);
     configuration.setForkMode((String)myForkCb.getSelectedItem());
-    configuration.setRepeatMode((String)myRepeatCb.getSelectedItem());
-    try {
-      configuration.setRepeatCount(Integer.parseInt(myRepeatCountField.getText()));
-    }
-    catch (NumberFormatException e) {
-      configuration.setRepeatCount(1);
-    }
   }
 
-  public void resetEditorFrom(final JUnitConfiguration configuration) {
+  public void resetEditorFrom(@NotNull final JUnitConfiguration configuration) {
     final int count = configuration.getRepeatCount();
     myRepeatCountField.setText(String.valueOf(count));
     myRepeatCountField.setEnabled(count > 1);
@@ -447,7 +438,7 @@ public class JUnitConfigurable<T extends JUnitConfiguration> extends SettingsEdi
     return new DefaultComboBoxModel(RepeatCount.ONCE.equals(myRepeatCb.getSelectedItem()) ? FORK_MODE : FORK_MODE_ALL);
   }
 
-  public ModulesComboBox getModulesComponent() {
+  public ModuleDescriptionsComboBox getModulesComponent() {
     return myModule.getComponent();
   }
 
@@ -664,7 +655,7 @@ public class JUnitConfigurable<T extends JUnitConfiguration> extends SettingsEdi
                                  JUnitConfigurationType.getInstance().getConfigurationFactories()[0]);
         applyEditorTo(configurationCopy);
         classFilter = TestClassFilter
-          .create(configurationCopy.getTestObject().getSourceScope(), configurationCopy.getConfigurationModule().getModule());
+          .create(SourceScope.modulesWithDependencies(configurationCopy.getModules()), configurationCopy.getConfigurationModule().getModule());
       }
       catch (JUnitUtil.NoJUnitException e) {
         throw NoFilterException.noJUnitInModule(module);

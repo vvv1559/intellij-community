@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@ package com.intellij.internal.statistic.updater;
 import com.intellij.concurrency.JobScheduler;
 import com.intellij.ide.FrameStateListener;
 import com.intellij.ide.FrameStateManager;
-import com.intellij.internal.statistic.StatisticsUploadAssistant;
+import com.intellij.internal.statistic.utils.StatisticsUploadAssistant;
 import com.intellij.internal.statistic.connect.StatisticsService;
 import com.intellij.internal.statistic.connect.StatisticsServiceEP;
 import com.intellij.notification.NotificationDisplayType;
@@ -106,15 +106,5 @@ public class SendStatisticsComponent implements ApplicationComponent {
     if (ApplicationManager.getApplication().isUnitTestMode()) return;
 
     runStatisticsService();
-  }
-
-  @Override
-  public void disposeComponent() {
-  }
-
-  @NotNull
-  @Override
-  public String getComponentName() {
-    return SendStatisticsComponent.class.getName();
   }
 }

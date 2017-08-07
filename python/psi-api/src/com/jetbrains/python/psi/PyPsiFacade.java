@@ -20,13 +20,14 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.util.QualifiedName;
-import com.jetbrains.python.psi.resolve.QualifiedNameResolver;
+import com.jetbrains.python.psi.resolve.PyQualifiedNameResolveContext;
 import com.jetbrains.python.psi.types.PyClassType;
 import com.jetbrains.python.psi.types.PyType;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.Collection;
+import java.util.List;
 
 /**
  * @author yole
@@ -36,9 +37,11 @@ public abstract class PyPsiFacade {
     return ServiceManager.getService(project, PyPsiFacade.class);
   }
 
-  public abstract QualifiedNameResolver qualifiedNameResolver(String qNameString);
-  public abstract QualifiedNameResolver qualifiedNameResolver(QualifiedName qualifiedName);
+  @NotNull
+  public abstract List<PsiElement> resolveQualifiedName(@NotNull QualifiedName name, @NotNull PyQualifiedNameResolveContext context);
 
+  @NotNull
+  public abstract PyQualifiedNameResolveContext createResolveContextFromFoothold(@NotNull PsiElement foothold);
   /**
    * @deprecated use {@link #createClassByQName(String, PsiElement)} or skeleton may be found
    */
@@ -53,7 +56,7 @@ public abstract class PyPsiFacade {
   public abstract PyType createUnionType(@NotNull Collection<PyType> members);
 
   @Nullable
-  public abstract PyType createTupleType(@NotNull Collection<PyType> members, @NotNull PsiElement anchor);
+  public abstract PyType createTupleType(@NotNull List<PyType> members, @NotNull PsiElement anchor);
 
   @Nullable
   public abstract PyType parseTypeAnnotation(@NotNull String annotation, @NotNull PsiElement anchor);

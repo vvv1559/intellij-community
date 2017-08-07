@@ -81,25 +81,20 @@ public class ClassUtil {
 
   private static int getNonQualifiedClassIdx(@NotNull final PsiClass psiClass, @NotNull final PsiClass containingClass) {
     TObjectIntHashMap<PsiClass> indices =
-      CachedValuesManager.getCachedValue(containingClass, new CachedValueProvider<TObjectIntHashMap<PsiClass>>() {
-        @Nullable
-        @Override
-        public Result<TObjectIntHashMap<PsiClass>> compute() {
-          final TObjectIntHashMap<PsiClass> map = new TObjectIntHashMap<PsiClass>();
-          int index = 0;
-          for (PsiClass aClass : SyntaxTraverser.psiTraverser().withRoot(containingClass).postOrderDfsTraversal().filter(PsiClass.class)) {
-            if (aClass.getQualifiedName() == null) {
-              map.put(aClass, ++index);
-            }
+      CachedValuesManager.getCachedValue(containingClass, () -> {
+        final TObjectIntHashMap<PsiClass> map = new TObjectIntHashMap<>();
+        int index = 0;
+        for (PsiClass aClass : SyntaxTraverser.psiTraverser().withRoot(containingClass).postOrderDfsTraversal().filter(PsiClass.class)) {
+          if (aClass.getQualifiedName() == null) {
+            map.put(aClass, ++index);
           }
-          return Result.create(map, containingClass);
         }
+        return CachedValueProvider.Result.create(map, containingClass);
       });
 
     return indices.get(psiClass);
   }
 
-  @SuppressWarnings("unused")
   public static PsiClass findNonQualifiedClassByIndex(@NotNull String indexName, @NotNull PsiClass containingClass) {
     return findNonQualifiedClassByIndex(indexName, containingClass, false);
   }

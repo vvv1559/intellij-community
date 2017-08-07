@@ -37,13 +37,6 @@ public class GroovySynchronizationOnNonFinalFieldInspection extends BaseInspecti
   @Override
   @Nls
   @NotNull
-  public String getGroupDisplayName() {
-    return THREADING_ISSUES;
-  }
-
-  @Override
-  @Nls
-  @NotNull
   public String getDisplayName() {
     return "Synchronization on non-final field";
   }
@@ -63,7 +56,7 @@ public class GroovySynchronizationOnNonFinalFieldInspection extends BaseInspecti
 
   private static class Visitor extends BaseInspectionVisitor {
     @Override
-    public void visitSynchronizedStatement(GrSynchronizedStatement synchronizedStatement) {
+    public void visitSynchronizedStatement(@NotNull GrSynchronizedStatement synchronizedStatement) {
       super.visitSynchronizedStatement(synchronizedStatement);
       final GrExpression lock = synchronizedStatement.getMonitor();
       if (lock == null || !(lock instanceof GrReferenceExpression)) {

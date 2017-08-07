@@ -24,6 +24,7 @@ import com.intellij.openapi.roots.ModuleRootManager;
 import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.util.Consumer;
 import com.intellij.util.PathMapper;
 import com.jetbrains.python.buildout.BuildoutFacet;
 import com.jetbrains.python.run.PythonCommandLineState;
@@ -40,8 +41,9 @@ import java.util.Map;
  */
 public class PydevConsoleRunnerFactory extends PythonConsoleRunnerFactory {
   @Override
+  @NotNull
   public PydevConsoleRunner createConsoleRunner(@NotNull Project project,
-                                                @Nullable Module contextModule) {
+                                                    @Nullable Module contextModule) {
     Pair<Sdk, Module> sdkAndModule = PydevConsoleRunner.findPythonSdkAndModule(project, contextModule);
 
     Module module = sdkAndModule.second;
@@ -68,8 +70,6 @@ public class PydevConsoleRunnerFactory extends PythonConsoleRunnerFactory {
       customStartScript = "\n" + customStartScript;
     }
 
-    String selfPathAppend = PydevConsoleRunner.constructPythonPathCommand(pythonPath, customStartScript);
-
     String workingDir = settingsProvider.getWorkingDirectory();
     if (StringUtil.isEmpty(workingDir)) {
       if (module != null && ModuleRootManager.getInstance(module).getContentRoots().length > 0) {
@@ -88,6 +88,8 @@ public class PydevConsoleRunnerFactory extends PythonConsoleRunnerFactory {
     if (pathMapper != null && workingDir != null) {
       workingDir = pathMapper.convertToRemote(workingDir);
     }
+
+    String selfPathAppend = PydevConsoleRunner.constructPyPathAndWorkingDirCommand(pythonPath, workingDir, customStartScript);
 
     BuildoutFacet facet = null;
     if (module != null) {
@@ -108,8 +110,15 @@ public class PydevConsoleRunnerFactory extends PythonConsoleRunnerFactory {
 
     Map<String, String> envs = Maps.newHashMap(settingsProvider.getEnvs());
     putIPythonEnvFlag(project, envs);
-    
-    return createConsoleRunner(project, sdk, workingDir, envs, PyConsoleType.PYTHON, settingsProvider, setupFragment);
+
+    Consumer<String> rerunAction = title -> {
+      PydevConsoleRunner runner = createConsoleRunner(project, module);
+      if(runner instanceof PydevConsoleRunnerImpl)
+        ((PydevConsoleRunnerImpl)runner).setConsoleTitle(title);
+      runner.run();
+    };
+
+    return createConsoleRunner(project, sdk, workingDir, envs, PyConsoleType.PYTHON, settingsProvider, rerunAction, setupFragment);
   }
 
   public static void putIPythonEnvFlag(@NotNull Project project, Map<String, String> envs) {
@@ -117,13 +126,14 @@ public class PydevConsoleRunnerFactory extends PythonConsoleRunnerFactory {
     envs.put(PythonEnvUtil.IPYTHONENABLE, ipythonEnabled);
   }
 
+  @NotNull
   protected PydevConsoleRunner createConsoleRunner(Project project,
-                                                   Sdk sdk,
-                                                   String workingDir,
-                                                   Map<String, String> envs,
-                                                   PyConsoleType consoleType,
-                                                   PyConsoleOptions.PyConsoleSettings settingsProvider,
-                                                   String... setupFragment) {
-    return new PydevConsoleRunner(project, sdk, consoleType, workingDir, envs, settingsProvider, setupFragment);
+                                                       Sdk sdk,
+                                                       String workingDir,
+                                                       Map<String, String> envs,
+                                                       PyConsoleType consoleType,
+                                                       PyConsoleOptions.PyConsoleSettings settingsProvider,
+                                                       Consumer<String> rerunAction, String... setupFragment) {
+    return new PydevConsoleRunnerImpl(project, sdk, consoleType, workingDir, envs, settingsProvider, rerunAction, setupFragment);
   }
 }

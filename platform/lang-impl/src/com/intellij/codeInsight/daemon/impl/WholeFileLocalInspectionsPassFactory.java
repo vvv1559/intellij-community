@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,7 +21,9 @@ import com.intellij.codeHighlighting.TextEditorHighlightingPass;
 import com.intellij.codeHighlighting.TextEditorHighlightingPassFactory;
 import com.intellij.codeHighlighting.TextEditorHighlightingPassRegistrar;
 import com.intellij.codeInsight.daemon.DaemonBundle;
+import com.intellij.codeInsight.daemon.ProblemHighlightFilter;
 import com.intellij.codeInspection.InspectionManager;
+import com.intellij.codeInspection.InspectionProfile;
 import com.intellij.codeInspection.ex.InspectionProfileWrapper;
 import com.intellij.codeInspection.ex.LocalInspectionToolWrapper;
 import com.intellij.openapi.components.AbstractProjectComponent;
@@ -29,9 +31,9 @@ import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Disposer;
-import com.intellij.profile.Profile;
+import com.intellij.openapi.util.ProperTextRange;
 import com.intellij.profile.ProfileChangeAdapter;
-import com.intellij.profile.codeInspection.InspectionProjectProfileManager;
+import com.intellij.profile.codeInspection.ProjectInspectionProfileManager;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiManager;
@@ -49,11 +51,10 @@ import java.util.stream.Collectors;
 */
 public class WholeFileLocalInspectionsPassFactory extends AbstractProjectComponent implements TextEditorHighlightingPassFactory {
   private final Map<PsiFile, Boolean> myFileToolsCache = ContainerUtil.createConcurrentWeakMap();
-  private final InspectionProjectProfileManager myProfileManager;
-  private volatile long myPsiModificationCount;
+  private final ProjectInspectionProfileManager myProfileManager;
+  private final Map<PsiFile, Long> myPsiModificationCount = ContainerUtil.createConcurrentWeakMap();
 
-  public WholeFileLocalInspectionsPassFactory(Project project, TextEditorHighlightingPassRegistrar highlightingPassRegistrar,
-                                              final InspectionProjectProfileManager profileManager) {
+  public WholeFileLocalInspectionsPassFactory(Project project, TextEditorHighlightingPassRegistrar highlightingPassRegistrar, ProjectInspectionProfileManager profileManager) {
     super(project);
     // can run in the same time with LIP, but should start after it, since I believe whole-file inspections would run longer
     highlightingPassRegistrar.registerTextEditorHighlightingPass(this, null, new int[]{Pass.LOCAL_INSPECTIONS}, true, Pass.WHOLE_FILE_LOCAL_INSPECTIONS);
@@ -69,34 +70,38 @@ public class WholeFileLocalInspectionsPassFactory extends AbstractProjectCompone
 
   @Override
   public void projectOpened() {
-    final ProfileChangeAdapter myProfilesListener = new ProfileChangeAdapter() {
+    myProfileManager.addProfileChangeListener(new ProfileChangeAdapter() {
       @Override
-      public void profileChanged(Profile profile) {
+      public void profileChanged(InspectionProfile profile) {
         myFileToolsCache.clear();
       }
 
       @Override
-      public void profileActivated(Profile oldProfile, @Nullable Profile profile) {
+      public void profileActivated(InspectionProfile oldProfile, @Nullable InspectionProfile profile) {
         myFileToolsCache.clear();
       }
-    };
-    myProfileManager.addProfileChangeListener(myProfilesListener, myProject);
+    }, myProject);
     Disposer.register(myProject, myFileToolsCache::clear);
   }
 
   @Override
   @Nullable
   public TextEditorHighlightingPass createHighlightingPass(@NotNull final PsiFile file, @NotNull final Editor editor) {
-    final long psiModificationCount = PsiManager.getInstance(myProject).getModificationTracker().getModificationCount();
-    if (psiModificationCount == myPsiModificationCount) {
+    final Long appliedModificationCount = myPsiModificationCount.get(file);
+    if (appliedModificationCount != null &&
+        appliedModificationCount == PsiManager.getInstance(myProject).getModificationTracker().getModificationCount()) {
       return null; //optimization
     }
+
+     if (!ProblemHighlightFilter.shouldHighlightFile(file)) {
+      return null;
+     }
 
     if (myFileToolsCache.containsKey(file) && !myFileToolsCache.get(file)) {
       return null;
     }
-
-    return new LocalInspectionsPass(file, editor.getDocument(), 0, file.getTextLength(), LocalInspectionsPass.EMPTY_PRIORITY_RANGE, true,
+    ProperTextRange visibleRange = VisibleHighlightingPassFactory.calculateVisibleRange(editor);
+    return new LocalInspectionsPass(file, editor.getDocument(), 0, file.getTextLength(), visibleRange, true,
                                     new DefaultHighlightInfoProcessor()) {
       @NotNull
       @Override
@@ -125,7 +130,7 @@ public class WholeFileLocalInspectionsPassFactory extends AbstractProjectCompone
       @Override
       protected void applyInformationWithProgress() {
         super.applyInformationWithProgress();
-        myPsiModificationCount = PsiManager.getInstance(myProject).getModificationTracker().getModificationCount();
+        myPsiModificationCount.put(file, PsiManager.getInstance(myProject).getModificationTracker().getModificationCount());
       }
     };
   }

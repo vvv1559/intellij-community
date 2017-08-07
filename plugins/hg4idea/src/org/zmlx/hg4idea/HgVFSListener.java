@@ -28,21 +28,22 @@ import com.intellij.openapi.vcs.changes.ChangeListManagerImpl;
 import com.intellij.openapi.vcs.changes.VcsDirtyScopeManager;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.ui.AppUIUtil;
-import com.intellij.util.Function;
+import com.intellij.util.ObjectUtils;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.ui.UIUtil;
 import com.intellij.util.ui.VcsBackgroundTask;
 import com.intellij.vcsUtil.VcsUtil;
 import org.jetbrains.annotations.NotNull;
 import org.zmlx.hg4idea.command.*;
+import org.zmlx.hg4idea.provider.HgLocalIgnoredHolder;
 import org.zmlx.hg4idea.util.HgUtil;
 
 import java.util.*;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Collectors;
 
 /**
  * Listens to VFS events (such as adding or deleting bunch of files) and performs necessary operations with the VCS.
- * @author Kirill Likhodedov
  */
 public class HgVFSListener extends VcsVFSListener {
 
@@ -100,33 +101,30 @@ public class HgVFSListener extends VcsVFSListener {
           final Collection<VirtualFile> files = e.getValue();
           pi.setText(repo.getPresentableUrl());
           try {
-            untrackedFiles
-              .addAll(new HgStatusCommand.Builder(false).unknown(true).removed(true).build(myProject)
-                        .getHgUntrackedFiles(repo, new ArrayList<>(files)));
+            Collection<VirtualFile> untrackedForRepo = new HgStatusCommand.Builder(false).unknown(true).removed(true).build(myProject)
+              .getFiles(repo, new ArrayList<>(files));
+            untrackedFiles.addAll(untrackedForRepo);
+            List<VirtualFile> ignoredForRepo = files.stream().filter(file -> !untrackedForRepo.contains(file)).collect(Collectors.toList());
+            getIgnoreRepoHolder(repo).addFiles(ignoredForRepo);
           }
           catch (final VcsException ex) {
-            UIUtil.invokeLaterIfNeeded(new Runnable() {
-              public void run() {
-                ((HgVcs)myVcs).showMessageInConsole(ex.getMessage(), ConsoleViewContentType.ERROR_OUTPUT);
-              }
-            });
+            UIUtil.invokeLaterIfNeeded(() -> ((HgVcs)myVcs).showMessageInConsole(ex.getMessage(), ConsoleViewContentType.ERROR_OUTPUT));
           }
         }
         addedFiles.retainAll(untrackedFiles);
         // select files to add if there is something to select
         if (!addedFiles.isEmpty() || !copyFromMap.isEmpty()) {
 
-          AppUIUtil.invokeLaterIfProjectAlive(myProject, new Runnable() {
-            @Override
-            public void run() {
-              originalExecuteAdd(addedFiles, copyFromMap);
-            }
-          });
+          AppUIUtil.invokeLaterIfProjectAlive(myProject, () -> originalExecuteAdd(addedFiles, copyFromMap));
         }
       }
     }.queue();
   }
 
+  @NotNull
+  HgLocalIgnoredHolder getIgnoreRepoHolder(@NotNull VirtualFile repoRoot) {
+    return ObjectUtils.assertNotNull(HgUtil.getRepositoryManager(myProject).getRepositoryForRootQuick(repoRoot)).getLocalIgnoredHolder();
+  }
   /**
    * The version of execute add before overriding
    *
@@ -153,12 +151,8 @@ public class HgVFSListener extends VcsVFSListener {
         HgStatusCommand statusCommand = new HgStatusCommand.Builder(false).unknown(true).ignored(true).build(myProject);
         for (Map.Entry<VirtualFile, Collection<VirtualFile>> entry : sortedSourceFilesByRepos.entrySet()) {
           Set<HgChange> changes =
-            statusCommand.executeInCurrentThread(entry.getKey(), ContainerUtil.map(entry.getValue(), new Function<VirtualFile, FilePath>() {
-              @Override
-              public FilePath fun(VirtualFile virtualFile) {
-                return VcsUtil.getFilePath(virtualFile);
-              }
-            }));
+            statusCommand.executeInCurrentThread(entry.getKey(), ContainerUtil.map(entry.getValue(),
+                                                                                   virtualFile -> VcsUtil.getFilePath(virtualFile)));
           for (HgChange change : changes) {
             unversionedAndIgnoredFiles.add(change.afterFile().toFilePath().getVirtualFile());
           }
@@ -230,6 +224,9 @@ public class HgVFSListener extends VcsVFSListener {
     skipNotUnderHg(filesToDelete);
     skipNotUnderHg(filesToConfirmDeletion);
 
+    filesToDelete.removeAll(processAndGetVcsIgnored(filesToDelete));
+    filesToConfirmDeletion.removeAll(processAndGetVcsIgnored(filesToConfirmDeletion));
+
     // newly added files (which were added to the repo but never committed) should be removed from the VCS,
     // but without user confirmation.
     for (Iterator<FilePath> it = filesToConfirmDeletion.iterator(); it.hasNext(); ) {
@@ -253,11 +250,7 @@ public class HgVFSListener extends VcsVFSListener {
           }
           else {
             final AtomicReference<Collection<FilePath>> filePaths = new AtomicReference<>();
-            ApplicationManager.getApplication().invokeAndWait(new Runnable() {
-                @Override public void run() {
-                  filePaths.set(selectFilePathsToDelete(filesToConfirmDeletion));
-                }
-              }, indicator.getModalityState());
+            ApplicationManager.getApplication().invokeAndWait(() -> filePaths.set(selectFilePathsToDelete(filesToConfirmDeletion)));
             if (filePaths.get() != null) {
               filesToDelete.addAll(filePaths.get());
             }
@@ -269,6 +262,14 @@ public class HgVFSListener extends VcsVFSListener {
         }
       }
     }.queue();
+  }
+
+  @NotNull
+  private List<FilePath> processAndGetVcsIgnored(@NotNull List<FilePath> filePaths) {
+    Map<VirtualFile, Collection<FilePath>> groupFilePathsByHgRoots = HgUtil.groupFilePathsByHgRoots(myProject, filePaths);
+    return groupFilePathsByHgRoots.entrySet().stream()
+      .map(entry -> getIgnoreRepoHolder(entry.getKey()).removeIgnoredFiles(entry.getValue()))
+      .flatMap(List::stream).collect(Collectors.toList());
   }
 
   /**

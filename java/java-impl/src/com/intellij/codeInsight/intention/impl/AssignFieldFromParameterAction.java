@@ -16,7 +16,6 @@
 package com.intellij.codeInsight.intention.impl;
 
 import com.intellij.codeInsight.CodeInsightBundle;
-import com.intellij.codeInsight.FileModificationService;
 import com.intellij.lang.java.JavaLanguage;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Editor;
@@ -47,8 +46,26 @@ public class AssignFieldFromParameterAction extends BaseIntentionAction {
       return false;
     }
     final PsiField field = findFieldToAssign(project, myParameter);
-    if (field == null) return false;
+    if (field == null || type == null || !field.getType().isAssignableFrom(type)) return false;
     if (!field.getLanguage().isKindOf(JavaLanguage.INSTANCE)) return false;
+    PsiElement scope = myParameter.getDeclarationScope();
+    if (scope instanceof PsiMethod && field.hasModifierProperty(PsiModifier.FINAL)) {
+      if (((PsiMethod)scope).isConstructor()) {
+        PsiCodeBlock body = ((PsiMethod)scope).getBody();
+        LOG.assertTrue(body != null);
+        PsiStatement[] statements = body.getStatements();
+        if (statements.length > 0 && statements[0] instanceof PsiExpressionStatement) {
+          PsiExpression expression = ((PsiExpressionStatement)statements[0]).getExpression();
+          if (expression instanceof PsiMethodCallExpression && 
+              PsiKeyword.THIS.equals(((PsiMethodCallExpression)expression).getMethodExpression().getReferenceName())) {
+            return false;
+          }
+        }
+      }
+      else {
+        return false;
+      }
+    }
     setText(CodeInsightBundle.message("intention.assign.field.from.parameter.text", field.getName()));
 
     return true;
@@ -63,16 +80,9 @@ public class AssignFieldFromParameterAction extends BaseIntentionAction {
   @Override
   public void invoke(@NotNull Project project, Editor editor, PsiFile file) {
     final PsiParameter myParameter = FieldFromParameterUtils.findParameterAtCursor(file, editor);
-    if (!FileModificationService.getInstance().prepareFileForWrite(myParameter.getContainingFile())) return;
-
     IdeDocumentHistory.getInstance(project).includeCurrentPlaceAsChangePlace();
-    try {
-      PsiField field = findFieldToAssign(project, myParameter);
-      if (field != null) addFieldAssignmentStatement(project, field, myParameter, editor);
-    }
-    catch (IncorrectOperationException e) {
-      LOG.error(e);
-    }
+    PsiField field = findFieldToAssign(project, myParameter);
+    if (field != null) addFieldAssignmentStatement(project, field, myParameter, editor);
   }
 
   @Nullable

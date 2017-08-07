@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,6 +25,7 @@ import com.intellij.psi.PsiElementFactory;
 import com.intellij.psi.PsiResolveHelper;
 import com.intellij.psi.codeStyle.JavaCodeStyleManager;
 import com.intellij.psi.codeStyle.JavaCodeStyleSettingsFacade;
+import com.intellij.psi.controlFlow.ControlFlowFactory;
 import com.intellij.psi.impl.JavaPsiFacadeImpl;
 import com.intellij.psi.impl.JavaPsiImplementationHelper;
 import com.intellij.psi.impl.PsiElementFactoryImpl;
@@ -35,7 +36,11 @@ import org.jetbrains.annotations.NotNull;
 
 import java.io.File;
 
-public class JavaCoreProjectEnvironment  extends  CoreProjectEnvironment {
+/**
+ * Used in Kotlin.
+ */
+@SuppressWarnings("unused")
+public class JavaCoreProjectEnvironment extends CoreProjectEnvironment {
   private final JavaFileManager myFileManager;
   private final PackageIndex myPackageIndex;
 
@@ -49,6 +54,7 @@ public class JavaCoreProjectEnvironment  extends  CoreProjectEnvironment {
     myProject.registerService(JavaResolveCache.class, new JavaResolveCache(myMessageBus));
     myProject.registerService(JavaCodeStyleSettingsFacade.class, new CoreJavaCodeStyleSettingsFacade());
     myProject.registerService(JavaCodeStyleManager.class, new CoreJavaCodeStyleManager());
+    myProject.registerService(ControlFlowFactory.class, new ControlFlowFactory(myPsiManager));
 
     myPackageIndex = createCorePackageIndex();
     myProject.registerService(PackageIndex.class, myPackageIndex);
@@ -56,6 +62,10 @@ public class JavaCoreProjectEnvironment  extends  CoreProjectEnvironment {
     myFileManager = createCoreFileManager();
     myProject.registerService(JavaFileManager.class, myFileManager);
 
+    registerJavaPsiFacade();
+  }
+
+  protected void registerJavaPsiFacade() {
     JavaPsiFacadeImpl javaPsiFacade = new JavaPsiFacadeImpl(myProject, myPsiManager, myFileManager, myMessageBus);
     myProject.registerService(JavaPsiFacade.class, javaPsiFacade);
   }
@@ -72,8 +82,7 @@ public class JavaCoreProjectEnvironment  extends  CoreProjectEnvironment {
     return new CorePackageIndex();
   }
 
-  @SuppressWarnings("UnusedDeclaration")
-  public void addJarToClassPath (File path) {
+  public void addJarToClassPath(File path) {
     assert path.isFile();
 
     final VirtualFile root = getEnvironment().getJarFileSystem().findFileByPath(path + "!/");

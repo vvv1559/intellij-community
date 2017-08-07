@@ -31,10 +31,13 @@ import com.intellij.openapi.util.IconLoader;
 import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.wm.IdeFocusManager;
+import com.intellij.openapi.wm.IdeFrame;
+import com.intellij.openapi.wm.WindowManager;
 import com.intellij.ui.ColorUtil;
 import com.intellij.ui.Gray;
 import com.intellij.ui.JBColor;
 import com.intellij.ui.UserActivityProviderComponent;
+import com.intellij.util.ui.GraphicsUtil;
 import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.MouseEventAdapter;
 import com.intellij.util.ui.UIUtil;
@@ -48,8 +51,20 @@ import java.beans.PropertyChangeEvent;
 import java.beans.PropertyChangeListener;
 
 public abstract class ComboBoxAction extends AnAction implements CustomComponentAction {
-  private static final Icon ARROW_ICON = UIUtil.isUnderDarcula() ? AllIcons.General.ComboArrow : AllIcons.General.ComboBoxButtonArrow;
-  private static final Icon DISABLED_ARROW_ICON = IconLoader.getDisabledIcon(ARROW_ICON);
+  private static Icon myIcon = null;
+  private static Icon myDisabledIcon = null;
+
+  public static Icon getArrowIcon(boolean enabled) {
+    if (UIUtil.isUnderWin10LookAndFeel()) {
+      return IconLoader.getIcon("/com/intellij/ide/ui/laf/icons/win10/comboDropTriangle.png");
+    }
+    Icon icon = UIUtil.isUnderDarcula() ? AllIcons.General.ComboArrow : AllIcons.General.ComboBoxButtonArrow;
+    if (myIcon != icon) {
+      myIcon = icon;
+      myDisabledIcon = IconLoader.getDisabledIcon(myIcon);
+    }
+    return enabled ? myIcon : myDisabledIcon;
+  }
 
   private boolean mySmallVariant = true;
   private String myPopupTitle;
@@ -59,30 +74,23 @@ public abstract class ComboBoxAction extends AnAction implements CustomComponent
 
   @Override
   public void actionPerformed(AnActionEvent e) {
-    JComponent button = (JComponent)e.getPresentation().getClientProperty(CUSTOM_COMPONENT_PROPERTY);
-    if (button == null) {
-      Component contextComponent = e.getData(PlatformDataKeys.CONTEXT_COMPONENT);
-      JRootPane rootPane = UIUtil.getParentOfType(JRootPane.class, contextComponent);
-      if (rootPane != null) {
-        button = (ComboBoxButton)
-          UIUtil.uiTraverser(rootPane).bfsTraversal().filter(
-            component -> component instanceof ComboBoxButton && ((ComboBoxButton)component).getMyAction() == this).first();
-      }
-      if (button == null) return;
-    }
-    if (!button.isShowing()) return;
-    if (button instanceof ComboBoxButton) {
-      ((ComboBoxButton)button).showPopup();
-    } else {
-      DataContext context = e.getDataContext();
-      Project project = e.getProject();
-      if (project == null) return;
-      DefaultActionGroup group = createPopupActionGroup(button);
-      ListPopup popup = JBPopupFactory.getInstance().createActionGroupPopup(
-        myPopupTitle, group, context, false, shouldShowDisabledActions(), false, null, getMaxRows(), getPreselectCondition());
-      popup.setMinimumSize(new Dimension(getMinWidth(), getMinHeight()));
-      popup.showCenteredInCurrentWindow(project);
-    }
+    Project project = e.getProject();
+    if (project == null) return;
+
+    JFrame frame = WindowManager.getInstance().getFrame(project);
+    if (!(frame instanceof IdeFrame)) return;
+
+    ListPopup popup = createActionPopup(e.getDataContext(), ((IdeFrame)frame).getComponent(), null);
+    popup.showCenteredInCurrentWindow(project);
+  }
+
+  @NotNull
+  private ListPopup createActionPopup(@NotNull DataContext context, @NotNull JComponent component, @Nullable Runnable disposeCallback) {
+    DefaultActionGroup group = createPopupActionGroup(component, context);
+    ListPopup popup = JBPopupFactory.getInstance().createActionGroupPopup(
+      myPopupTitle, group, context, false, shouldShowDisabledActions(), false, disposeCallback, getMaxRows(), getPreselectCondition());
+    popup.setMinimumSize(new Dimension(getMinWidth(), getMinHeight()));
+    return popup;
   }
 
   @Override
@@ -121,6 +129,11 @@ public abstract class ComboBoxAction extends AnAction implements CustomComponent
   @NotNull
   protected abstract DefaultActionGroup createPopupActionGroup(JComponent button);
 
+  @NotNull
+  protected DefaultActionGroup createPopupActionGroup(JComponent button, @NotNull  DataContext dataContext) {
+    return createPopupActionGroup(button);
+  }
+
   protected int getMaxRows() {
     return 30;
   }
@@ -148,9 +161,7 @@ public abstract class ComboBoxAction extends AnAction implements CustomComponent
       setVisible(presentation.isVisible());
       setHorizontalAlignment(LEFT);
       setFocusable(false);
-      if (isSmallVariant()) {
-        putClientProperty("styleCombo", Boolean.TRUE);
-      }
+      putClientProperty("styleCombo", Boolean.TRUE);
       Insets margins = getMargin();
       setMargin(JBUI.insets(margins.top, 2, margins.bottom, 2));
       if (isSmallVariant()) {
@@ -247,6 +258,7 @@ public abstract class ComboBoxAction extends AnAction implements CustomComponent
         ApplicationManager.getApplication().invokeLater(() -> {
           myForcePressed = false;
           myPopup = null;
+          repaint();
         }, ModalityState.any());
         repaint();
         fireStateChanged();
@@ -264,13 +276,7 @@ public abstract class ComboBoxAction extends AnAction implements CustomComponent
     }
 
     protected JBPopup createPopup(Runnable onDispose) {
-      DefaultActionGroup group = createPopupActionGroup(this);
-
-      DataContext context = getDataContext();
-      ListPopup popup = JBPopupFactory.getInstance().createActionGroupPopup(
-        myPopupTitle, group, context, false, shouldShowDisabledActions(), false, onDispose, getMaxRows(), getPreselectCondition());
-      popup.setMinimumSize(new Dimension(getMinWidth(), getMinHeight()));
-      return popup;
+      return createActionPopup(getDataContext(), this, onDispose);
     }
 
     private ComboBoxAction getMyAction() {
@@ -357,14 +363,14 @@ public abstract class ComboBoxAction extends AnAction implements CustomComponent
     @Override
     public Insets getInsets() {
       final Insets insets = super.getInsets();
-      return new Insets(insets.top, insets.left, insets.bottom, insets.right + ARROW_ICON.getIconWidth());
+      insets.right += getArrowIcon(isEnabled()).getIconWidth();
+      return insets;
     }
 
     @Override
     public Insets getInsets(Insets insets) {
       final Insets result = super.getInsets(insets);
-      result.right += ARROW_ICON.getIconWidth();
-
+      result.right += getArrowIcon(isEnabled()).getIconWidth();
       return result;
     }
 
@@ -376,9 +382,16 @@ public abstract class ComboBoxAction extends AnAction implements CustomComponent
     @Override
     public Dimension getPreferredSize() {
       final boolean isEmpty = getIcon() == null && StringUtil.isEmpty(getText());
-      int width = isEmpty ? JBUI.scale(10) + ARROW_ICON.getIconWidth() : super.getPreferredSize().width;
-      if (isSmallVariant() && !(SystemInfo.isMac && UIUtil.isUnderIntelliJLaF())) width += JBUI.scale(4);
-      return new Dimension(width, isSmallVariant() ? JBUI.scale(19) : super.getPreferredSize().height);
+      int width = isEmpty ? JBUI.scale(10) + getArrowIcon(isEnabled()).getIconWidth() : super.getPreferredSize().width;
+      if (isSmallVariant() && !UIUtil.isUnderDefaultMacTheme()) {
+        width += JBUI.scale(4);
+        if (UIUtil.isUnderWin10LookAndFeel()) {
+          width += JBUI.scale(8);
+        }
+      }
+
+      int height = UIUtil.isUnderWin10LookAndFeel() ? JBUI.scale(24) : JBUI.scale(19);
+      return new Dimension(width, isSmallVariant() ? height : super.getPreferredSize().height);
     }
 
     @Override
@@ -393,17 +406,18 @@ public abstract class ComboBoxAction extends AnAction implements CustomComponent
 
     @Override
     public void paint(Graphics g) {
-      final boolean isEmpty = getIcon() == null && StringUtil.isEmpty(getText());
-      final Dimension size = getSize();
+      Dimension size = getSize();
 
-      if (SystemInfo.isMac && UIUtil.isUnderIntelliJLaF()) {
+      if (UIUtil.isUnderDefaultMacTheme() || UIUtil.isUnderWin10LookAndFeel()) {
         super.paint(g);
       } else {
         UISettings.setupAntialiasing(g);
+        GraphicsUtil.setupRoundedBorderAntialiasing(g);
 
         final Color textColor = isEnabled()
                                 ? UIManager.getColor("Panel.foreground")
                                 : UIUtil.getInactiveTextColor();
+
         if (myForceTransparent) {
           final Icon icon = getIcon();
           int x = 7;
@@ -415,11 +429,9 @@ public abstract class ComboBoxAction extends AnAction implements CustomComponent
             final Font font = getFont();
             g.setFont(font);
             g.setColor(textColor);
-            g.drawString(getText(), x, (size.height + font.getSize()) / 2 - 1);
+            UIUtil.drawCenteredString((Graphics2D)g, new Rectangle(x, 0, Integer.MAX_VALUE, size.height), getText(), false, true);
           }
-        }
-        else {
-
+        } else {
           if (isSmallVariant()) {
             final Graphics2D g2 = (Graphics2D)g;
             g2.setColor(UIUtil.getControlColor());
@@ -438,6 +450,7 @@ public abstract class ComboBoxAction extends AnAction implements CustomComponent
                                                     new JBColor(SystemInfo.isMac ? Gray._198 : Gray._208, Gray._128)));
               }
             }
+
             g2.fillRoundRect(2, 0, w - 2, h, 5, 5);
 
             Color borderColor = myMouseInside ? new JBColor(Gray._111, Gray._118) : new JBColor(Gray._151, Gray._95);
@@ -454,7 +467,7 @@ public abstract class ComboBoxAction extends AnAction implements CustomComponent
               final Font font = getFont();
               g2.setFont(font);
               g2.setColor(textColor);
-              g2.drawString(getText(), x, (size.height + font.getSize()) / 2 - 1);
+              UIUtil.drawCenteredString(g2, new Rectangle(x, 0, Integer.MAX_VALUE, size.height), getText(), false, true);
             }
           }
           else {
@@ -462,21 +475,31 @@ public abstract class ComboBoxAction extends AnAction implements CustomComponent
           }
         }
       }
-      final Insets insets = super.getInsets();
-      final Icon icon = isEnabled() ? ARROW_ICON : DISABLED_ARROW_ICON;
-      int x;
+
+      Insets insets = super.getInsets();
+      Icon icon = getArrowIcon(isEnabled());
+      boolean isEmpty = getIcon() == null && StringUtil.isEmpty(getText());
+
+      int x = size.width - icon.getIconWidth();
       if (isEmpty) {
-        x = (size.width - icon.getIconWidth()) / 2;
-      }
-      else {
-        if (isSmallVariant()) {
-          x = size.width - icon.getIconWidth() - insets.right + 1;
-          if (SystemInfo.isMac && UIUtil.isUnderIntelliJLaF()) {
-            x-=3;
+        x /= 2;
+      } else {
+        if (UIUtil.isUnderWin10LookAndFeel()) {
+          x -= JBUI.scale(6);
+          x -= JBUI.scale(UIUtil.getParentOfType(ActionToolbar.class, this) != null ? 2 : 0);
+        } else {
+          x -= insets.right;
+
+          if (isSmallVariant()) {
+            x += JBUI.scale(1);
+
+            if (UIUtil.isUnderDefaultMacTheme()) {
+              x -= JBUI.scale(3);
+            }
           }
-        }
-        else {
-          x = size.width - icon.getIconWidth() - insets.right + (UIUtil.isUnderNimbusLookAndFeel() ? -3 : 2);
+          else {
+            x += JBUI.scale(UIUtil.isUnderNimbusLookAndFeel() ? -3 : 2);
+          }
         }
       }
 

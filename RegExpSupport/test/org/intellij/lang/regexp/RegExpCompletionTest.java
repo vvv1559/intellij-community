@@ -15,21 +15,17 @@
  */
 package org.intellij.lang.regexp;
 
+import com.intellij.codeInsight.lookup.LookupElement;
 import com.intellij.openapi.application.PathManager;
 import com.intellij.testFramework.fixtures.CodeInsightFixtureTestCase;
 import com.intellij.util.ArrayUtil;
+import com.intellij.util.containers.ContainerUtil;
 
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
-/**
- * Created by IntelliJ IDEA.
- * User: vnikolaenko
- * Date: 25.09.2008
- * Time: 15:10:10
- */
 public class RegExpCompletionTest extends CodeInsightFixtureTestCase {
 
   // util methods
@@ -41,20 +37,15 @@ public class RegExpCompletionTest extends CodeInsightFixtureTestCase {
         return Character.toUpperCase(testName.charAt(0)) + testName.substring(1) + "Expected" + ".regexp";
     }
 
-    public void testPosixBracketExpression() {
-      RegExpParserDefinition.setTestCapability(RegExpCapability.POSIX_BRACKET_EXPRESSIONS, getTestRootDisposable());
-
-      myFixture.configureByText(RegExpFileType.INSTANCE, "[[:alp<caret>");
-      myFixture.completeBasic();
-      myFixture.checkResult("[[:alpha:]<caret>");
-    }
-
-    public void testNegatePosixBracketExpression() {
-      RegExpParserDefinition.setTestCapability(RegExpCapability.POSIX_BRACKET_EXPRESSIONS, getTestRootDisposable());
-
-      myFixture.configureByText(RegExpFileType.INSTANCE, "[[:^alp<caret>");
-      myFixture.completeBasic();
-      myFixture.checkResult("[[:^alpha:]<caret>");
+    public void testNamedCharacter() {
+      myFixture.configureByText(RegExpFileType.INSTANCE, "\\N{SMILE<caret>}");
+      final LookupElement[] elements = myFixture.completeBasic();
+      final List<String> strings = ContainerUtil.map(elements, LookupElement::getLookupString);
+      assertEquals(Arrays.asList("SMILE", "SMILING FACE WITH SMILING EYES", "SMILING FACE WITH HEART-SHAPED EYES",
+                                 "SMILING CAT FACE WITH HEART-SHAPED EYES", "SMILING FACE WITH OPEN MOUTH AND SMILING EYES",
+                                 "SMILING FACE WITH OPEN MOUTH AND TIGHTLY-CLOSED EYES", "CAT FACE WITH WRY SMILE",
+                                 "GRINNING CAT FACE WITH SMILING EYES", "GRINNING FACE WITH SMILING EYES",
+                                 "KISSING FACE WITH SMILING EYES"), strings);
     }
 
     public void testBackSlashVariants() throws Throwable {
@@ -76,7 +67,9 @@ public class RegExpCompletionTest extends CodeInsightFixtureTestCase {
     }
 
     public void testPropertyAlpha() throws Throwable {
-        doTest();
+      myFixture.configureByText(RegExpFileType.INSTANCE, "\\P{Alp<caret>}");
+      myFixture.completeBasic();
+      myFixture.checkResult("\\P{Alpha<caret>}");
     }
 
     public void doTest() throws Throwable {
@@ -88,7 +81,7 @@ public class RegExpCompletionTest extends CodeInsightFixtureTestCase {
     @Override
     protected String getBasePath() {
       String homePath = PathManager.getHomePath();
-      File candidate = new File(homePath, "community/RegExpSupport");
+      File candidate = new File(homePath, "community/RegExpSupport/testData/completion");
       if (candidate.isDirectory()) {
         return "/community/RegExpSupport/testData/completion";
       }

@@ -16,6 +16,7 @@
 package com.intellij.openapi.editor.impl;
 
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.WriteAction;
 import com.intellij.openapi.application.impl.ApplicationImpl;
 import com.intellij.openapi.command.WriteCommandAction;
 import com.intellij.openapi.editor.Document;
@@ -23,7 +24,6 @@ import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.ex.DocumentEx;
 import com.intellij.openapi.editor.ex.EditorSettingsExternalizable;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
-import com.intellij.openapi.util.Computable;
 import com.intellij.openapi.vfs.VfsUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.testFramework.EditorTestUtil;
@@ -35,9 +35,6 @@ import java.awt.event.FocusEvent;
 import java.awt.event.FocusListener;
 import java.io.IOException;
 
-/**
- * User: cdr
- */
 public class TrailingSpacesStripperTest extends LightPlatformCodeInsightTestCase {
   private EditorSettingsExternalizable.OptionSet oldSettings;
 
@@ -67,7 +64,7 @@ public class TrailingSpacesStripperTest extends LightPlatformCodeInsightTestCase
 
   private static void stripTrailingSpaces() {
     WriteCommandAction.runWriteCommandAction(null, () -> {
-      TrailingSpacesStripper.stripIfNotCurrentLine(getEditor().getDocument(), true);
+      TrailingSpacesStripper.strip(getEditor().getDocument(), true, true);
     });
   }
 
@@ -215,20 +212,36 @@ public class TrailingSpacesStripperTest extends LightPlatformCodeInsightTestCase
     assertEquals("x11\nyyy\n", editor1.getDocument().getText());
     assertEquals("x22  \nyyy\n", editor2.getDocument().getText()); // caret in the way in second but not in the first
   }
+  
+  public void testStripTrailingSpacesAtCaretLineOnExplicitSave() {
+    EditorSettingsExternalizable settings = EditorSettingsExternalizable.getInstance();
+    settings.setStripTrailingSpaces(EditorSettingsExternalizable.STRIP_TRAILING_SPACES_WHOLE);
+    settings.setKeepTrailingSpacesOnCaretLine(false);
+    configureFromFileText(
+      "x.txt",
+      "xxx   <caret>\nyyy   "
+    );
+    type(' ');
+    backspace();
+    EditorTestUtil.executeAction(
+      getEditor(),
+      "SaveAll"
+    );
+    checkResultByText(
+      "xxx<caret>\nyyy"
+    );
+  }
 
   @NotNull
   private static Editor createHeavyEditor(@NotNull String name, @NotNull String text) throws IOException {
-    VirtualFile myVFile = ApplicationManager.getApplication().runWriteAction(new Computable<VirtualFile>() {
-      @Override
-      public VirtualFile compute() {
-        try {
-          VirtualFile file = getSourceRoot().createChildData(null, name);
-          VfsUtil.saveText(file, text);
-          return file;
-        }
-        catch (IOException e) {
-          throw new RuntimeException(e);
-        }
+    VirtualFile myVFile = WriteAction.compute(() -> {
+      try {
+        VirtualFile file = getSourceRoot().createChildData(null, name);
+        VfsUtil.saveText(file, text);
+        return file;
+      }
+      catch (IOException e) {
+        throw new RuntimeException(e);
       }
     });
     final FileDocumentManager manager = FileDocumentManager.getInstance();

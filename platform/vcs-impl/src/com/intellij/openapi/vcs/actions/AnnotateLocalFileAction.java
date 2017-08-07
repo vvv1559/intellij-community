@@ -28,7 +28,6 @@ import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.progress.Task;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.util.Condition;
 import com.intellij.openapi.util.Ref;
 import com.intellij.openapi.vcs.*;
 import com.intellij.openapi.vcs.annotate.AnnotationProvider;
@@ -81,12 +80,7 @@ public class AnnotateLocalFileAction {
       return editor.getGutter().isAnnotationsShown();
     }
 
-    return ContainerUtil.exists(getEditors(context), new Condition<Editor>() {
-      @Override
-      public boolean value(Editor editor) {
-        return editor.getGutter().isAnnotationsShown();
-      }
-    });
+    return ContainerUtil.exists(getEditors(context), editor1 -> editor1.getGutter().isAnnotationsShown());
   }
 
   private static void perform(AnActionEvent e, boolean selected) {
@@ -122,7 +116,7 @@ public class AnnotateLocalFileAction {
     final AbstractVcs vcs = ProjectLevelVcsManager.getInstance(project).getVcsFor(file);
     if (vcs == null) return;
 
-    final AnnotationProvider annotationProvider = vcs.getCachingAnnotationProvider();
+    final AnnotationProvider annotationProvider = vcs.getAnnotationProvider();
     assert annotationProvider != null;
 
     final Ref<FileAnnotation> fileAnnotationRef = new Ref<>();

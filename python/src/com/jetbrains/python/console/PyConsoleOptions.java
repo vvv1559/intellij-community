@@ -88,7 +88,7 @@ public class PyConsoleOptions implements PersistentStateComponent<PyConsoleOptio
 
   @Tag("console-settings")
   public static class PyConsoleSettings implements PythonRunParams {
-    public String myCustomStartScript = PydevConsoleRunner.CONSOLE_START_COMMAND;
+    public String myCustomStartScript = PydevConsoleRunnerImpl.CONSOLE_START_COMMAND;
     public String mySdkHome = null;
     public String myInterpreterOptions = "";
     public boolean myUseModuleSdk;
@@ -100,6 +100,7 @@ public class PyConsoleOptions implements PersistentStateComponent<PyConsoleOptio
     public boolean myAddSourceRoots;
     @NotNull
     private PathMappingSettings myMappings = new PathMappingSettings();
+    private boolean myUseSoftWraps = false;
 
     public PyConsoleSettings(){
     }
@@ -281,6 +282,14 @@ public class PyConsoleOptions implements PersistentStateComponent<PyConsoleOptio
 
     public void setMappings(@Nullable PathMappingSettings mappings) {
       myMappings = mappings != null ? mappings : new PathMappingSettings();
+    }
+
+    public boolean isUseSoftWraps() {
+      return myUseSoftWraps;
+    }
+
+    public void setUseSoftWraps(boolean useSoftWraps) {
+      myUseSoftWraps = useSoftWraps;
     }
   }
 }

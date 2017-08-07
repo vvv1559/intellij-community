@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@ package com.intellij.debugger.actions;
 import com.intellij.debugger.SourcePosition;
 import com.intellij.debugger.engine.DebugProcessImpl;
 import com.intellij.debugger.engine.JVMNameUtil;
+import com.intellij.debugger.engine.SuspendContextImpl;
 import com.intellij.debugger.engine.evaluation.EvaluationContextImpl;
 import com.intellij.debugger.engine.events.SuspendContextCommandImpl;
 import com.intellij.debugger.impl.DebuggerContextImpl;
@@ -27,18 +28,13 @@ import com.intellij.debugger.ui.impl.watch.DebuggerTreeNodeImpl;
 import com.intellij.debugger.ui.impl.watch.NodeDescriptorImpl;
 import com.intellij.debugger.ui.tree.ValueDescriptor;
 import com.intellij.openapi.actionSystem.AnActionEvent;
-import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.diagnostic.Logger;
-import com.intellij.openapi.util.Computable;
 import com.intellij.psi.PsiClass;
 import com.intellij.util.containers.ContainerUtil;
 import com.sun.jdi.*;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-import org.jetbrains.org.objectweb.asm.MethodVisitor;
-import org.jetbrains.org.objectweb.asm.Opcodes;
-
-import java.util.List;
-import java.util.concurrent.atomic.AtomicReference;
 
 public class JumpToObjectAction extends DebuggerAction{
   private static final Logger LOG = Logger.getInstance("#com.intellij.debugger.actions.JumpToObjectAction");
@@ -98,57 +94,33 @@ public class JumpToObjectAction extends DebuggerAction{
     }
 
     try {
-      if(type instanceof ArrayType) {
+      if (type instanceof ArrayType) {
         type = ((ArrayType)type).componentType();
       }
-      if(type instanceof ClassType) {
-        final ClassType clsType = (ClassType)type;
-        Location lambdaLocation = null;
-        if (DebuggerUtilsEx.isLambdaClassName(clsType.name())) {
-          List<Method> applicableMethods = ContainerUtil.filter(clsType.methods(), m -> m.isPublic() && !m.isBridge());
-          if (applicableMethods.size() == 1) {
-            AtomicReference<Location> locationRef = new AtomicReference<>();
-            MethodBytecodeUtil.visit(clsType, applicableMethods.get(0), new MethodVisitor(Opcodes.API_VERSION) {
-              @Override
-              public void visitMethodInsn(int opcode, String owner, String name, String desc, boolean itf) {
-                ReferenceType cls = ContainerUtil.getFirstItem(clsType.virtualMachine().classesByName(owner));
-                if (cls != null) {
-                  Method method = ContainerUtil.getFirstItem(cls.methodsByName(name));
-                  if (method != null) {
-                    try {
-                      Location loc = ContainerUtil.getFirstItem(method.allLineLocations());
-                      if (loc != null) {
-                        locationRef.set(loc);
-                      }
-                    }
-                    catch (AbsentInformationException e) {
-                      LOG.debug(e);
-                    }
-                  }
-                }
-              }
-            });
-            lambdaLocation = locationRef.get();
-          }
+      if (type instanceof ClassType) {
+        ClassType clsType = (ClassType)type;
+
+        Method lambdaMethod = MethodBytecodeUtil.getLambdaMethod(clsType, debugProcess.getVirtualMachineProxy());
+        Location location = lambdaMethod != null ? ContainerUtil.getFirstItem(DebuggerUtilsEx.allLineLocations(lambdaMethod)) : null;
+
+        if (location == null) {
+          location = ContainerUtil.getFirstItem(clsType.allLineLocations());
         }
-        final Location location = lambdaLocation != null ? lambdaLocation : ContainerUtil.getFirstItem(clsType.allLineLocations());
+
         if (location != null) {
-          return ApplicationManager.getApplication().runReadAction(new Computable<SourcePosition>() {
-            @Override
-            public SourcePosition compute() {
-              SourcePosition position = debugProcess.getPositionManager().getSourcePosition(location);
-              // adjust position for non-anonymous classes
-              if (clsType.name().indexOf('$') < 0) {
-                final PsiClass classAt = JVMNameUtil.getClassAt(position);
-                if (classAt != null) {
-                  final SourcePosition classPosition = SourcePosition.createFromElement(classAt);
-                  if (classPosition != null) {
-                    position = classPosition;
-                  }
+          SourcePosition position = debugProcess.getPositionManager().getSourcePosition(location);
+          return ReadAction.compute(() -> {
+            // adjust position for non-anonymous classes
+            if (clsType.name().indexOf('$') < 0) {
+              PsiClass classAt = JVMNameUtil.getClassAt(position);
+              if (classAt != null) {
+                SourcePosition classPosition = SourcePosition.createFromElement(classAt);
+                if (classPosition != null) {
+                  return classPosition;
                 }
               }
-              return position;
             }
+            return position;
           });
         }
       }
@@ -207,7 +179,7 @@ public class JumpToObjectAction extends DebuggerAction{
     }
 
     @Override
-    public final void contextAction() throws Exception {
+    public void contextAction(@NotNull SuspendContextImpl suspendContext) throws Exception {
       try {
         doAction(calcPosition(myDescriptor, myDebugProcess));
       }

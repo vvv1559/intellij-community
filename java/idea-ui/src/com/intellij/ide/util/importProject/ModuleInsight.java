@@ -23,7 +23,6 @@ import com.intellij.openapi.progress.ProcessCanceledException;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.util.Consumer;
-import com.intellij.util.StringBuilderSpinAllocator;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.StringInterner;
 import com.intellij.util.text.StringFactory;
@@ -40,7 +39,7 @@ import java.util.*;
  */
 public abstract class ModuleInsight {
   private static final Logger LOG = Logger.getInstance("#com.intellij.ide.util.importProject.ModuleInsight");
-  @NotNull private final ProgressIndicatorWrapper myProgress;
+  @NotNull protected final ProgressIndicatorWrapper myProgress;
 
   private final Set<File> myEntryPointRoots = new HashSet<>();
   private final List<DetectedSourceRoot> mySourceRoots = new ArrayList<>();
@@ -60,7 +59,7 @@ public abstract class ModuleInsight {
     myExistingModuleNames = existingModuleNames;
     myExistingProjectLibraryNames = existingProjectLibraryNames;
     myProgress = new ProgressIndicatorWrapper(progress);
-    setRoots(Collections.<File>emptyList(), Collections.<DetectedSourceRoot>emptyList(), Collections.<String>emptySet());
+    setRoots(Collections.emptyList(), Collections.emptyList(), Collections.emptySet());
   }
 
   public final void setRoots(final List<File> contentRoots, final List<? extends DetectedSourceRoot> sourceRoots, final Set<String> ignoredNames) {
@@ -98,9 +97,9 @@ public abstract class ModuleInsight {
       myProgress.pushState();
 
       List<DetectedSourceRoot> processedRoots = new ArrayList<>();
-      for (DetectedSourceRoot root : mySourceRoots) {
+      for (DetectedSourceRoot root : getSourceRootsToScan()) {
         final File sourceRoot = root.getDirectory();
-        if (myIgnoredNames.contains(sourceRoot.getName())) {
+        if (isIgnoredName(sourceRoot)) {
           continue;
         }
         myProgress.setText("Scanning " + sourceRoot.getPath());
@@ -109,7 +108,7 @@ public abstract class ModuleInsight {
         mySourceRootToReferencedPackagesMap.put(sourceRoot, usedPackages);
 
         final HashSet<String> selfPackages = new HashSet<>();
-        mySourceRootToPackagesMap.put(sourceRoot, selfPackages);
+        addExportedPackages(sourceRoot, selfPackages);
 
         scanSources(sourceRoot, ProjectFromSourcesBuilderImpl.getPackagePrefix(root), usedPackages, selfPackages) ;
         usedPackages.removeAll(selfPackages);
@@ -121,7 +120,7 @@ public abstract class ModuleInsight {
       myProgress.setText("Building modules layout...");
       for (DetectedSourceRoot sourceRoot : processedRoots) {
         final File srcRoot = sourceRoot.getDirectory();
-        final File moduleContentRoot = myEntryPointRoots.contains(srcRoot)? srcRoot : srcRoot.getParentFile();
+        final File moduleContentRoot = isEntryPointRoot(srcRoot) ? srcRoot : srcRoot.getParentFile();
         ModuleDescriptor moduleDescriptor = contentRootToModules.get(moduleContentRoot);
         if (moduleDescriptor != null) {
           moduleDescriptor.addSourceRoot(moduleContentRoot, sourceRoot);
@@ -139,13 +138,39 @@ public abstract class ModuleInsight {
     catch (ProcessCanceledException ignored) {
     }
 
-    myModules = new ArrayList<>(contentRootToModules.values());
+    addModules(contentRootToModules.values());
+  }
+
+  protected void addExportedPackages(File sourceRoot, Set<String> packages) {
+    mySourceRootToPackagesMap.put(sourceRoot, packages);
+  }
+
+  protected boolean isIgnoredName(File sourceRoot) {
+    return myIgnoredNames.contains(sourceRoot.getName());
+  }
+
+  protected void addModules(Collection<ModuleDescriptor> newModules) {
+    if (myModules == null) {
+      myModules = new ArrayList<>(newModules);
+    }
+    else {
+      myModules.addAll(newModules);
+    }
     final Set<String> moduleNames = new HashSet<>(myExistingModuleNames);
-    for (ModuleDescriptor module : myModules) {
+    for (ModuleDescriptor module : newModules) {
       final String suggested = suggestUniqueName(moduleNames, module.getName());
       module.setName(suggested);
       moduleNames.add(suggested);
     }
+  }
+
+  @NotNull
+  protected List<DetectedSourceRoot> getSourceRootsToScan() {
+    return Collections.unmodifiableList(mySourceRoots);
+  }
+
+  protected boolean isEntryPointRoot(File srcRoot) {
+    return myEntryPointRoots.contains(srcRoot);
   }
 
   protected abstract ModuleDescriptor createModuleDescriptor(final File moduleContentRoot, Collection<DetectedSourceRoot> sourceRoots);
@@ -331,11 +356,13 @@ public abstract class ModuleInsight {
   }
 
   public static Collection<LibraryDescriptor> getLibraryDependencies(ModuleDescriptor module,
-                                                                     final List<LibraryDescriptor> allLibraries) {
+                                                                     @Nullable List<LibraryDescriptor> allLibraries) {
     final Set<LibraryDescriptor> libs = new HashSet<>();
-    for (LibraryDescriptor library : allLibraries) {
-      if (ContainerUtil.intersects(library.getJars(), module.getLibraryFiles())) {
-        libs.add(library);
+    if (allLibraries != null) {
+      for (LibraryDescriptor library : allLibraries) {
+        if (ContainerUtil.intersects(library.getJars(), module.getLibraryFiles())) {
+          libs.add(library);
+        }
       }
     }
     return libs;
@@ -377,7 +404,7 @@ public abstract class ModuleInsight {
   }
 
   private void scanSources(final File fromRoot, final String parentPackageName, final Set<String> usedPackages, final Set<String> selfPackages) {
-    if (myIgnoredNames.contains(fromRoot.getName())) {
+    if (isIgnoredName(fromRoot)) {
       return;
     }
     final File[] files = fromRoot.listFiles();
@@ -386,19 +413,7 @@ public abstract class ModuleInsight {
       boolean includeParentName = false;
       for (File file : files) {
         if (file.isDirectory()) {
-          final String subPackageName;
-          final StringBuilder builder = StringBuilderSpinAllocator.alloc();
-          try {
-            builder.append(parentPackageName);
-            if (builder.length() > 0) {
-              builder.append(".");
-            }
-            builder.append(file.getName());
-            subPackageName = builder.toString();
-          }
-          finally {
-            StringBuilderSpinAllocator.dispose(builder);
-          }
+          String subPackageName = parentPackageName + (parentPackageName.isEmpty() ? "" : ".") + file.getName();
           scanSources(file, subPackageName, usedPackages, selfPackages);
         }
         else {
@@ -430,7 +445,7 @@ public abstract class ModuleInsight {
   protected abstract void scanSourceFileForImportedPackages(final CharSequence chars, Consumer<String> result);
 
   private void scanRootForLibraries(File fromRoot) {
-    if (myIgnoredNames.contains(fromRoot.getName())) {
+    if (isIgnoredName(fromRoot)) {
       return;
     }
     final File[] files = fromRoot.listFiles();
@@ -457,6 +472,9 @@ public abstract class ModuleInsight {
                 });
               }
               catch (IOException e) {
+                LOG.info(e);
+              }
+              catch (IllegalArgumentException e) { // may be thrown from java.util.zip.ZipCoder.toString for corrupted archive
                 LOG.info(e);
               }
               catch (InternalError e) { // indicates that file is somehow damaged and cannot be processed

@@ -38,55 +38,39 @@ import static com.intellij.psi.util.PsiModificationTracker.OUT_OF_CODE_BLOCK_MOD
 
 public class ClassInnerStuffCache {
   private final PsiExtensibleClass myClass;
-  private final SimpleModificationTracker myTracker;
+  private final SimpleModificationTracker myTracker = new SimpleModificationTracker();
 
   public ClassInnerStuffCache(@NotNull PsiExtensibleClass aClass) {
     myClass = aClass;
-    myTracker = new SimpleModificationTracker();
+  }
+
+  @NotNull
+  private static <T> T[] copy(T[] value) {
+    return value.length == 0 ? value : value.clone();
   }
 
   @NotNull
   public PsiMethod[] getConstructors() {
-    return CachedValuesManager.getCachedValue(myClass, new CachedValueProvider<PsiMethod[]>() {
-      @Nullable
-      @Override
-      public Result<PsiMethod[]> compute() {
-        return Result.create(PsiImplUtil.getConstructors(myClass), OUT_OF_CODE_BLOCK_MODIFICATION_COUNT, myTracker);
-      }
-    });
+    return copy(CachedValuesManager.getCachedValue(myClass, () -> CachedValueProvider.Result
+      .create(PsiImplUtil.getConstructors(myClass), OUT_OF_CODE_BLOCK_MODIFICATION_COUNT, myTracker)));
   }
 
   @NotNull
   public PsiField[] getFields() {
-    return CachedValuesManager.getCachedValue(myClass, new CachedValueProvider<PsiField[]>() {
-      @Nullable
-      @Override
-      public Result<PsiField[]> compute() {
-        return Result.create(getAllFields(), OUT_OF_CODE_BLOCK_MODIFICATION_COUNT, myTracker);
-      }
-    });
+    return copy(CachedValuesManager.getCachedValue(myClass, () -> CachedValueProvider.Result
+      .create(getAllFields(), OUT_OF_CODE_BLOCK_MODIFICATION_COUNT, myTracker)));
   }
 
   @NotNull
   public PsiMethod[] getMethods() {
-    return CachedValuesManager.getCachedValue(myClass, new CachedValueProvider<PsiMethod[]>() {
-      @Nullable
-      @Override
-      public Result<PsiMethod[]> compute() {
-        return Result.create(getAllMethods(), OUT_OF_CODE_BLOCK_MODIFICATION_COUNT, myTracker);
-      }
-    });
+    return copy(CachedValuesManager.getCachedValue(myClass, () -> CachedValueProvider.Result
+      .create(getAllMethods(), OUT_OF_CODE_BLOCK_MODIFICATION_COUNT, myTracker)));
   }
 
   @NotNull
   public PsiClass[] getInnerClasses() {
-    return CachedValuesManager.getCachedValue(myClass, new CachedValueProvider<PsiClass[]>() {
-      @Nullable
-      @Override
-      public Result<PsiClass[]> compute() {
-        return Result.create(getAllInnerClasses(), OUT_OF_CODE_BLOCK_MODIFICATION_COUNT, myTracker);
-      }
-    });
+    return copy(CachedValuesManager.getCachedValue(myClass, () -> CachedValueProvider.Result
+      .create(getAllInnerClasses(), OUT_OF_CODE_BLOCK_MODIFICATION_COUNT, myTracker)));
   }
 
   @Nullable
@@ -94,13 +78,9 @@ public class ClassInnerStuffCache {
     if (checkBases) {
       return PsiClassImplUtil.findFieldByName(myClass, name, true);
     }
-    return CachedValuesManager.getCachedValue(myClass, new CachedValueProvider<Map<String, PsiField>>() {
-      @Nullable
-      @Override
-      public Result<Map<String, PsiField>> compute() {
-        return Result.create(getFieldsMap(), OUT_OF_CODE_BLOCK_MODIFICATION_COUNT, myTracker);
-      }
-    }).get(name);
+    return CachedValuesManager.getCachedValue(myClass,
+                                              () -> CachedValueProvider.Result
+                                                .create(getFieldsMap(), OUT_OF_CODE_BLOCK_MODIFICATION_COUNT, myTracker)).get(name);
   }
 
   @NotNull
@@ -108,14 +88,9 @@ public class ClassInnerStuffCache {
     if (checkBases) {
       return PsiClassImplUtil.findMethodsByName(myClass, name, true);
     }
-    PsiMethod[] methods = CachedValuesManager.getCachedValue(myClass, new CachedValueProvider<Map<String, PsiMethod[]>>() {
-      @Nullable
-      @Override
-      public Result<Map<String, PsiMethod[]>> compute() {
-        return Result.create(getMethodsMap(), OUT_OF_CODE_BLOCK_MODIFICATION_COUNT, myTracker);
-      }
-    }).get(name);
-    return methods == null ? PsiMethod.EMPTY_ARRAY : methods;
+    PsiMethod[] methods = CachedValuesManager.getCachedValue(myClass, () -> CachedValueProvider.Result
+      .create(getMethodsMap(), OUT_OF_CODE_BLOCK_MODIFICATION_COUNT, myTracker)).get(name);
+    return methods == null ? PsiMethod.EMPTY_ARRAY : methods.clone();
   }
 
   @Nullable
@@ -124,37 +99,24 @@ public class ClassInnerStuffCache {
       return PsiClassImplUtil.findInnerByName(myClass, name, true);
     }
     else {
-      return CachedValuesManager.getCachedValue(myClass, new CachedValueProvider<Map<String, PsiClass>>() {
-        @Nullable
-        @Override
-        public Result<Map<String, PsiClass>> compute() {
-          return Result.create(getInnerClassesMap(), OUT_OF_CODE_BLOCK_MODIFICATION_COUNT, myTracker);
-        }
-      }).get(name);
+      return CachedValuesManager.getCachedValue(myClass, () -> CachedValueProvider.Result
+        .create(getInnerClassesMap(), OUT_OF_CODE_BLOCK_MODIFICATION_COUNT, myTracker)).get(name);
     }
   }
 
   @Nullable
   public PsiMethod getValuesMethod() {
-    return !myClass.isEnum() || myClass.getName() == null ? null : CachedValuesManager.getCachedValue(myClass, new CachedValueProvider<PsiMethod>() {
-      @Nullable
-      @Override
-      public Result<PsiMethod> compute() {
-        String text = "public static " + myClass.getName() + "[] values() { }";
-        return new Result<PsiMethod>(getSyntheticMethod(text), OUT_OF_CODE_BLOCK_MODIFICATION_COUNT, myTracker);
-      }
+    return !myClass.isEnum() || myClass.getName() == null ? null : CachedValuesManager.getCachedValue(myClass, () -> {
+      String text = "public static " + myClass.getName() + "[] values() { }";
+      return new CachedValueProvider.Result<>(getSyntheticMethod(text), OUT_OF_CODE_BLOCK_MODIFICATION_COUNT, myTracker);
     });
   }
 
   @Nullable
   public PsiMethod getValueOfMethod() {
-    return !myClass.isEnum() || myClass.getName() == null ? null : CachedValuesManager.getCachedValue(myClass, new CachedValueProvider<PsiMethod>() {
-      @Nullable
-      @Override
-      public Result<PsiMethod> compute() {
-        String text = "public static " + myClass.getName() + " valueOf(java.lang.String name) throws java.lang.IllegalArgumentException { }";
-        return new Result<PsiMethod>(getSyntheticMethod(text), OUT_OF_CODE_BLOCK_MODIFICATION_COUNT, myTracker);
-      }
+    return !myClass.isEnum() || myClass.getName() == null ? null : CachedValuesManager.getCachedValue(myClass, () -> {
+      String text = "public static " + myClass.getName() + " valueOf(java.lang.String name) throws java.lang.IllegalArgumentException { }";
+      return new CachedValueProvider.Result<>(getSyntheticMethod(text), OUT_OF_CODE_BLOCK_MODIFICATION_COUNT, myTracker);
     });
   }
 
@@ -184,10 +146,10 @@ public class ClassInnerStuffCache {
     PsiField[] fields = getFields();
     if (fields.length == 0) return Collections.emptyMap();
 
-    Map<String, PsiField> cachedFields = new THashMap<String, PsiField>();
+    Map<String, PsiField> cachedFields = new THashMap<>();
     for (PsiField field : fields) {
       String name = field.getName();
-      if (!(field instanceof ExternallyDefinedPsiElement) || !cachedFields.containsKey(name)) {
+      if (!cachedFields.containsKey(name)) {
         cachedFields.put(name, field);
       }
     }
@@ -221,7 +183,7 @@ public class ClassInnerStuffCache {
     PsiClass[] classes = getInnerClasses();
     if (classes.length == 0) return Collections.emptyMap();
 
-    Map<String, PsiClass> cachedInners = new THashMap<String, PsiClass>();
+    Map<String, PsiClass> cachedInners = new THashMap<>();
     for (PsiClass psiClass : classes) {
       String name = psiClass.getName();
       if (name == null) {

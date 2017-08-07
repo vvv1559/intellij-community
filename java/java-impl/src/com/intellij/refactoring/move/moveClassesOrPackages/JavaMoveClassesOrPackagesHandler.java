@@ -18,6 +18,7 @@ package com.intellij.refactoring.move.moveClassesOrPackages;
 import com.intellij.CommonBundle;
 import com.intellij.openapi.actionSystem.DataContext;
 import com.intellij.openapi.actionSystem.LangDataKeys;
+import com.intellij.openapi.application.WriteAction;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.module.Module;
@@ -34,6 +35,7 @@ import com.intellij.psi.impl.file.JavaDirectoryServiceImpl;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.refactoring.BaseRefactoringProcessor;
 import com.intellij.refactoring.JavaRefactoringSettings;
+import com.intellij.refactoring.MoveDestination;
 import com.intellij.refactoring.RefactoringBundle;
 import com.intellij.refactoring.move.MoveCallback;
 import com.intellij.refactoring.move.MoveHandlerDelegate;
@@ -52,7 +54,7 @@ import java.awt.*;
 import java.util.Arrays;
 
 public class JavaMoveClassesOrPackagesHandler extends MoveHandlerDelegate {
-  private static final Logger LOG = Logger.getInstance("#" + JavaMoveClassesOrPackagesHandler.class.getName());
+  private static final Logger LOG = Logger.getInstance(JavaMoveClassesOrPackagesHandler.class);
   private static final JavaVetoRenameCondition VETO_RENAME_CONDITION = new JavaVetoRenameCondition();
 
   public static boolean isPackageOrDirectory(final PsiElement element) {
@@ -218,16 +220,28 @@ public class JavaMoveClassesOrPackagesHandler extends MoveHandlerDelegate {
                                                                         PsiPackage aPackage,
                                                                         boolean searchInComments,
                                                                         boolean searchForTextOccurences) {
+            final MoveDestination destination = createDestination(aPackage, targetDirectory);
             try {
               for (PsiDirectory dir: directories) {
-                MoveFilesOrDirectoriesUtil.checkIfMoveIntoSelf(dir, targetDirectory);
+                MoveFilesOrDirectoriesUtil.checkIfMoveIntoSelf(dir, WriteAction.compute(() -> destination.getTargetDirectory(dir)));
               }
             }
             catch (IncorrectOperationException e) {
               Messages.showErrorDialog(project, e.getMessage(), RefactoringBundle.message("cannot.move"));
               return null;
             }
-            return new MoveDirectoryWithClassesProcessor(project, directories, targetDirectory, searchInComments, searchForTextOccurences, true, callback);
+            return new MoveDirectoryWithClassesProcessor(project, directories, null, searchInComments, searchForTextOccurences, true, callback) {
+              @Override
+              public TargetDirectoryWrapper getTargetDirectory(PsiDirectory dir) {
+                final PsiDirectory targetDirectory = destination.getTargetDirectory(dir);
+                return new TargetDirectoryWrapper(targetDirectory);
+              }
+
+              @Override
+              protected String getTargetName() {
+                return targetDirectory.getName();
+              }
+            };
           }
         };
       dlg.show();

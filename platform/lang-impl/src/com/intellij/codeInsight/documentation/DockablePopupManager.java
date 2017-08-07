@@ -45,14 +45,10 @@ import org.jetbrains.annotations.NotNull;
 import javax.swing.*;
 import java.awt.*;
 
-/**
- * User: anna
- * Date: 5/7/12
- */
 public abstract class DockablePopupManager<T extends JComponent & Disposable> {
-  protected ToolWindow myToolWindow = null;
-  protected boolean myAutoUpdateDocumentation = PropertiesComponent.getInstance().isTrueValue(getAutoUpdateEnabledProperty());
-  protected Runnable myAutoUpdateRequest;
+  protected ToolWindow myToolWindow;
+  private boolean myAutoUpdateDocumentation = PropertiesComponent.getInstance().isTrueValue(getAutoUpdateEnabledProperty());
+  private Runnable myAutoUpdateRequest;
   @NotNull protected final Project myProject;
 
   public DockablePopupManager(@NotNull Project project) {
@@ -171,10 +167,10 @@ public abstract class DockablePopupManager<T extends JComponent & Disposable> {
     };
   }
 
-  protected void restartAutoUpdate(final boolean state) {
+  void restartAutoUpdate(final boolean state) {
     if (state && myToolWindow != null) {
       if (myAutoUpdateRequest == null) {
-        myAutoUpdateRequest = () -> updateComponent();
+        myAutoUpdateRequest = this::updateComponent;
 
         UIUtil.invokeLaterIfNeeded(() -> IdeEventQueue.getInstance().addIdleListener(myAutoUpdateRequest, 500));
       }
@@ -190,12 +186,9 @@ public abstract class DockablePopupManager<T extends JComponent & Disposable> {
   public void updateComponent() {
     if (myProject.isDisposed()) return;
 
-    DataManager.getInstance().getDataContextFromFocus().doWhenDone(new Consumer<DataContext>() {
-      @Override
-      public void consume(@NotNull DataContext dataContext) {
-        if (!myProject.isOpen()) return;
-        updateComponentInner(dataContext);
-      }
+    DataManager.getInstance().getDataContextFromFocus().doWhenDone((Consumer<DataContext>)dataContext -> {
+      if (!myProject.isOpen()) return;
+      updateComponentInner(dataContext);
     });
   }
 
@@ -213,21 +206,19 @@ public abstract class DockablePopupManager<T extends JComponent & Disposable> {
       return;
     }
 
-    PsiDocumentManager.getInstance(myProject).commitAllDocuments();
-    final PsiFile file = PsiUtilBase.getPsiFileInEditor(editor, myProject);
+    PsiDocumentManager.getInstance(myProject).performLaterWhenAllCommitted(() -> {
+      if (editor.isDisposed()) return;
 
-    final Editor injectedEditor = InjectedLanguageUtil.getEditorForInjectedLanguageNoCommit(editor, file);
-    if (injectedEditor != null) {
-      final PsiFile psiFile = PsiUtilBase.getPsiFileInEditor(injectedEditor, myProject);
-      if (psiFile != null) {
-        doUpdateComponent(injectedEditor, psiFile);
-        return;
+      PsiFile file = PsiUtilBase.getPsiFileInEditor(editor, myProject);
+      Editor injectedEditor = InjectedLanguageUtil.getEditorForInjectedLanguageNoCommit(editor, file);
+      PsiFile injectedFile = injectedEditor != null ? PsiUtilBase.getPsiFileInEditor(injectedEditor, myProject) : null;
+      if (injectedFile != null) {
+        doUpdateComponent(injectedEditor, injectedFile);
       }
-    }
-
-    if (file != null) {
-      doUpdateComponent(editor, file);
-    }
+      else if (file != null) {
+        doUpdateComponent(editor, file);
+      }
+    });
   }
 
 

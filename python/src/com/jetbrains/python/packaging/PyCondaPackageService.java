@@ -17,10 +17,8 @@ package com.jetbrains.python.packaging;
 
 import com.intellij.execution.configurations.PathEnvironmentVariableUtil;
 import com.intellij.execution.process.ProcessOutput;
-import com.intellij.openapi.components.PersistentStateComponent;
-import com.intellij.openapi.components.ServiceManager;
-import com.intellij.openapi.components.State;
-import com.intellij.openapi.components.Storage;
+import com.intellij.openapi.components.*;
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.LocalFileSystem;
@@ -39,8 +37,9 @@ import org.jetbrains.annotations.Nullable;
 import java.io.File;
 import java.util.*;
 
-@State(name = "PyCondaPackageService", storages = @Storage("conda_packages.xml"))
+@State(name = "PyCondaPackageService", storages = @Storage(value="conda_packages.xml", roamingType = RoamingType.DISABLED))
 public class PyCondaPackageService implements PersistentStateComponent<PyCondaPackageService> {
+  private static final Logger LOG = Logger.getInstance(PyCondaPackageService.class);
   public Map<String, String> CONDA_PACKAGES = ContainerUtil.newConcurrentMap();
   public Map<String, List<String>> PACKAGES_TO_RELEASES = new HashMap<>();
   public Set<String> CONDA_CHANNELS = ContainerUtil.newConcurrentSet();
@@ -65,8 +64,8 @@ public class PyCondaPackageService implements PersistentStateComponent<PyCondaPa
     return CONDA_PACKAGES;
   }
 
-  public Map<String, String> loadAndGetPackages() {
-    if (CONDA_PACKAGES.isEmpty()) {
+  public Map<String, String> loadAndGetPackages(boolean force) {
+    if (CONDA_PACKAGES.isEmpty() || force) {
       updatePackagesCache();
     }
     return CONDA_PACKAGES;
@@ -117,9 +116,15 @@ public class PyCondaPackageService implements PersistentStateComponent<PyCondaPa
   @Nullable
   public static String getCondaExecutable(VirtualFile sdkPath) {
     final VirtualFile bin = sdkPath.getParent();
-    final String condaName = SystemInfo.isWindows ? "conda.exe" : "conda";
+    String condaName = "conda";
+    if (SystemInfo.isWindows) {
+      condaName = bin.findChild("envs") != null ? "conda.exe" : "conda.bat";
+    }
     final VirtualFile conda = bin.findChild(condaName);
     if (conda != null) return conda.getPath();
+    final VirtualFile condaFolder = bin.getParent();
+    final String condaPath = findExecutable(condaName, condaFolder);
+    if (condaPath != null) return condaPath;
     return getSystemCondaExecutable();
   }
 
@@ -151,17 +156,15 @@ public class PyCondaPackageService implements PersistentStateComponent<PyCondaPa
   @Nullable
   private static String findExecutable(String condaName, @Nullable final VirtualFile condaFolder) {
     if (condaFolder != null) {
-      final VirtualFile bin = condaFolder.findChild(SystemInfo.isWindows ? "Scripts" : "bin");
-      if (bin != null) {
-        String directoryPath = bin.getPath();
-        if (!SystemInfo.isWindows) {
-          final VirtualFile[] children = bin.getChildren();
-          if (children.length == 0) return null;
-          directoryPath = children[0].getPath();
-        }
-        final String executableFile = PythonSdkType.getExecutablePath(directoryPath, condaName);
-        if (executableFile != null) {
-          return executableFile;
+      final VirtualFile binFolder = condaFolder.findChild(SystemInfo.isWindows ? "Scripts" : "bin");
+      if (binFolder != null) {
+        final VirtualFile bin = binFolder.findChild(condaName);
+        if (bin != null) {
+          String directoryPath = bin.getPath();
+          final String executableFile = PythonSdkType.getExecutablePath(directoryPath, condaName);
+          if (executableFile != null) {
+            return executableFile;
+          }
         }
       }
     }
@@ -170,11 +173,20 @@ public class PyCondaPackageService implements PersistentStateComponent<PyCondaPa
 
   public void updatePackagesCache() {
     final String condaPython = getCondaPython();
-    if (condaPython == null) return;
+    if (condaPython == null) {
+      return;
+    }
     final String path = PythonHelpersLocator.getHelperPath("conda_packaging_tool.py");
     final String runDirectory = new File(condaPython).getParent();
-    final ProcessOutput output = PySdkUtil.getProcessOutput(runDirectory, new String[]{condaPython, path, "listall"});
-    if (output.getExitCode() != 0) return;
+    final String[] command = {condaPython, path, "listall"};
+    final ProcessOutput output = PySdkUtil.getProcessOutput(runDirectory, command);
+    if (output.getExitCode() != 0) {
+      LOG.warn("Failed to get list of conda packages");
+      LOG.warn(StringUtil.join(command, " "));
+      return;
+    }
+    CONDA_PACKAGES.clear();
+    PACKAGES_TO_RELEASES.clear();
     final List<String> lines = output.getStdoutLines();
     for (String line : lines) {
       final List<String> split = StringUtil.split(line, "\t");
@@ -219,9 +231,7 @@ public class PyCondaPackageService implements PersistentStateComponent<PyCondaPa
     final ProcessOutput output = PySdkUtil.getProcessOutput(runDirectory, new String[]{condaPython, path, "channels"});
     if (output.getExitCode() != 0) return;
     final List<String> lines = output.getStdoutLines();
-    for (String line : lines) {
-      CONDA_CHANNELS.add(line);
-    }
+    CONDA_CHANNELS.addAll(lines);
     LAST_TIME_CHECKED = System.currentTimeMillis();
   }
 }

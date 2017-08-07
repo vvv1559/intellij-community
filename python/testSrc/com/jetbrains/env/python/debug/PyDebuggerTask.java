@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
  */
 package com.jetbrains.env.python.debug;
 
+import com.google.common.collect.Sets;
 import com.intellij.execution.*;
 import com.intellij.execution.configurations.ConfigurationFactory;
 import com.intellij.execution.configurations.RunProfile;
@@ -27,6 +28,7 @@ import com.intellij.execution.runners.ExecutionEnvironment;
 import com.intellij.openapi.application.Result;
 import com.intellij.openapi.application.WriteAction;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.Key;
 import com.intellij.xdebugger.*;
 import com.jetbrains.env.python.PythonDebuggerTest;
 import com.jetbrains.python.debugger.PyDebugProcess;
@@ -39,7 +41,9 @@ import org.jetbrains.annotations.Nullable;
 import org.junit.Assert;
 
 import java.io.IOException;
+import java.lang.reflect.InvocationTargetException;
 import java.net.ServerSocket;
+import java.util.Set;
 import java.util.concurrent.Semaphore;
 
 /**
@@ -48,7 +52,8 @@ import java.util.concurrent.Semaphore;
 public class PyDebuggerTask extends PyBaseDebuggerTask {
 
   private boolean myMultiprocessDebug = false;
-  private PythonRunConfiguration myRunConfiguration;
+  protected PythonRunConfiguration myRunConfiguration;
+  private boolean myWaitForTermination = true;
 
 
   public PyDebuggerTask(@Nullable final String relativeTestDataPath, String scriptName, String scriptParameters) {
@@ -64,6 +69,12 @@ public class PyDebuggerTask extends PyBaseDebuggerTask {
 
   protected void init() {
 
+  }
+
+  @Nullable
+  @Override
+  public Set<String> getTagsToCover() {
+    return Sets.newHashSet("python2.6", "python2.7", "python3.5", "python3.6", "jython", "IronPython", "pypy");
   }
 
   public void runTestOn(String sdkHome) throws Exception {
@@ -85,9 +96,10 @@ public class PyDebuggerTask extends PyBaseDebuggerTask {
     new WriteAction() {
       @Override
       protected void run(@NotNull Result result) throws Throwable {
-        RunManagerEx.getInstanceEx(project).addConfiguration(settings, false);
-        RunManagerEx.getInstanceEx(project).setSelectedConfiguration(settings);
-        Assert.assertSame(settings, RunManagerEx.getInstanceEx(project).getSelectedConfiguration());
+        RunManager runManager = RunManager.getInstance(project);
+        runManager.addConfiguration(settings, false);
+        runManager.setSelectedConfiguration(settings);
+        Assert.assertSame(settings, runManager.getSelectedConfiguration());
       }
     }.execute();
 
@@ -136,13 +148,21 @@ public class PyDebuggerTask extends PyBaseDebuggerTask {
               myDebugProcess =
                 new PyDebugProcess(session, serverSocket, myExecutionResult.getExecutionConsole(), myExecutionResult.getProcessHandler(), isMultiprocessDebug());
 
+
+              StringBuilder output = new StringBuilder();
+
               myDebugProcess.getProcessHandler().addProcessListener(new ProcessAdapter() {
+
+                @Override
+                public void onTextAvailable(ProcessEvent event, Key outputType) {
+                  output.append(event.getText());
+                }
 
                 @Override
                 public void processTerminated(ProcessEvent event) {
                   myTerminateSemaphore.release();
                   if (event.getExitCode() != 0 && !myProcessCanTerminate) {
-                    Assert.fail("Process terminated unexpectedly\n" + output());
+                    Assert.fail("Process terminated unexpectedly\n" + output.toString());
                   }
                 }
               });
@@ -167,7 +187,7 @@ public class PyDebuggerTask extends PyBaseDebuggerTask {
     myPausedSemaphore = new Semaphore(0);
     
 
-    mySession.addSessionListener(new XDebugSessionAdapter() {
+    mySession.addSessionListener(new XDebugSessionListener() {
       @Override
       public void sessionPaused() {
         if (myPausedSemaphore != null) {
@@ -195,6 +215,25 @@ public class PyDebuggerTask extends PyBaseDebuggerTask {
     myMultiprocessDebug = multiprocessDebug;
   }
 
+  public void setWaitForTermination(boolean waitForTermination) {
+    myWaitForTermination = waitForTermination;
+  }
+
+  protected void waitForAllThreadsPause() throws InterruptedException, InvocationTargetException {
+    waitForPause();
+    Assert.assertTrue(String.format("All threads didn't stop within timeout\n" +
+                                    "Output: %s", output()), waitForAllThreads());
+    XDebuggerTestUtil.waitForSwing();
+  }
+
+  protected boolean waitForAllThreads() throws InterruptedException {
+    long until = System.currentTimeMillis() + NORMAL_TIMEOUT;
+    while (System.currentTimeMillis() < until && getRunningThread() != null) {
+      Thread.sleep(1000);
+    }
+    return getRunningThread() == null;
+  }
+
   @Override
   protected void disposeDebugProcess() throws InterruptedException {
     if (myDebugProcess != null) {
@@ -202,7 +241,10 @@ public class PyDebuggerTask extends PyBaseDebuggerTask {
 
       myDebugProcess.stop();
 
-      waitFor(processHandler);
+      if (myWaitForTermination) {
+        // for some tests (with infinite loops, for example, it has no sense)
+        waitFor(processHandler);
+      }
 
       if (!processHandler.isProcessTerminated()) {
         killDebugProcess();
@@ -213,7 +255,7 @@ public class PyDebuggerTask extends PyBaseDebuggerTask {
     }
   }
 
-  private void killDebugProcess() {
+  protected void killDebugProcess() {
     if (myDebugProcess.getProcessHandler() instanceof KillableColoredProcessHandler) {
       KillableColoredProcessHandler h = (KillableColoredProcessHandler)myDebugProcess.getProcessHandler();
 

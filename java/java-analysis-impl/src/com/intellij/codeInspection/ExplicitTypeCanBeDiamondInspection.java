@@ -15,7 +15,6 @@
  */
 package com.intellij.codeInspection;
 
-import com.intellij.codeInsight.FileModificationService;
 import com.intellij.codeInsight.daemon.GroupNames;
 import com.intellij.codeInsight.intention.HighPriorityAction;
 import com.intellij.openapi.diagnostic.Logger;
@@ -28,12 +27,8 @@ import com.intellij.psi.util.PsiTreeUtil;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 
-/**
- * User: anna
- * Date: 1/28/11
- */
 public class ExplicitTypeCanBeDiamondInspection extends BaseJavaBatchLocalInspectionTool {
-  public static final Logger LOG = Logger.getInstance("#" + ExplicitTypeCanBeDiamondInspection.class.getName());
+  public static final Logger LOG = Logger.getInstance(ExplicitTypeCanBeDiamondInspection.class);
 
   @Nls
   @NotNull
@@ -84,20 +79,13 @@ public class ExplicitTypeCanBeDiamondInspection extends BaseJavaBatchLocalInspec
   private static class ReplaceWithDiamondFix implements LocalQuickFix, HighPriorityAction {
     @NotNull
     @Override
-    public String getName() {
-      return "Replace with <>";
-    }
-
-    @NotNull
-    @Override
     public String getFamilyName() {
-      return getName();
+      return "Replace with <>";
     }
 
     @Override
     public void applyFix(@NotNull Project project, @NotNull ProblemDescriptor descriptor) {
       final PsiElement element = descriptor.getPsiElement();
-      if (!FileModificationService.getInstance().preparePsiElementForWrite(element)) return;
       final PsiNewExpression newExpression =
         PsiTreeUtil.getParentOfType(PsiDiamondTypeUtil.replaceExplicitWithDiamond(element), PsiNewExpression.class);
       if (newExpression != null) {

@@ -36,4 +36,8 @@ public class IpnbPyTargetExpressionElementType extends PyTargetExpressionElement
     return new IpnbPyTargetExpression(stub);
   }
 
+  @Override
+  public boolean shouldCreateStub(ASTNode node) {
+    return false;
+  }
 }

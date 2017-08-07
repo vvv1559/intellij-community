@@ -14,10 +14,6 @@
  * limitations under the License.
  */
 
-/*
- * User: anna
- * Date: 03-Jun-2009
- */
 package com.intellij.junit4;
 
 import com.intellij.rt.execution.junit.ComparisonFailureData;
@@ -45,7 +41,6 @@ public class JUnit4TestListener extends RunListener {
   private final PrintStream myPrintStream;
   private String myRootName;
   private long myCurrentTestStart;
-  private int myFinishedCount = 0;
 
   private Description myCurrentTest;
   private Map myWaitingQueue = new LinkedHashMap();
@@ -86,7 +81,7 @@ public class JUnit4TestListener extends RunListener {
     dumpQueue(true);
     for (int i = myStartedSuites.size() - 1; i>= 0; i--) {
       Object parent = JUnit4ReflectionUtil.getClassName((Description)myStartedSuites.get(i));
-      myPrintStream.println("##teamcity[testSuiteFinished name=\'" + escapeName(getShortName((String)parent)) + "\']");
+      myPrintStream.println("\n##teamcity[testSuiteFinished name=\'" + escapeName(getShortName((String)parent)) + "\']");
     }
     myStartedSuites.clear();
   }
@@ -130,8 +125,7 @@ public class JUnit4TestListener extends RunListener {
 
     for (int i = myStartedSuites.size() - 1; i >= idx; i--) {
       currentClass = (Description)myStartedSuites.remove(i);
-      myFinishedCount = 0;
-      myPrintStream.println("##teamcity[testSuiteFinished name=\'" + escapeName(getShortName(JUnit4ReflectionUtil.getClassName(currentClass))) + "\']");
+      myPrintStream.println("\n##teamcity[testSuiteFinished name=\'" + escapeName(getShortName(JUnit4ReflectionUtil.getClassName(currentClass))) + "\']");
     }
 
     for (int i = idx; i < parentsHierarchy.size(); i++) {
@@ -139,7 +133,7 @@ public class JUnit4TestListener extends RunListener {
       final String fqName = JUnit4ReflectionUtil.getClassName(descriptionFromHistory);
       final String className = getShortName(fqName);
       if (!className.equals(myRootName)) {
-        myPrintStream.println("##teamcity[testSuiteStarted name=\'" + escapeName(className) + "\'" + (parents == null ? getClassLocation(fqName) : "") + "]");
+        myPrintStream.println("\n##teamcity[testSuiteStarted name=\'" + escapeName(className) + "\'" + (parents == null ? getClassLocation(fqName) : "") + "]");
         myStartedSuites.add(descriptionFromHistory);
       }
     }
@@ -195,7 +189,6 @@ public class JUnit4TestListener extends RunListener {
 
   private void testFinishedNoDumping(final String methodName) {
     if (methodName != null) {
-      myFinishedCount++;
       final long duration = currentTime() - myCurrentTestStart;
       myPrintStream.println("\n##teamcity[testFinished name=\'" + escapeName(methodName) +
                             (duration > 0 ? "\' duration=\'"  + Long.toString(duration) : "") + "\']");
@@ -216,9 +209,7 @@ public class JUnit4TestListener extends RunListener {
         testFailure(failure, description, messageName, CLASS_CONFIGURATION);
         classConfigurationFinished(description);
       }
-
-      if (myFinishedCount == 0) {
-        //only setup failures
+      if (myStartedSuites.isEmpty() || !description.equals(myStartedSuites.get(myStartedSuites.size() - 1))) {
         for (Iterator iterator = description.getChildren().iterator(); iterator.hasNext(); ) {
           Description next = (Description)iterator.next();
           testStarted(next);
@@ -252,7 +243,7 @@ public class JUnit4TestListener extends RunListener {
     }
 
     myCurrentTest = description;
-    myPrintStream.println("##teamcity[testStarted name=\'" + escapeName(CLASS_CONFIGURATION) + "\' " + getClassLocation(JUnit4ReflectionUtil.getClassName(description)) + " ]");
+    myPrintStream.println("\n##teamcity[testStarted name=\'" + escapeName(CLASS_CONFIGURATION) + "\' " + getClassLocation(JUnit4ReflectionUtil.getClassName(description)) + " ]");
   }
 
   private void testFailure(Failure failure, Description description, String messageName, String methodName) {
@@ -268,7 +259,7 @@ public class JUnit4TestListener extends RunListener {
       return;
     }
 
-    final Map attrs = new HashMap();
+    final Map attrs = new LinkedHashMap();
     attrs.put("name", methodName);
     final long duration = currentTime() - myCurrentTestStart;
     if (duration > 0) {

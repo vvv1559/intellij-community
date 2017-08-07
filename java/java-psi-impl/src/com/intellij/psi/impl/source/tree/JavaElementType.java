@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -83,9 +83,15 @@ public interface JavaElementType {
   IElementType PARAMETER_LIST = JavaStubElementTypes.PARAMETER_LIST;
   IElementType EXTENDS_BOUND_LIST = JavaStubElementTypes.EXTENDS_BOUND_LIST;
   IElementType THROWS_LIST = JavaStubElementTypes.THROWS_LIST;
-  IElementType MODULE = JavaStubElementTypes.MODULE;
   IElementType LAMBDA_EXPRESSION = JavaStubElementTypes.LAMBDA_EXPRESSION;
   IElementType METHOD_REF_EXPRESSION = JavaStubElementTypes.METHOD_REFERENCE;
+  IElementType MODULE = JavaStubElementTypes.MODULE;
+  IElementType REQUIRES_STATEMENT = JavaStubElementTypes.REQUIRES_STATEMENT;
+  IElementType EXPORTS_STATEMENT = JavaStubElementTypes.EXPORTS_STATEMENT;
+  IElementType OPENS_STATEMENT = JavaStubElementTypes.OPENS_STATEMENT;
+  IElementType USES_STATEMENT = JavaStubElementTypes.USES_STATEMENT;
+  IElementType PROVIDES_STATEMENT = JavaStubElementTypes.PROVIDES_STATEMENT;
+  IElementType PROVIDES_WITH_LIST = JavaStubElementTypes.PROVIDES_WITH_LIST;
 
   IElementType IMPORT_STATIC_REFERENCE = new JavaCompositeElementType("IMPORT_STATIC_REFERENCE", PsiImportStaticReferenceElementImpl.class);
   IElementType TYPE = new JavaCompositeElementType("TYPE", PsiTypeElementImpl.class);
@@ -139,12 +145,7 @@ public interface JavaElementType {
   IElementType ASSERT_STATEMENT = new JavaCompositeElementType("ASSERT_STATEMENT", PsiAssertStatementImpl.class);
   IElementType ANNOTATION_ARRAY_INITIALIZER = new JavaCompositeElementType("ANNOTATION_ARRAY_INITIALIZER", PsiArrayInitializerMemberValueImpl.class);
   IElementType RECEIVER_PARAMETER = new JavaCompositeElementType("RECEIVER", PsiReceiverParameterImpl.class);
-
   IElementType MODULE_REFERENCE = new JavaCompositeElementType("MODULE_REFERENCE", PsiJavaModuleReferenceElementImpl.class);
-  IElementType REQUIRES_STATEMENT = new JavaCompositeElementType("REQUIRES_STATEMENT", PsiRequiresStatementImpl.class);
-  IElementType EXPORTS_STATEMENT = new JavaCompositeElementType("EXPORTS_STATEMENT", PsiExportsStatementImpl.class);
-  IElementType USES_STATEMENT = new JavaCompositeElementType("USES_STATEMENT", PsiUsesStatementImpl.class);
-  IElementType PROVIDES_STATEMENT = new JavaCompositeElementType("PROVIDES_STATEMENT", PsiProvidesStatementImpl.class);
 
   class ICodeBlockElementType extends IErrorCounterReparseableElementType implements ICompositeElementType, ILightLazyParseableElementType {
     private ICodeBlockElementType() {
@@ -179,24 +180,7 @@ public interface JavaElementType {
     @Override
     public int getErrorsCount(final CharSequence seq, Language fileLanguage, final Project project) {
       Lexer lexer = JavaParserDefinition.createLexer(LanguageLevel.HIGHEST);
-
-      lexer.start(seq);
-      if (lexer.getTokenType() != JavaTokenType.LBRACE) return IErrorCounterReparseableElementType.FATAL_ERROR;
-      lexer.advance();
-      int balance = 1;
-      while (true) {
-        IElementType type = lexer.getTokenType();
-        if (type == null) break;
-        if (balance == 0) return IErrorCounterReparseableElementType.FATAL_ERROR;
-        if (type == JavaTokenType.LBRACE) {
-          balance++;
-        }
-        else if (type == JavaTokenType.RBRACE) {
-          balance--;
-        }
-        lexer.advance();
-      }
-      return balance;
+      return PsiBuilderUtil.hasProperBraceBalance(seq, lexer, JavaTokenType.LBRACE, JavaTokenType.RBRACE) ? NO_ERRORS : FATAL_ERROR;
     }
   }
   ILazyParseableElementType CODE_BLOCK = new ICodeBlockElementType();

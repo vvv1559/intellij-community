@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,24 +21,28 @@ import com.intellij.codeInspection.ProblemDescriptor;
 import com.intellij.codeInspection.ProblemHighlightType;
 import com.intellij.openapi.components.ProjectComponent;
 import com.intellij.openapi.project.Project;
-import com.intellij.psi.*;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiField;
+import com.intellij.psi.PsiModifier;
+import com.intellij.psi.PsiReference;
 import com.intellij.psi.util.InheritanceUtil;
 import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-import org.jetbrains.idea.devkit.util.ExtensionPointLocator;
+import org.jetbrains.idea.devkit.util.ExtensionLocator;
+import org.jetbrains.uast.UClass;
 
 import java.util.List;
 
-public class StatefulEpInspection extends DevKitInspectionBase {
+public class StatefulEpInspection extends DevKitUastInspectionBase {
   @Nullable
   @Override
-  public ProblemDescriptor[] checkClass(@NotNull PsiClass psiClass, @NotNull InspectionManager manager, boolean isOnTheFly) {
+  public ProblemDescriptor[] checkClass(@NotNull UClass psiClass, @NotNull InspectionManager manager, boolean isOnTheFly) {
     PsiField[] fields = psiClass.getFields();
     if (fields.length == 0) return super.checkClass(psiClass, manager, isOnTheFly);
 
     final boolean isQuickFix = InheritanceUtil.isInheritor(psiClass, LocalQuickFix.class.getCanonicalName());
-    if (isQuickFix || ExtensionPointLocator.isRegisteredExtension(psiClass)) {
+    if (isQuickFix || ExtensionLocator.isRegisteredExtension(psiClass)) {
       final boolean isProjectComponent = InheritanceUtil.isInheritor(psiClass, ProjectComponent.class.getCanonicalName());
 
       List<ProblemDescriptor> result = ContainerUtil.newArrayList();

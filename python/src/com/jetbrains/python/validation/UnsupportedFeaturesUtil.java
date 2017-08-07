@@ -34,9 +34,6 @@ import java.io.FileReader;
 import java.io.IOException;
 import java.util.*;
 
-/**
- * User: catherine
- */
 public class UnsupportedFeaturesUtil {
   public static Map<LanguageLevel, Set<String>> BUILTINS = new HashMap<>();
   public static Map<LanguageLevel, Set<String>> MODULES = new HashMap<>();
@@ -144,9 +141,9 @@ public class UnsupportedFeaturesUtil {
   }
 
   public static boolean visitPyListCompExpression(final PyListCompExpression node, LanguageLevel versionToProcess) {
-    final List<ComprhForComponent> forComponents = node.getForComponents();
+    final List<PyComprehensionForComponent> forComponents = node.getForComponents();
     if (versionToProcess.isPy3K()) {
-      for (ComprhForComponent forComponent : forComponents) {
+      for (PyComprehensionForComponent forComponent : forComponents) {
         final PyExpression iteratedList = forComponent.getIteratedList();
         if (iteratedList instanceof PyTupleExpression) {
           return true;

@@ -15,7 +15,6 @@
  */
 package com.intellij.openapi.vfs.newvfs.persistent;
 
-import com.intellij.openapi.Forceable;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ApplicationNamesInfo;
 import com.intellij.openapi.application.PathManager;
@@ -27,13 +26,9 @@ import com.intellij.openapi.util.io.FileAttributes;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.vfs.newvfs.FileAttribute;
 import com.intellij.openapi.vfs.newvfs.impl.FileNameCache;
-import com.intellij.util.ArrayUtil;
-import com.intellij.util.BitUtil;
-import com.intellij.util.CompressionUtil;
-import com.intellij.util.SystemProperties;
+import com.intellij.util.*;
 import com.intellij.util.concurrency.AppExecutorUtil;
 import com.intellij.util.containers.ConcurrentIntObjectMap;
-import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.IntArrayList;
 import com.intellij.util.io.*;
 import com.intellij.util.io.DataOutputStream;
@@ -41,39 +36,40 @@ import com.intellij.util.io.storage.*;
 import gnu.trove.TIntArrayList;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.TestOnly;
 
 import javax.swing.*;
 import java.awt.*;
 import java.io.*;
 import java.nio.charset.Charset;
 import java.security.MessageDigest;
+import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.concurrent.ConcurrentMap;
+import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
-
-import static com.intellij.util.io.IOUtil.deleteAllFilesStartingWith;
 
 /**
  * @author max
  */
 @SuppressWarnings({"PointlessArithmeticExpression", "HardCodedStringLiteral"})
-public class FSRecords implements Forceable {
+public class FSRecords {
   private static final Logger LOG = Logger.getInstance("#com.intellij.vfs.persistent.FSRecords");
 
   public static final boolean weHaveContentHashes = SystemProperties.getBooleanProperty("idea.share.contents", true);
-  public static final boolean lazyVfsDataCleaning = SystemProperties.getBooleanProperty("idea.lazy.vfs.data.cleaning", true);
-  public static final boolean backgroundVfsFlush = SystemProperties.getBooleanProperty("idea.background.vfs.flush", true);
-  public static final boolean persistentAttributesList = SystemProperties.getBooleanProperty("idea.persistent.attr.list", true);
+  private static final boolean lazyVfsDataCleaning = SystemProperties.getBooleanProperty("idea.lazy.vfs.data.cleaning", true);
+  static final boolean backgroundVfsFlush = SystemProperties.getBooleanProperty("idea.background.vfs.flush", true);
   private static final boolean inlineAttributes = SystemProperties.getBooleanProperty("idea.inline.vfs.attributes", true);
-  public static final boolean bulkAttrReadSupport = SystemProperties.getBooleanProperty("idea.bulk.attr.read", false);
-  public static final boolean useSnappyForCompression = SystemProperties.getBooleanProperty("idea.use.snappy.for.vfs", false);
-  public static final boolean useSmallAttrTable = SystemProperties.getBooleanProperty("idea.use.small.attr.table.for.vfs", true);
+  static final boolean bulkAttrReadSupport = SystemProperties.getBooleanProperty("idea.bulk.attr.read", false);
+  static final boolean useSnappyForCompression = SystemProperties.getBooleanProperty("idea.use.snappy.for.vfs", false);
+  private static final boolean useSmallAttrTable = SystemProperties.getBooleanProperty("idea.use.small.attr.table.for.vfs", true);
   static final String VFS_FILES_EXTENSION = System.getProperty("idea.vfs.files.extension", ".dat");
+  private static final boolean ourStoreRootsSeparately = SystemProperties.getBooleanProperty("idea.store.roots.separately", false);
 
   private static final int VERSION = 21 + (weHaveContentHashes ? 0x10:0) + (IOUtil.ourByteBuffersUseNativeByteOrder ? 0x37:0) +
-                                     (persistentAttributesList ? 31 : 0) + (bulkAttrReadSupport ? 0x27:0) + (inlineAttributes ? 0x31 : 0) +
+                                     31 + (bulkAttrReadSupport ? 0x27:0) + (inlineAttributes ? 0x31 : 0) +
+                                     (ourStoreRootsSeparately ? 0x63 : 0) +
                                      (useSnappyForCompression ? 0x7f : 0) + (useSmallAttrTable ? 0x31 : 0) +
                                      (PersistentHashMapValueStorage.COMPRESSION_ENABLED ? 21:0);
 
@@ -114,7 +110,7 @@ public class FSRecords implements Forceable {
   private static final ReentrantReadWriteLock.ReadLock r;
   private static final ReentrantReadWriteLock.WriteLock w;
 
-  private static volatile int ourLocalModificationCount = 0;
+  private static volatile int ourLocalModificationCount;
   private static volatile boolean ourIsDisposed;
 
   private static final int FREE_RECORD_FLAG = 0x100;
@@ -145,14 +141,14 @@ public class FSRecords implements Forceable {
       setParent(id, parentId);
     }
     catch (Throwable e) {
-      throw DbConnection.handleError(e);
+      DbConnection.handleError(e);
     }
     finally {
       w.unlock();
     }
   }
 
-  public static void requestVfsRebuild(Throwable e) {
+  static void requestVfsRebuild(Throwable e) {
     //noinspection ThrowableResultOfMethodCallIgnored
     DbConnection.handleError(e);
   }
@@ -163,20 +159,20 @@ public class FSRecords implements Forceable {
 
   public static class DbConnection {
     private static boolean ourInitialized;
-    private static final ConcurrentMap<String, Integer> myAttributeIds = ContainerUtil.newConcurrentMap();
 
     private static PersistentStringEnumerator myNames;
     private static Storage myAttributes;
     private static RefCountingStorage myContents;
     private static ResizeableMappedFile myRecords;
     private static PersistentBTreeEnumerator<byte[]> myContentHashesEnumerator;
+    private static File myRootsFile;
     private static final VfsDependentEnum<String> myAttributesList =
       new VfsDependentEnum<>("attrib", EnumeratorStringDescriptor.INSTANCE, 1);
     private static final TIntArrayList myFreeRecords = new TIntArrayList();
 
-    private static boolean myDirty = false;
+    private static boolean myDirty;
     private static ScheduledFuture<?> myFlushingFuture;
-    private static boolean myCorrupted = false;
+    @SuppressWarnings("FieldAccessedSynchronizedAndUnsynchronized") private static boolean myCorrupted;
 
     private static final AttrPageAwareCapacityAllocationPolicy REASONABLY_SMALL = new AttrPageAwareCapacityAllocationPolicy();
 
@@ -217,25 +213,17 @@ public class FSRecords implements Forceable {
 
       try {
         final ByteArrayOutputStream out = new ByteArrayOutputStream();
-        final PrintStream stream = new PrintStream(out);
-        try {
+        try (PrintStream stream = new PrintStream(out)) {
           new Exception().printStackTrace(stream);
           if (reason != null) {
             stream.print("\nReason:\n");
             reason.printStackTrace(stream);
           }
         }
-        finally {
-          stream.close();
-        }
-        LOG.info("Creating VFS corruption marker; Trace=\n" + out.toString());
+        LOG.info("Creating VFS corruption marker; Trace=\n" + out);
 
-        final FileWriter writer = new FileWriter(brokenMarker);
-        try {
+        try (FileWriter writer = new FileWriter(brokenMarker)) {
           writer.write("These files are corrupted and must be rebuilt from the scratch on next startup");
-        }
-        finally {
-          writer.close();
         }
       }
       catch (IOException e) {
@@ -256,6 +244,7 @@ public class FSRecords implements Forceable {
       final File contentsFile = new File(basePath, "content" + VFS_FILES_EXTENSION);
       final File contentsHashesFile = new File(basePath, "contentHashes" + VFS_FILES_EXTENSION);
       final File recordsFile = new File(basePath, "records" + VFS_FILES_EXTENSION);
+      myRootsFile = ourStoreRootsSeparately ? new File(basePath, "roots" + VFS_FILES_EXTENSION) : null;
 
       final File vfsDependentEnumBaseFile = VfsDependentEnum.getBaseFile();
 
@@ -291,7 +280,9 @@ public class FSRecords implements Forceable {
         myRecords = new ResizeableMappedFile(recordsFile, 20 * 1024, storageLockContext,
                                              PagedFileStorage.BUFFER_SIZE, aligned, IOUtil.ourByteBuffersUseNativeByteOrder);
 
-        if (myRecords.length() == 0) {
+        boolean initial = myRecords.length() == 0;
+
+        if (initial) {
           cleanRecord(0); // Clean header
           cleanRecord(1); // Create root record
           setCurrentVersion();
@@ -304,7 +295,7 @@ public class FSRecords implements Forceable {
         if (myRecords.getInt(HEADER_CONNECTION_STATUS_OFFSET) != SAFELY_CLOSED_MAGIC) {
           throw new IOException("FS repository wasn't safely shut down");
         }
-        markDirty();
+        if (initial) markDirty();
         scanFreeRecords();
       }
       catch (Exception e) { // IOException, IllegalArgumentException
@@ -313,12 +304,13 @@ public class FSRecords implements Forceable {
           closeFiles();
 
           boolean deleted = FileUtil.delete(getCorruptionMarkerFile());
-          deleted &= deleteAllFilesStartingWith(namesFile);
+          deleted &= IOUtil.deleteAllFilesStartingWith(namesFile);
           deleted &= AbstractStorage.deleteFiles(attributesFile.getPath());
           deleted &= AbstractStorage.deleteFiles(contentsFile.getPath());
-          deleted &= deleteAllFilesStartingWith(contentsHashesFile);
-          deleted &= deleteAllFilesStartingWith(recordsFile);
-          deleted &= deleteAllFilesStartingWith(vfsDependentEnumBaseFile);
+          deleted &= IOUtil.deleteAllFilesStartingWith(contentsHashesFile);
+          deleted &= IOUtil.deleteAllFilesStartingWith(recordsFile);
+          deleted &= IOUtil.deleteAllFilesStartingWith(vfsDependentEnumBaseFile);
+          deleted &= myRootsFile == null || IOUtil.deleteAllFilesStartingWith(myRootsFile);
 
           if (!deleted) {
             throw new IOException("Cannot delete filesystem storage files");
@@ -394,7 +386,7 @@ public class FSRecords implements Forceable {
         @Override
         public void run() {
           if (lastModCount == ourLocalModificationCount) {
-            flushSome();
+            flush();
           }
           lastModCount = ourLocalModificationCount;
         }
@@ -404,23 +396,25 @@ public class FSRecords implements Forceable {
     public static void force() {
       w.lock();
       try {
-        if (myRecords != null) {
-          markClean();
-        }
-        if (myNames != null) {
-          myNames.force();
-          myAttributes.force();
-          myContents.force();
-          if (myContentHashesEnumerator != null) myContentHashesEnumerator.force();
-          myRecords.force();
-        }
+        doForce();
       }
       finally {
         w.unlock();
       }
     }
 
-    public static void flushSome() {
+    private static void doForce() {
+      if (myNames != null) {
+        myNames.force();
+        myAttributes.force();
+        myContents.force();
+        if (myContentHashesEnumerator != null) myContentHashesEnumerator.force();
+        markClean();
+        myRecords.force();
+      }
+    }
+
+    private static void flush() {
       if (!isDirty() || HeavyProcessLatch.INSTANCE.isRunning()) return;
 
       r.lock();
@@ -428,15 +422,7 @@ public class FSRecords implements Forceable {
         if (myFlushingFuture == null) {
           return; // avoid NPE when close has already taken place
         }
-        myNames.force();
-
-        final boolean attribsFlushed = myAttributes.flushSome();
-        final boolean contentsFlushed = myContents.flushSome();
-        if (myContentHashesEnumerator != null) myContentHashesEnumerator.force();
-        if (attribsFlushed && contentsFlushed) {
-          markClean();
-          myRecords.force();
-        }
+        doForce();
       }
       finally {
         r.unlock();
@@ -445,7 +431,7 @@ public class FSRecords implements Forceable {
 
     public static boolean isDirty() {
       return myDirty || myNames.isDirty() || myAttributes.isDirty() || myContents.isDirty() || myRecords.isDirty() ||
-             (myContentHashesEnumerator != null && myContentHashesEnumerator.isDirty());
+             myContentHashesEnumerator != null && myContentHashesEnumerator.isDirty();
     }
 
 
@@ -521,28 +507,33 @@ public class FSRecords implements Forceable {
     private static final int FIRST_ATTR_ID_OFFSET = bulkAttrReadSupport ? RESERVED_ATTR_ID : 0;
 
     private static int getAttributeId(@NotNull String attId) throws IOException {
-      if (persistentAttributesList) {
-        return myAttributesList.getId(attId) + FIRST_ATTR_ID_OFFSET;
-      }
-      Integer integer = myAttributeIds.get(attId);
-      if (integer != null) return integer.intValue();
-      int enumeratedId = myNames.enumerate(attId);
-      integer = myAttributeIds.putIfAbsent(attId, enumeratedId);
-      return integer == null ? enumeratedId:  integer.intValue();
+      return myAttributesList.getId(attId) + FIRST_ATTR_ID_OFFSET;
     }
 
-    private static RuntimeException handleError(final Throwable e) {
-      if (!ourIsDisposed) {
-        // No need to forcibly mark VFS corrupted if it is already shut down
-        if (!myCorrupted && w.tryLock()) { // avoid deadlock if r lock is occupied by current thread
-          w.unlock();
-          createBrokenMarkerFile(e);
-          myCorrupted = true;
-          force();
+    private static final Object CORRUPTION_LOCK = new Object();
+
+    private static void handleError(@NotNull Throwable e) throws RuntimeException, Error {
+      if (!ourIsDisposed) { // No need to forcibly mark VFS corrupted if it is already shut down
+        synchronized (CORRUPTION_LOCK) {  
+          if (!myCorrupted) {
+            createBrokenMarkerFile(e);
+            myCorrupted = true;
+            // avoid deadlock if r lock is occupied by current thread
+            if (canWriteWithoutDeadlock()) force();
+            else flush();
+          }
         }
       }
 
-      return new RuntimeException(e);
+      ExceptionUtil.rethrow(e);
+    }
+
+    private static boolean canWriteWithoutDeadlock() {
+      if (w.tryLock()) {
+        w.unlock();
+        return true;
+      }
+      return false;
     }
 
     private static class AttrPageAwareCapacityAllocationPolicy extends CapacityAllocationPolicy {
@@ -555,7 +546,7 @@ public class FSRecords implements Forceable {
     }
   }
 
-  public FSRecords() {
+  private FSRecords() {
   }
 
   public static void connect() {
@@ -573,6 +564,7 @@ public class FSRecords implements Forceable {
   }
 
   private static ResizeableMappedFile getRecords() {
+    assert DbConnection.myRecords != null:"Vfs should be initialized"; 
     return DbConnection.myRecords;
   }
 
@@ -614,11 +606,12 @@ public class FSRecords implements Forceable {
       }
     }
     catch (Throwable e) {
-      throw DbConnection.handleError(e);
+      DbConnection.handleError(e);
     }
     finally {
       w.unlock();
     }
+    return -1;
   }
 
   private static int length() {
@@ -645,7 +638,7 @@ public class FSRecords implements Forceable {
       }
     }
     catch (Throwable e) {
-      throw DbConnection.handleError(e);
+      DbConnection.handleError(e);
     }
     finally {
       w.unlock();
@@ -667,7 +660,7 @@ public class FSRecords implements Forceable {
       addToFreeRecordsList(id);
     }
     catch (Throwable e) {
-      throw DbConnection.handleError(e);
+      DbConnection.handleError(e);
     }
     finally {
       w.unlock();
@@ -692,7 +685,7 @@ public class FSRecords implements Forceable {
       addToFreeRecordsList(id);
     }
     catch (Throwable e) {
-      throw DbConnection.handleError(e);
+      DbConnection.handleError(e);
     }
     finally {
       w.unlock();
@@ -737,11 +730,31 @@ public class FSRecords implements Forceable {
     setFlags(id, FREE_RECORD_FLAG, false);
   }
 
+  private static final int ROOT_RECORD_ID = 1;
+
+  @NotNull
   static int[] listRoots() {
     try {
       r.lock();
       try {
-        final DataInputStream input = readAttribute(1, ourChildrenAttr);
+        if (ourStoreRootsSeparately) {
+          TIntArrayList result = new TIntArrayList();
+
+          try {
+            try (LineNumberReader stream = new LineNumberReader(new BufferedReader(new InputStreamReader(new FileInputStream(DbConnection.myRootsFile))))) {
+              String str;
+              while((str = stream.readLine()) != null) {
+                int index = str.indexOf(' ');
+                int id = Integer.parseInt(str.substring(0, index));
+                result.add(id);
+              }
+            }
+          } catch (FileNotFoundException ignored) {}
+
+          return result.toNativeArray();
+        }
+
+        final DataInputStream input = readAttribute(ROOT_RECORD_ID, ourChildrenAttr);
         if (input == null) return ArrayUtil.EMPTY_INT_ARRAY;
 
         try {
@@ -763,17 +776,18 @@ public class FSRecords implements Forceable {
       }
     }
     catch (Throwable e) {
-      throw DbConnection.handleError(e);
+      DbConnection.handleError(e);
+      return ArrayUtil.EMPTY_INT_ARRAY;
     }
   }
 
-  @Override
-  public void force() {
+  @TestOnly
+  public static void force() {
     DbConnection.force();
   }
 
-  @Override
-  public boolean isDirty() {
+  @TestOnly
+  public static boolean isDirty() {
     return DbConnection.isDirty();
   }
 
@@ -789,14 +803,35 @@ public class FSRecords implements Forceable {
     }
   }
 
-  public static int findRootRecord(@NotNull String rootUrl) {
+  static int findRootRecord(@NotNull String rootUrl) {
     w.lock();
 
     try {
-      DbConnection.markDirty();
-      final int root = getNames().enumerate(rootUrl);
+      if (ourStoreRootsSeparately) {
+        try {
+          try (LineNumberReader stream = new LineNumberReader(new BufferedReader(new InputStreamReader(new FileInputStream(DbConnection.myRootsFile))))) {
+            String str;
+            while((str = stream.readLine()) != null) {
+              int index = str.indexOf(' ');
 
-      final DataInputStream input = readAttribute(1, ourChildrenAttr);
+              if (str.substring(index + 1).equals(rootUrl)) {
+                return Integer.parseInt(str.substring(0, index));
+              }
+            }
+          }
+        } catch (FileNotFoundException ignored) {}
+
+        DbConnection.markDirty();
+        try (Writer stream = new BufferedWriter(new OutputStreamWriter(new FileOutputStream(DbConnection.myRootsFile, true)))) {
+          int id = createRecord();
+          stream.write(id + " " + rootUrl + "\n");
+          return id;
+        }
+      }
+
+      int root = getNames().tryEnumerate(rootUrl);
+
+      final DataInputStream input = readAttribute(ROOT_RECORD_ID, ourChildrenAttr);
       int[] names = ArrayUtil.EMPTY_INT_ARRAY;
       int[] ids = ArrayUtil.EMPTY_INT_ARRAY;
 
@@ -824,9 +859,11 @@ public class FSRecords implements Forceable {
         }
       }
 
-      final DataOutputStream output = writeAttribute(1, ourChildrenAttr);
+      DbConnection.markDirty();
+      root = getNames().enumerate(rootUrl);
+
       int id;
-      try {
+      try (DataOutputStream output = writeAttribute(ROOT_RECORD_ID, ourChildrenAttr)) {
         id = createRecord();
 
         int index = Arrays.binarySearch(ids, id);
@@ -835,31 +872,53 @@ public class FSRecords implements Forceable {
 
         saveNameIdSequenceWithDeltas(names, ids, output);
       }
-      finally {
-        output.close();
-      }
 
       return id;
-    } catch (Throwable e) {
-      throw DbConnection.handleError(e);
+    }
+    catch (Throwable e) {
+      DbConnection.handleError(e);
     }
     finally {
       w.unlock();
     }
+    return -1;
   }
 
-  public static void deleteRootRecord(int id) {
+  static void deleteRootRecord(int id) {
     w.lock();
 
     try {
       DbConnection.markDirty();
-      final DataInputStream input = readAttribute(1, ourChildrenAttr);
+      if (ourStoreRootsSeparately) {
+        List<String> rootsThatLeft = new ArrayList<>();
+        try {
+          try (LineNumberReader stream = new LineNumberReader(new BufferedReader(new InputStreamReader(new FileInputStream(DbConnection.myRootsFile))))) {
+            String str;
+            while((str = stream.readLine()) != null) {
+              int index = str.indexOf(' ');
+              int rootId = Integer.parseInt(str.substring(0, index));
+              if (rootId != id) {
+                rootsThatLeft.add(str);
+              }
+            }
+          }
+        } catch (FileNotFoundException ignored) {}
+
+        try (Writer stream = new BufferedWriter(new OutputStreamWriter(new FileOutputStream(DbConnection.myRootsFile)))) {
+          for(String line:rootsThatLeft) {
+            stream.write(line);
+            stream.write("\n");
+          }
+        }
+        return;
+      }
+
+      final DataInputStream input = readAttribute(ROOT_RECORD_ID, ourChildrenAttr);
       assert input != null;
-      int count;
       int[] names;
       int[] ids;
       try {
-        count = DataInputOutputUtil.readINT(input);
+        int count = DataInputOutputUtil.readINT(input);
 
         names = ArrayUtil.newIntArray(count);
         ids = ArrayUtil.newIntArray(count);
@@ -882,21 +941,19 @@ public class FSRecords implements Forceable {
       names = ArrayUtil.remove(names, index);
       ids = ArrayUtil.remove(ids, index);
 
-      final DataOutputStream output = writeAttribute(1, ourChildrenAttr);
-      try {
+      try (DataOutputStream output = writeAttribute(ROOT_RECORD_ID, ourChildrenAttr)) {
         saveNameIdSequenceWithDeltas(names, ids, output);
       }
-      finally {
-        output.close();
-      }
-    } catch (Throwable e) {
-      throw DbConnection.handleError(e);
+    }
+    catch (Throwable e) {
+      DbConnection.handleError(e);
     }
     finally {
       w.unlock();
     }
   }
 
+  @NotNull
   public static int[] list(int id) {
     try {
       r.lock();
@@ -918,11 +975,13 @@ public class FSRecords implements Forceable {
       }
     }
     catch (Throwable e) {
-      throw DbConnection.handleError(e);
+      DbConnection.handleError(e);
+      return ArrayUtil.EMPTY_INT_ARRAY;
     }
   }
 
   public static class NameId {
+    @NotNull
     public static final NameId[] EMPTY_ARRAY = new NameId[0];
     public final int id;
     public final CharSequence name;
@@ -965,11 +1024,12 @@ public class FSRecords implements Forceable {
       }
     }
     catch (Throwable e) {
-      throw DbConnection.handleError(e);
+      DbConnection.handleError(e);
+      return NameId.EMPTY_ARRAY;
     }
   }
 
-  public static boolean wereChildrenAccessed(int id) {
+  static boolean wereChildrenAccessed(int id) {
     try {
       r.lock();
       try {
@@ -979,33 +1039,35 @@ public class FSRecords implements Forceable {
       }
     }
     catch (Throwable e) {
-      throw DbConnection.handleError(e);
+      DbConnection.handleError(e);
     }
+    return false;
   }
 
-  public static void updateList(int id, @NotNull int[] children) {
+  static void updateList(int id, @NotNull int[] childIds) {
+    Arrays.sort(childIds);
     w.lock();
     try {
       DbConnection.markDirty();
-      final DataOutputStream record = writeAttribute(id, ourChildrenAttr);
-      DataInputOutputUtil.writeINT(record, children.length);
-      int prevId = id;
+      try (DataOutputStream record = writeAttribute(id, ourChildrenAttr)) {
+        DataInputOutputUtil.writeINT(record, childIds.length);
 
-      Arrays.sort(children);
-
-      for (int child : children) {
-        if (child == id) {
-          LOG.error("Cyclic parent child relations");
-        }
-        else {
-          DataInputOutputUtil.writeINT(record, child - prevId);
-          prevId = child;
+        int prevId = id;
+        for (int childId : childIds) {
+          assert childId > 0 : childId;
+          if (childId == id) {
+            LOG.error("Cyclic parent child relations");
+          }
+          else {
+            int delta = childId - prevId;
+            DataInputOutputUtil.writeINT(record, delta);
+            prevId = childId;
+          }
         }
       }
-      record.close();
     }
     catch (Throwable e) {
-      throw DbConnection.handleError(e);
+      DbConnection.handleError(e);
     }
     finally {
       w.unlock();
@@ -1013,28 +1075,23 @@ public class FSRecords implements Forceable {
   }
 
   private static void incModCount(int id) {
-    DbConnection.markDirty();
-    ourLocalModificationCount++;
+    incLocalModCount();
     final int count = getModCount() + 1;
     getRecords().putInt(HEADER_GLOBAL_MOD_COUNT_OFFSET, count);
 
-    int parent = id;
-    int depth = 10000;
-    while (parent != 0) {
-      setModCount(parent, count);
-      parent = getParent(parent);
-      if (depth -- == 0) {
-        LOG.error("Cyclic parent child relation? file: " + getName(id));
-        return;
-      }
-    }
+    setModCount(id, count);
   }
 
-  public static int getLocalModCount() {
+  private static void incLocalModCount() {
+    DbConnection.markDirty();
+    ourLocalModificationCount++;
+  }
+
+  static int getLocalModCount() {
     return ourLocalModificationCount; // This is volatile, only modified under Application.runWriteAction() lock.
   }
 
-  public static int getModCount() {
+  static int getModCount() {
     r.lock();
     try {
       return getRecords().getInt(HEADER_GLOBAL_MOD_COUNT_OFFSET);
@@ -1061,13 +1118,14 @@ public class FSRecords implements Forceable {
       }
     }
     catch (Throwable e) {
-      throw DbConnection.handleError(e);
+      DbConnection.handleError(e);
     }
+    return -1;
   }
 
   // returns id, parent(id), parent(parent(id)), ...  (already cached id or rootId)
   @NotNull
-  public static TIntArrayList getParents(int id, @NotNull ConcurrentIntObjectMap<?> idCache) {
+  static TIntArrayList getParents(int id, @NotNull ConcurrentIntObjectMap<?> idCache) {
     TIntArrayList result = new TIntArrayList(10);
     r.lock();
     try {
@@ -1086,7 +1144,7 @@ public class FSRecords implements Forceable {
       } while (parentId != 0);
     }
     catch (Throwable e) {
-      throw DbConnection.handleError(e);
+      DbConnection.handleError(e);
     }
     finally {
       r.unlock();
@@ -1094,8 +1152,8 @@ public class FSRecords implements Forceable {
     return result;
   }
 
-  public static void setParent(int id, int parent) {
-    if (id == parent) {
+  static void setParent(int id, int parentId) {
+    if (id == parentId) {
       LOG.error("Cyclic parent/child relations");
       return;
     }
@@ -1103,17 +1161,17 @@ public class FSRecords implements Forceable {
     w.lock();
     try {
       incModCount(id);
-      putRecordInt(id, PARENT_OFFSET, parent);
+      putRecordInt(id, PARENT_OFFSET, parentId);
     }
     catch (Throwable e) {
-      throw DbConnection.handleError(e);
+      DbConnection.handleError(e);
     }
     finally {
       w.unlock();
     }
   }
 
-  public static int getNameId(int id) {
+  static int getNameId(int id) {
     try {
       r.lock();
       try {
@@ -1124,8 +1182,9 @@ public class FSRecords implements Forceable {
       }
     }
     catch (Throwable e) {
-      throw DbConnection.handleError(e);
+      DbConnection.handleError(e);
     }
+    return -1;
   }
 
   public static int getNameId(String name) {
@@ -1139,27 +1198,30 @@ public class FSRecords implements Forceable {
       }
     }
     catch (Throwable e) {
-      throw DbConnection.handleError(e);
+      DbConnection.handleError(e);
     }
+    return -1;
   }
 
   public static String getName(int id) {
     return getNameSequence(id).toString();
   }
 
-  public static CharSequence getNameSequence(int id) {
+  @NotNull
+  static CharSequence getNameSequence(int id) {
     try {
       r.lock();
       try {
         final int nameId = getRecordInt(id, NAME_OFFSET);
-        return nameId != 0 ? FileNameCache.getVFileName(nameId) : "";
+        return nameId == 0 ? "" : FileNameCache.getVFileName(nameId);
       }
       finally {
         r.unlock();
       }
     }
     catch (Throwable e) {
-      throw DbConnection.handleError(e);
+      DbConnection.handleError(e);
+      return "";
     }
   }
 
@@ -1174,25 +1236,27 @@ public class FSRecords implements Forceable {
       }
     }
     catch (Throwable e) {
-      throw DbConnection.handleError(e);
+      DbConnection.handleError(e);
     }
+    return null;
   }
 
   public static void setName(int id, @NotNull String name) {
     w.lock();
     try {
       incModCount(id);
-      putRecordInt(id, NAME_OFFSET, getNames().enumerate(name));
+      int nameId = getNames().enumerate(name);
+      putRecordInt(id, NAME_OFFSET, nameId);
     }
     catch (Throwable e) {
-      throw DbConnection.handleError(e);
+      DbConnection.handleError(e);
     }
     finally {
       w.unlock();
     }
   }
 
-  public static int getFlags(int id) {
+  static int getFlags(int id) {
     r.lock();
     try {
       return getRecordInt(id, FLAGS_OFFSET);
@@ -1202,7 +1266,7 @@ public class FSRecords implements Forceable {
     }
   }
 
-  public static void setFlags(int id, int flags, final boolean markAsChange) {
+  static void setFlags(int id, int flags, final boolean markAsChange) {
     w.lock();
     try {
       if (markAsChange) {
@@ -1211,7 +1275,7 @@ public class FSRecords implements Forceable {
       putRecordInt(id, FLAGS_OFFSET, flags);
     }
     catch (Throwable e) {
-      throw DbConnection.handleError(e);
+      DbConnection.handleError(e);
     }
     finally {
       w.unlock();
@@ -1231,11 +1295,15 @@ public class FSRecords implements Forceable {
   public static void setLength(int id, long len) {
     w.lock();
     try {
-      incModCount(id);
-      getRecords().putLong(getOffset(id, LENGTH_OFFSET), len);
+      ResizeableMappedFile records = getRecords();
+      int lengthOffset = getOffset(id, LENGTH_OFFSET);
+      if (records.getLong(lengthOffset) != len) {
+        incModCount(id);
+        records.putLong(lengthOffset, len);
+      }
     }
     catch (Throwable e) {
-      throw DbConnection.handleError(e);
+      DbConnection.handleError(e);
     }
     finally {
       w.unlock();
@@ -1255,18 +1323,22 @@ public class FSRecords implements Forceable {
   public static void setTimestamp(int id, long value) {
     w.lock();
     try {
-      incModCount(id);
-      getRecords().putLong(getOffset(id, TIMESTAMP_OFFSET), value);
+      int timeStampOffset = getOffset(id, TIMESTAMP_OFFSET);
+      ResizeableMappedFile records = getRecords();
+      if (records.getLong(timeStampOffset) != value) {
+        incModCount(id);
+        records.putLong(timeStampOffset, value);
+      }
     }
     catch (Throwable e) {
-      throw DbConnection.handleError(e);
+      DbConnection.handleError(e);
     }
     finally {
       w.unlock();
     }
   }
 
-  public static int getModCount(int id) {
+  static int getModCount(int id) {
     r.lock();
     try {
       return getRecordInt(id, MOD_COUNT_OFFSET);
@@ -1311,8 +1383,8 @@ public class FSRecords implements Forceable {
   @Nullable
   public static DataInputStream readContent(int fileId) {
     try {
-      int page;
       r.lock();
+      int page;
       try {
         checkFileIsValid(fileId);
 
@@ -1325,18 +1397,20 @@ public class FSRecords implements Forceable {
       return doReadContentById(page);
     }
     catch (Throwable e) {
-      throw DbConnection.handleError(e);
+      DbConnection.handleError(e);
     }
+    return null;
   }
 
   @Nullable
-  public static DataInputStream readContentById(int contentId) {
+  static DataInputStream readContentById(int contentId) {
     try {
       return doReadContentById(contentId);
     }
     catch (Throwable e) {
-      throw DbConnection.handleError(e);
+      DbConnection.handleError(e);
     }
+    return null;
   }
 
   private static DataInputStream doReadContentById(int contentId) throws IOException {
@@ -1375,8 +1449,9 @@ public class FSRecords implements Forceable {
       }
     }
     catch (Throwable e) {
-      throw DbConnection.handleError(e);
+      DbConnection.handleError(e);
     }
+    return null;
   }
 
   // should be called under r or w lock
@@ -1390,10 +1465,9 @@ public class FSRecords implements Forceable {
 
     Storage storage = getAttributesStorage();
 
-    DataInputStream attrRefs = storage.readStream(recordId);
     int page = 0;
 
-    try {
+    try (DataInputStream attrRefs = storage.readStream(recordId)) {
       if (bulkAttrReadSupport) skipRecordHeader(attrRefs, DbConnection.RESERVED_ATTR_ID, fileId);
 
       while (attrRefs.available() > 0) {
@@ -1404,7 +1478,8 @@ public class FSRecords implements Forceable {
           if (inlineAttributes && attrAddressOrSize < MAX_SMALL_ATTR_SIZE) {
             attrRefs.skipBytes(attrAddressOrSize);
           }
-        } else {
+        }
+        else {
           if (inlineAttributes && attrAddressOrSize < MAX_SMALL_ATTR_SIZE) {
             byte[] b = new byte[attrAddressOrSize];
             attrRefs.readFully(b);
@@ -1414,9 +1489,6 @@ public class FSRecords implements Forceable {
           break;
         }
       }
-    }
-    finally {
-      attrRefs.close();
     }
 
     if (page == 0) {
@@ -1449,9 +1521,7 @@ public class FSRecords implements Forceable {
       directoryRecord = true;
     }
     else {
-      DataInputStream attrRefs = storage.readStream(recordId);
-
-      try {
+      try (DataInputStream attrRefs = storage.readStream(recordId)) {
         if (bulkAttrReadSupport) skipRecordHeader(attrRefs, DbConnection.RESERVED_ATTR_ID, fileId);
 
         while (attrRefs.available() > 0) {
@@ -1461,19 +1531,17 @@ public class FSRecords implements Forceable {
           if (attIdOnPage == encodedAttrId) {
             if (inlineAttributes) {
               return attrAddressOrSize < MAX_SMALL_ATTR_SIZE ? -recordId : attrAddressOrSize - MAX_SMALL_ATTR_SIZE;
-            } else {
+            }
+            else {
               return attrAddressOrSize;
             }
-          } else {
+          }
+          else {
             if (inlineAttributes && attrAddressOrSize < MAX_SMALL_ATTR_SIZE) {
               attrRefs.skipBytes(attrAddressOrSize);
             }
           }
-
         }
-      }
-      finally {
-        attrRefs.close();
       }
     }
 
@@ -1521,7 +1589,7 @@ public class FSRecords implements Forceable {
     }
   }
 
-  public static int acquireFileContent(int fileId) {
+  static int acquireFileContent(int fileId) {
     w.lock();
     try {
       int record = getContentRecordId(fileId);
@@ -1529,14 +1597,15 @@ public class FSRecords implements Forceable {
       return record;
     }
     catch (Throwable e) {
-      throw DbConnection.handleError(e);
+      DbConnection.handleError(e);
     }
     finally {
       w.unlock();
     }
+    return -1;
   }
 
-  public static void releaseContent(int contentId) {
+  static void releaseContent(int contentId) {
     w.lock();
     try {
       RefCountingStorage contentStorage = getContentStorage();
@@ -1547,8 +1616,9 @@ public class FSRecords implements Forceable {
       }
     }
     catch (Throwable e) {
-      throw DbConnection.handleError(e);
-    } finally {
+      DbConnection.handleError(e);
+    }
+    finally {
       w.unlock();
     }
   }
@@ -1564,26 +1634,24 @@ public class FSRecords implements Forceable {
       }
     }
     catch (Throwable e) {
-      throw DbConnection.handleError(e);
+      DbConnection.handleError(e);
     }
+    return -1;
   }
 
   @NotNull
-  public static DataOutputStream writeContent(int fileId, boolean readOnly) {
+  static DataOutputStream writeContent(int fileId, boolean readOnly) {
     return new ContentOutputStream(fileId, readOnly);
   }
 
   private static final MessageDigest myDigest = ContentHashesUtil.createHashDigest();
 
-  public static void writeContent(int fileId, ByteSequence bytes, boolean readOnly) throws IOException {
-    try {
-      new ContentOutputStream(fileId, readOnly).writeBytes(bytes);
-    } catch (Throwable e) {
-      throw DbConnection.handleError(e);
-    }
+  static void writeContent(int fileId, ByteSequence bytes, boolean readOnly) {
+    //noinspection IOResourceOpenedButNotSafelyClosed
+    new ContentOutputStream(fileId, readOnly).writeBytes(bytes);
   }
 
-  public static int storeUnlinkedContent(byte[] bytes) {
+  static int storeUnlinkedContent(byte[] bytes) {
     w.lock();
     try {
       int recordId;
@@ -1601,10 +1669,12 @@ public class FSRecords implements Forceable {
       return recordId;
     }
     catch (IOException e) {
-      throw DbConnection.handleError(e);
-    } finally {
+      DbConnection.handleError(e);
+    }
+    finally {
       w.unlock();
     }
+    return -1;
   }
 
   @NotNull
@@ -1622,8 +1692,8 @@ public class FSRecords implements Forceable {
   }
 
   private static class ContentOutputStream extends DataOutputStream {
-    protected final int myFileId;
-    protected final boolean myFixedSize;
+    final int myFileId;
+    final boolean myFixedSize;
 
     private ContentOutputStream(final int fileId, boolean readOnly) {
       super(new BufferExposingByteArrayOutputStream());
@@ -1635,37 +1705,34 @@ public class FSRecords implements Forceable {
     public void close() throws IOException {
       super.close();
 
-      try {
-        final BufferExposingByteArrayOutputStream _out = (BufferExposingByteArrayOutputStream)out;
-        writeBytes(new ByteSequence(_out.getInternalBuffer(), 0, _out.size()));
-      }
-      catch (Throwable e) {
-        throw DbConnection.handleError(e);
-      }
+      final BufferExposingByteArrayOutputStream _out = (BufferExposingByteArrayOutputStream)out;
+      writeBytes(new ByteSequence(_out.getInternalBuffer(), 0, _out.size()));
     }
 
-    public void writeBytes(ByteSequence bytes) throws IOException {
-      int page;
+    private void writeBytes(ByteSequence bytes) {
       RefCountingStorage contentStorage = getContentStorage();
-      final boolean fixedSize;
       w.lock();
       try {
-        incModCount(myFileId);
-
         checkFileIsValid(myFileId);
 
+        int page;
+        final boolean fixedSize;
         if (weHaveContentHashes) {
           page = findOrCreateContentRecord(bytes.getBytes(), bytes.getOffset(), bytes.getLength());
 
-          incModCount(myFileId);
-          checkFileIsValid(myFileId);
+          if (page < 0 || getContentId(myFileId) != page) {
+            incModCount(myFileId);
+            setContentRecordId(myFileId, page > 0 ? page : -page);
+          }
 
           setContentRecordId(myFileId, page > 0 ? page : -page);
 
           if (page > 0) return;
           page = -page;
           fixedSize = true;
-        } else {
+        }
+        else {
+          incModCount(myFileId);
           page = getContentRecordId(myFileId);
           if (page == 0 || contentStorage.getRefCount(page) > 1) {
             page = contentStorage.acquireNewRecord();
@@ -1677,16 +1744,14 @@ public class FSRecords implements Forceable {
         if (useSnappyForCompression) {
           BufferExposingByteArrayOutputStream out = new BufferExposingByteArrayOutputStream();
           DataOutputStream outputStream = new DataOutputStream(out);
-          byte[] rawBytes = bytes.getBytes();
-          if (bytes.getOffset() != 0) {
-            rawBytes = new byte[bytes.getLength()];
-            System.arraycopy(bytes.getBytes(), bytes.getOffset(), rawBytes, 0, bytes.getLength());
-          }
-          CompressionUtil.writeCompressed(outputStream, rawBytes, bytes.getLength());
+          CompressionUtil.writeCompressed(outputStream, bytes.getBytes(), bytes.getOffset(), bytes.getLength());
           outputStream.close();
           bytes = new ByteSequence(out.getInternalBuffer(), 0, out.size());
         }
         contentStorage.writeBytes(page, bytes, fixedSize);
+      }
+      catch (Throwable e) {
+        DbConnection.handleError(e);
       }
       finally {
         w.unlock();
@@ -1694,21 +1759,22 @@ public class FSRecords implements Forceable {
     }
   }
 
-  private static final boolean DO_HARD_CONSISTENCY_CHECK = false;
   private static final boolean DUMP_STATISTICS = weHaveContentHashes;  // TODO: remove once not needed
-  private static long totalContents, totalReuses, time;
-  private static int contents, reuses;
+  private static long totalContents;
+  private static long totalReuses;
+  private static long time;
+  private static int contents;
+  private static int reuses;
 
   private static int findOrCreateContentRecord(byte[] bytes, int offset, int length) throws IOException {
     assert weHaveContentHashes;
-    byte[] digest;
 
     long started = DUMP_STATISTICS ? System.nanoTime():0;
     myDigest.reset();
     myDigest.update(String.valueOf(length - offset).getBytes(Charset.defaultCharset()));
     myDigest.update("\0".getBytes(Charset.defaultCharset()));
     myDigest.update(bytes, offset, length);
-    digest = myDigest.digest();
+    byte[] digest = myDigest.digest();
     long done = DUMP_STATISTICS ? System.nanoTime() - started : 0;
     time += done;
 
@@ -1716,7 +1782,7 @@ public class FSRecords implements Forceable {
     totalContents += length;
 
     if (DUMP_STATISTICS && (contents & 0x3FFF) == 0) {
-      LOG.info("Contents:"+contents + " of " + totalContents + ", reuses:"+reuses + " of " + totalReuses + " for " + (time / 1000000));
+      LOG.info("Contents:" + contents + " of " + totalContents + ", reuses:" + reuses + " of " + totalReuses + " for " + time / 1000000);
     }
     PersistentBTreeEnumerator<byte[]> hashesEnumerator = getContentHashesEnumerator();
     final int largestId = hashesEnumerator.getLargestId();
@@ -1726,38 +1792,12 @@ public class FSRecords implements Forceable {
       ++reuses;
       getContentStorage().acquireRecord(page);
       totalReuses += length;
-
-      if (DO_HARD_CONSISTENCY_CHECK) {
-        DataInputStream stream = doReadContentById(page);
-        int i = offset;
-        for(int c = 0; c < length; ++c) {
-          if (stream.available() == 0) {
-            assert false;
-          }
-          if (bytes[i++] != stream.readByte()) {
-            assert false;
-          }
-        }
-        if (stream.available() > 0) {
-          assert false;
-        }
-      }
+      
       return page;
     } else {
       int newRecord = getContentStorage().acquireNewRecord();
-      if (page != newRecord) {
-        assert false:"Unexpected content storage modification";
-      }
-      if (DO_HARD_CONSISTENCY_CHECK) {
-        if (hashesEnumerator.enumerate(digest) != page) {
-          assert false;
-        }
-
-        byte[] bytes1 = hashesEnumerator.valueOf(page);
-        if (!Arrays.equals(digest, bytes1)) {
-          assert false;
-        }
-      }
+      assert page == newRecord :"Unexpected content storage modification";
+      
       return -page;
     }
   }
@@ -1782,21 +1822,18 @@ public class FSRecords implements Forceable {
         if (inlineAttributes && _out.size() < MAX_SMALL_ATTR_SIZE) {
           w.lock();
           try {
-
             rewriteDirectoryRecordWithAttrContent(_out);
-            incModCount(myFileId);
-
-            return;
+            incLocalModCount();
           }
           finally {
             w.unlock();
           }
-        } else {
-          int page;
+        }
+        else {
           w.lock();
           try {
-            incModCount(myFileId);
-            page = findAttributePage(myFileId, myAttribute, true);
+            incLocalModCount();
+            int page = findAttributePage(myFileId, myAttribute, true);
             if (inlineAttributes && page < 0) {
               rewriteDirectoryRecordWithAttrContent(new BufferExposingByteArrayOutputStream());
               page = findAttributePage(myFileId, myAttribute, true);
@@ -1804,15 +1841,13 @@ public class FSRecords implements Forceable {
 
             if (bulkAttrReadSupport) {
               BufferExposingByteArrayOutputStream stream = new BufferExposingByteArrayOutputStream();
-              BufferExposingByteArrayOutputStream oldOut = _out;
               out = stream;
               writeRecordHeader(DbConnection.getAttributeId(myAttribute.getId()), myFileId, this);
-              write(oldOut.getInternalBuffer(), 0, oldOut.size());
-              getAttributesStorage()
-                .writeBytes(page, new ByteSequence(stream.getInternalBuffer(), 0, stream.size()), myAttribute.isFixedSize());
-            } else {
-              getAttributesStorage()
-                .writeBytes(page, new ByteSequence(_out.getInternalBuffer(), 0, _out.size()), myAttribute.isFixedSize());
+              write(_out.getInternalBuffer(), 0, _out.size());
+              getAttributesStorage().writeBytes(page, new ByteSequence(stream.getInternalBuffer(), 0, stream.size()), myAttribute.isFixedSize());
+            }
+            else {
+              getAttributesStorage().writeBytes(page, new ByteSequence(_out.getInternalBuffer(), 0, _out.size()), myAttribute.isFixedSize());
             }
           }
           finally {
@@ -1821,11 +1856,11 @@ public class FSRecords implements Forceable {
         }
       }
       catch (Throwable e) {
-        throw DbConnection.handleError(e);
+        DbConnection.handleError(e);
       }
     }
 
-    protected void rewriteDirectoryRecordWithAttrContent(BufferExposingByteArrayOutputStream _out) throws IOException {
+    void rewriteDirectoryRecordWithAttrContent(BufferExposingByteArrayOutputStream _out) throws IOException {
       int recordId = getAttributeRecordId(myFileId);
       assert inlineAttributes;
       int encodedAttrId = DbConnection.getAttributeId(myAttribute.getId());
@@ -1864,6 +1899,7 @@ public class FSRecords implements Forceable {
             if (attIdOnPage != encodedAttrId) {
               if (dataStream == null) {
                 unchangedPreviousDirectoryStream = new BufferExposingByteArrayOutputStream();
+                //noinspection IOResourceOpenedButNotSafelyClosed
                 dataStream = new DataOutputStream(unchangedPreviousDirectoryStream);
               }
               DataInputOutputUtil.writeINT(dataStream, attIdOnPage);
@@ -1874,7 +1910,8 @@ public class FSRecords implements Forceable {
                 attrRefs.readFully(b);
                 dataStream.write(b);
               }
-            } else {
+            }
+            else {
               if (attrAddressOrSize < MAX_SMALL_ATTR_SIZE) {
                 if (_out.size() == attrAddressOrSize) {
                   // update inplace when new attr has the same size
@@ -1917,7 +1954,7 @@ public class FSRecords implements Forceable {
       DbConnection.closeFiles();
     }
     catch (Throwable e) {
-      throw DbConnection.handleError(e);
+      DbConnection.handleError(e);
     }
     finally {
       ourIsDisposed = true;
@@ -1929,7 +1966,7 @@ public class FSRecords implements Forceable {
     DbConnection.createBrokenMarkerFile(null);
   }
 
-  public static void checkSanity() {
+  static void checkSanity() {
     long t = System.currentTimeMillis();
 
     r.lock();
@@ -1997,7 +2034,7 @@ public class FSRecords implements Forceable {
         checkAttributesSanity(attributeRecordId, usedAttributeRecordIds, validAttributeIds);
       }
       catch (IOException ex) {
-        throw DbConnection.handleError(ex);
+        DbConnection.handleError(ex);
       }
     }
   }
@@ -2007,15 +2044,14 @@ public class FSRecords implements Forceable {
     assert !usedAttributeRecordIds.contains(attributeRecordId);
     usedAttributeRecordIds.add(attributeRecordId);
 
-    final DataInputStream dataInputStream = getAttributesStorage().readStream(attributeRecordId);
-    try {
+    try (DataInputStream dataInputStream = getAttributesStorage().readStream(attributeRecordId)) {
       if (bulkAttrReadSupport) skipRecordHeader(dataInputStream, 0, 0);
 
-      while(dataInputStream.available() > 0) {
+      while (dataInputStream.available() > 0) {
         int attId = DataInputOutputUtil.readINT(dataInputStream);
 
         if (!validAttributeIds.contains(attId)) {
-          assert persistentAttributesList || !getNames().valueOf(attId).isEmpty();
+          //assert !getNames().valueOf(attId).isEmpty();
           validAttributeIds.add(attId);
         }
 
@@ -2034,13 +2070,10 @@ public class FSRecords implements Forceable {
         getAttributesStorage().checkSanity(attDataRecordIdOrSize);
       }
     }
-    finally {
-      dataInputStream.close();
-    }
   }
 
-  public static RuntimeException handleError(Throwable e) {
-    return DbConnection.handleError(e);
+  public static void handleError(Throwable e) throws RuntimeException, Error {
+    DbConnection.handleError(e);
   }
 
   /*

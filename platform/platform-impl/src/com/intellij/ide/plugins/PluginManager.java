@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,6 +15,8 @@
  */
 package com.intellij.ide.plugins;
 
+import com.intellij.diagnostic.ImplementationConflictException;
+import com.intellij.diagnostic.PluginConflictReporter;
 import com.intellij.diagnostic.PluginException;
 import com.intellij.ide.ClassUtilCore;
 import com.intellij.ide.IdeBundle;
@@ -28,6 +30,7 @@ import com.intellij.openapi.application.Application;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ApplicationNamesInfo;
 import com.intellij.openapi.application.PathManager;
+import com.intellij.openapi.application.impl.ApplicationInfoImpl;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.extensions.PluginId;
 import com.intellij.openapi.extensions.impl.PicoPluginExtensionInitializationException;
@@ -37,8 +40,8 @@ import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.wm.IdeFrame;
 import com.intellij.openapi.wm.ex.WindowManagerEx;
 import com.intellij.util.ArrayUtil;
+import com.intellij.util.ExceptionUtil;
 import com.intellij.util.ui.UIUtil;
-import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -55,9 +58,9 @@ import java.util.List;
  * @author mike
  */
 public class PluginManager extends PluginManagerCore {
-  @NonNls public static final String INSTALLED_TXT = "installed.txt";
+  public static final String INSTALLED_TXT = "installed.txt";
 
-  public static long startupStart;
+  @SuppressWarnings("StaticNonFinalField") public static long startupStart;
 
   /**
    * Called via reflection
@@ -108,6 +111,13 @@ public class PluginManager extends PluginManagerCore {
 
   public static void processException(Throwable t) {
     if (!IdeaApplication.isLoaded()) {
+      InstallationCorruptedException corrupted = findCause(t, InstallationCorruptedException.class);
+      String productName = ApplicationNamesInfo.getInstance().getFullProductName();
+      if (corrupted != null) {
+        Main.showMessage("Corrupted Installation", corrupted.getMessage() + ". Try reinstalling " + productName + " from scratch.", true);
+        System.exit(Main.INSTALLATION_CORRUPTED);
+      }
+
       @SuppressWarnings("ThrowableResultOfMethodCallIgnored") StartupAbortedException se = findCause(t, StartupAbortedException.class);
       if (se == null) se = new StartupAbortedException(t);
       @SuppressWarnings("ThrowableResultOfMethodCallIgnored") PluginException pe = findCause(t, PluginException.class);
@@ -118,14 +128,24 @@ public class PluginManager extends PluginManagerCore {
           getLogger().error(t);
         }
         catch (Throwable ignore) { }
+        if (t instanceof StackOverflowError && "Nashorn AST Serializer".equals(Thread.currentThread().getName())) {
+          // workaround for startup's SOE parsing PAC file (JRE-247)
+          // jdk8u_nashorn/blob/master/src/jdk/nashorn/internal/runtime/RecompilableScriptFunctionData.java#createAstSerializerExecutorService
+          return;
+        }
       }
 
-      if (pluginId != null && !CORE_PLUGIN_ID.equals(pluginId.getIdString())) {
+      final ImplementationConflictException conflictException = findCause(t, ImplementationConflictException.class);
+      if (conflictException != null) {
+        PluginConflictReporter.INSTANCE.reportConflictByClasses(conflictException.getConflictingClasses());
+      }
+
+      if (pluginId != null && !ApplicationInfoImpl.getShadowInstance().isEssentialPlugin(pluginId.getIdString())) {
         disablePlugin(pluginId.getIdString());
 
         StringWriter message = new StringWriter();
         message.append("Plugin '").append(pluginId.getIdString()).append("' failed to initialize and will be disabled. ");
-        message.append(" Please restart ").append(ApplicationNamesInfo.getInstance().getFullProductName()).append('.');
+        message.append(" Please restart ").append(productName).append('.');
         message.append("\n\n");
         pe.getCause().printStackTrace(new PrintWriter(message));
 
@@ -219,9 +239,7 @@ public class PluginManager extends PluginManagerCore {
   public static void handleComponentError(Throwable t, @Nullable String componentClassName, @Nullable PluginId pluginId) {
     Application app = ApplicationManager.getApplication();
     if (app != null && app.isUnitTestMode()) {
-      if (t instanceof Error) throw (Error)t;
-      if (t instanceof RuntimeException) throw (RuntimeException)t;
-      throw new RuntimeException(t);
+      ExceptionUtil.rethrow(t);
     }
 
     if (t instanceof StartupAbortedException) {
@@ -240,7 +258,7 @@ public class PluginManager extends PluginManagerCore {
     }
 
     if (pluginId != null && !CORE_PLUGIN_ID.equals(pluginId.getIdString())) {
-      throw new StartupAbortedException(new PluginException(t, pluginId));
+      throw new StartupAbortedException("Fatal error initializing plugin " + pluginId.getIdString(), new PluginException(t, pluginId));
     }
     else {
       throw new StartupAbortedException("Fatal error initializing '" + componentClassName + "'", t);

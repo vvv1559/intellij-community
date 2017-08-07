@@ -5,7 +5,7 @@ import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 
 /**
- * Holds object representation of icons used at the <code>Gradle</code> plugin.
+ * Holds object representation of icons used at the {@code Gradle} plugin.
  * 
  * @author Denis Zhdanov
  * @since 8/1/11 3:10 PM
@@ -26,6 +26,7 @@ public class GradleConstants {
 
   @NotNull @NonNls public static final String OFFLINE_MODE_CMD_OPTION = "--offline";
   @NotNull @NonNls public static final String INIT_SCRIPT_CMD_OPTION = "--init-script";
+  @NotNull @NonNls public static final String INCLUDE_BUILD_CMD_OPTION = "--include-build";
 
   @NotNull @NonNls public static final String GRADLE_SOURCE_SET_MODULE_TYPE_KEY = "sourceSet";
 

@@ -21,15 +21,22 @@ import com.intellij.ide.fileTemplates.FileTemplate;
 import com.intellij.ide.fileTemplates.FileTemplateManager;
 import com.intellij.ide.fileTemplates.FileTemplatesScheme;
 import com.intellij.ide.fileTemplates.InternalTemplateBean;
+import com.intellij.openapi.Disposable;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ApplicationNamesInfo;
-import com.intellij.openapi.components.*;
+import com.intellij.openapi.components.PersistentStateComponent;
+import com.intellij.openapi.components.State;
+import com.intellij.openapi.components.Storage;
+import com.intellij.openapi.components.StoragePathMacros;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.extensions.Extensions;
 import com.intellij.openapi.fileTypes.ex.FileTypeManagerEx;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectManager;
+import com.intellij.openapi.util.Disposer;
+import com.intellij.openapi.util.io.FileUtilRt;
 import com.intellij.openapi.util.text.StringUtil;
+import com.intellij.project.ProjectKt;
 import com.intellij.util.ArrayUtil;
 import com.intellij.util.SystemProperties;
 import com.intellij.util.text.DateFormatUtil;
@@ -39,7 +46,6 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.TestOnly;
 
-import java.io.File;
 import java.net.URL;
 import java.text.SimpleDateFormat;
 import java.util.*;
@@ -80,7 +86,7 @@ public class FileTemplateManagerImpl extends FileTemplateManager implements Pers
       @NotNull
       @Override
       public String getTemplatesDir() {
-        return new File(project.getBasePath(), Project.DIRECTORY_STORE_FOLDER + "/" + TEMPLATES_DIR).getPath();
+        return FileUtilRt.toSystemDependentName(ProjectKt.getStateStore(project).getDirectoryStorePath(false) + "/" + TEMPLATES_DIR);
       }
 
       @NotNull
@@ -111,9 +117,6 @@ public class FileTemplateManagerImpl extends FileTemplateManager implements Pers
 
   private void setScheme(@NotNull FileTemplatesScheme scheme) {
     myScheme = scheme;
-    for (FTManager manager : getAllManagers()) {
-      manager.setScheme(scheme);
-    }
     myInitialized = true;
   }
 
@@ -343,20 +346,27 @@ public class FileTemplateManagerImpl extends FileTemplateManager implements Pers
   @Override
   @NotNull
   public FileTemplate getDefaultTemplate(@NotNull final String name) {
-    final String templateQName = myTypeManager.getExtension(name).isEmpty()? FileTemplateBase.getQualifiedName(name, "java") : name;
+    final String templateQName = getQualifiedName(name);
 
     for (FTManager manager : getAllManagers()) {
-      final FileTemplateBase template = manager.getTemplate(templateQName);
-      if (template instanceof BundledFileTemplate) {
-        final BundledFileTemplate copy = ((BundledFileTemplate)template).clone();
-        copy.revertToDefaults();
-        return copy;
+      FileTemplateBase template = manager.getTemplate(templateQName);
+      if (template != null) {
+        if (template instanceof BundledFileTemplate) {
+          template = ((BundledFileTemplate)template).clone();
+          ((BundledFileTemplate)template).revertToDefaults();
+        }
+        return template;
       }
     }
 
     String message = "Default template not found: " + name;
     LOG.error(message);
-    return null;
+    throw new RuntimeException(message);
+  }
+
+  @NotNull
+  private String getQualifiedName(@NotNull String name) {
+    return myTypeManager.getExtension(name).isEmpty() ? FileTemplateBase.getQualifiedName(name, "java") : name;
   }
 
   @Override
@@ -390,7 +400,6 @@ public class FileTemplateManagerImpl extends FileTemplateManager implements Pers
     for (FTManager manager : getAllManagers()) {
       if (templatesCategory.equals(manager.getName())) {
         manager.updateTemplates(templates);
-        manager.saveTemplates();
         break;
       }
     }
@@ -407,7 +416,7 @@ public class FileTemplateManagerImpl extends FileTemplateManager implements Pers
     return myDefaultSettings.getDefaultTemplateDescription();
   }
 
-  public URL getDefaultIncludeDescription() {
+  URL getDefaultIncludeDescription() {
     return myDefaultSettings.getDefaultIncludeDescription();
   }
 
@@ -434,6 +443,57 @@ public class FileTemplateManagerImpl extends FileTemplateManager implements Pers
 
   private FTManager[] getAllManagers() {
     return getSettings().getAllManagers();
+  }
+
+  @TestOnly
+  public void setDefaultFileIncludeTemplateTextTemporarilyForTest(String simpleName, String text, @NotNull Disposable parentDisposable) {
+    FTManager defaultTemplatesManager = getSettings().getPatternsManager();
+    String qName = getQualifiedName(simpleName);
+    FileTemplateBase oldTemplate = defaultTemplatesManager.getTemplate(qName);
+    Map<String, FileTemplateBase> templates = defaultTemplatesManager.getTemplates();
+    templates.put(qName, new FileTemplateBase() {
+      @NotNull
+      @Override
+      public String getName() {
+        return simpleName;
+      }
+
+      @Override
+      public void setName(@NotNull String name) {
+        throw new AbstractMethodError();
+      }
+
+      @Override
+      public boolean isDefault() {
+        return true;
+      }
+
+      @NotNull
+      @Override
+      public String getDescription() {
+        throw new AbstractMethodError();
+      }
+
+      @NotNull
+      @Override
+      public String getExtension() {
+        return qName.substring(simpleName.length());
+      }
+
+      @Override
+      public void setExtension(@NotNull String extension) {
+        throw new AbstractMethodError();
+      }
+
+      @NotNull
+      @Override
+      protected String getDefaultText() {
+        return text;
+      }
+    });
+    Disposer.register(parentDisposable, () -> {
+      templates.put(qName, oldTemplate);
+    });
   }
 
   public static class State {

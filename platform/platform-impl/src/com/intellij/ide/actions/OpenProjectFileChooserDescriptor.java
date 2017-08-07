@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,11 +19,12 @@ import com.intellij.icons.AllIcons;
 import com.intellij.ide.highlighter.ProjectFileType;
 import com.intellij.openapi.application.ex.ApplicationInfoEx;
 import com.intellij.openapi.fileChooser.FileChooserDescriptor;
-import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.IconLoader;
+import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.vfs.VfsUtil;
 import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.project.ProjectKt;
 import com.intellij.projectImport.ProjectOpenProcessor;
 import com.intellij.util.PlatformUtils;
 import com.intellij.util.SystemProperties;
@@ -79,10 +80,16 @@ public class OpenProjectFileChooserDescriptor extends FileChooserDescriptor {
     if (home == null || VfsUtilCore.isAncestor(file, home, false)) {
       return false;
     }
-    if (ourCanInspectDirs || VfsUtilCore.isAncestor(home, file, true)) {
+    if (VfsUtilCore.isAncestor(home, file, true)) {
       return true;
     }
-    return false;
+    if (SystemInfo.isUnix && file.isInLocalFileSystem()) {
+      VirtualFile parent = file.getParent();
+      if (parent != null && parent.getParent() == null) {
+        return false;
+      }
+    }
+    return ourCanInspectDirs;
   }
 
   private static Icon getImporterIcon(VirtualFile file) {
@@ -106,7 +113,7 @@ public class OpenProjectFileChooserDescriptor extends FileChooserDescriptor {
   }
 
   private static boolean isIdeaDirectory(VirtualFile file) {
-    return file.findChild(Project.DIRECTORY_STORE_FOLDER) != null;
+    return ProjectKt.getProjectStoreDirectory(file) != null;
   }
 
   private static boolean hasImportProvider(VirtualFile file) {

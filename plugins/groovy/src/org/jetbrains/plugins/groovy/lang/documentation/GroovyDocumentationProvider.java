@@ -32,7 +32,6 @@ import com.intellij.psi.*;
 import com.intellij.psi.util.PsiFormatUtil;
 import com.intellij.psi.util.PsiFormatUtilBase;
 import com.intellij.psi.util.PsiTreeUtil;
-import com.intellij.util.StringBuilderSpinAllocator;
 import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
@@ -311,10 +310,10 @@ public class GroovyDocumentationProvider implements CodeDocumentationProvider, E
 
     if (element == null) return null;
 
-    String standard = element.getNavigationElement() instanceof PsiDocCommentOwner ? JavaDocumentationProvider.generateExternalJavadoc(element) : null;
+    String standard = generateExternalJavaDoc(element);
 
     if (element instanceof GrVariable &&
-        ((GrVariable)element).getTypeElementGroovy() == null &&
+        ((GrVariable)element).getDeclaredType() == null &&
         standard != null) {
       final String truncated = StringUtil.trimEnd(standard, BODY_HTML);
 
@@ -347,6 +346,12 @@ public class GroovyDocumentationProvider implements CodeDocumentationProvider, E
     }
 
     return standard;
+  }
+
+  @Nullable
+  protected static String generateExternalJavaDoc(@NotNull PsiElement element) {
+    JavaDocInfoGenerator generator = new GroovyDocInfoGenerator(element);
+    return JavaDocumentationProvider.generateExternalJavadoc(element, generator);
   }
 
   private static PsiElement getDocumentationElement(PsiElement element, PsiElement originalElement) {
@@ -488,35 +493,30 @@ public class GroovyDocumentationProvider implements CodeDocumentationProvider, E
       (CodeDocumentationAwareCommenter)LanguageCommenters.INSTANCE.forLanguage(owner.getLanguage());
 
 
-    StringBuilder builder = StringBuilderSpinAllocator.alloc();
-    try {
-      if (owner instanceof GrMethod) {
-        final GrMethod method = (GrMethod)owner;
-        JavaDocumentationProvider.generateParametersTakingDocFromSuperMethods(project, builder, commenter, method);
+    StringBuilder builder = new StringBuilder();
+    if (owner instanceof GrMethod) {
+      final GrMethod method = (GrMethod)owner;
+      JavaDocumentationProvider.generateParametersTakingDocFromSuperMethods(project, builder, commenter, method);
 
-        final PsiType returnType = method.getInferredReturnType();
-        if ((returnType != null || method.getModifierList().hasModifierProperty(GrModifier.DEF)) && !PsiType.VOID.equals(returnType)) {
-          builder.append(CodeDocumentationUtil.createDocCommentLine(RETURN_TAG, project, commenter));
-          builder.append(LINE_SEPARATOR);
-        }
+      final PsiType returnType = method.getInferredReturnType();
+      if ((returnType != null || method.getModifierList().hasModifierProperty(GrModifier.DEF)) && !PsiType.VOID.equals(returnType)) {
+        builder.append(CodeDocumentationUtil.createDocCommentLine(RETURN_TAG, project, commenter));
+        builder.append(LINE_SEPARATOR);
+      }
 
-        final PsiClassType[] references = method.getThrowsList().getReferencedTypes();
-        for (PsiClassType reference : references) {
-          builder.append(CodeDocumentationUtil.createDocCommentLine(THROWS_TAG, project, commenter));
-          builder.append(reference.getClassName());
-          builder.append(LINE_SEPARATOR);
-        }
+      final PsiClassType[] references = method.getThrowsList().getReferencedTypes();
+      for (PsiClassType reference : references) {
+        builder.append(CodeDocumentationUtil.createDocCommentLine(THROWS_TAG, project, commenter));
+        builder.append(reference.getClassName());
+        builder.append(LINE_SEPARATOR);
       }
-      else if (owner instanceof GrTypeDefinition) {
-        final PsiTypeParameterList typeParameterList = ((PsiClass)owner).getTypeParameterList();
-        if (typeParameterList != null) {
-          JavaDocumentationProvider.createTypeParamsListComment(builder, project, commenter, typeParameterList);
-        }
+    }
+    else if (owner instanceof GrTypeDefinition) {
+      final PsiTypeParameterList typeParameterList = ((PsiClass)owner).getTypeParameterList();
+      if (typeParameterList != null) {
+        JavaDocumentationProvider.createTypeParamsListComment(builder, project, commenter, typeParameterList);
       }
-      return builder.length() > 0 ? builder.toString() : null;
     }
-    finally {
-      StringBuilderSpinAllocator.dispose(builder);
-    }
+    return builder.length() > 0 ? builder.toString() : null;
   }
 }

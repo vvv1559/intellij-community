@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,27 +15,33 @@
  */
 package com.intellij.execution.application;
 
+import com.intellij.codeInsight.daemon.impl.analysis.JavaModuleGraphUtil;
+import com.intellij.debugger.settings.DebuggerSettings;
 import com.intellij.diagnostic.logging.LogConfigurationPanel;
 import com.intellij.execution.*;
 import com.intellij.execution.configuration.EnvironmentVariablesComponent;
 import com.intellij.execution.configurations.*;
 import com.intellij.execution.filters.TextConsoleBuilderFactory;
 import com.intellij.execution.junit.RefactoringListeners;
+import com.intellij.execution.process.KillableProcessHandler;
+import com.intellij.execution.process.OSProcessHandler;
 import com.intellij.execution.runners.ExecutionEnvironment;
 import com.intellij.execution.util.JavaParametersUtil;
 import com.intellij.execution.util.ProgramParametersUtil;
-import com.intellij.openapi.components.PathMacroManager;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.options.SettingsEditor;
 import com.intellij.openapi.options.SettingsEditorGroup;
+import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.projectRoots.JavaSdkVersion;
+import com.intellij.openapi.projectRoots.ex.JavaSdkUtil;
 import com.intellij.openapi.util.DefaultJDOMExternalizer;
-import com.intellij.openapi.util.InvalidDataException;
-import com.intellij.openapi.util.WriteExternalException;
 import com.intellij.psi.PsiClass;
 import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiJavaModule;
 import com.intellij.psi.util.PsiMethodUtil;
 import com.intellij.refactoring.listeners.RefactoringElementListener;
+import com.intellij.util.PathsList;
 import org.jdom.Element;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -206,24 +212,24 @@ public class ApplicationConfiguration extends ModuleBasedConfiguration<JavaRunCo
 
   @Override
   public boolean isAlternativeJrePathEnabled() {
-     return ALTERNATIVE_JRE_PATH_ENABLED;
-   }
+    return ALTERNATIVE_JRE_PATH_ENABLED;
+  }
 
-   @Override
-   public void setAlternativeJrePathEnabled(boolean enabled) {
-     ALTERNATIVE_JRE_PATH_ENABLED = enabled;
-   }
+  @Override
+  public void setAlternativeJrePathEnabled(boolean enabled) {
+    ALTERNATIVE_JRE_PATH_ENABLED = enabled;
+  }
 
-   @Nullable
-   @Override
-   public String getAlternativeJrePath() {
-     return ALTERNATIVE_JRE_PATH;
-   }
+  @Nullable
+  @Override
+  public String getAlternativeJrePath() {
+    return ALTERNATIVE_JRE_PATH;
+  }
 
-   @Override
-   public void setAlternativeJrePath(String path) {
-     ALTERNATIVE_JRE_PATH = path;
-   }
+  @Override
+  public void setAlternativeJrePath(String path) {
+    ALTERNATIVE_JRE_PATH = path;
+  }
 
   @Override
   public Collection<Module> getValidModules() {
@@ -231,8 +237,7 @@ public class ApplicationConfiguration extends ModuleBasedConfiguration<JavaRunCo
   }
 
   @Override
-  public void readExternal(final Element element) throws InvalidDataException {
-    PathMacroManager.getInstance(getProject()).expandPaths(element);
+  public void readExternal(final Element element) {
     super.readExternal(element);
     JavaRunConfigurationExtensionManager.getInstance().readExternal(this, element);
     DefaultJDOMExternalizer.readExternal(this, element);
@@ -241,12 +246,17 @@ public class ApplicationConfiguration extends ModuleBasedConfiguration<JavaRunCo
   }
 
   @Override
-  public void writeExternal(final Element element) throws WriteExternalException {
+  public void writeExternal(@NotNull Element element) {
     super.writeExternal(element);
+
     JavaRunConfigurationExtensionManager.getInstance().writeExternal(this, element);
     DefaultJDOMExternalizer.writeExternal(this, element);
     writeModule(element);
-    EnvironmentVariablesComponent.writeExternal(element, getEnvs());
+
+    Map<String, String> envs = getEnvs();
+    //if (!envs.isEmpty()) {
+      EnvironmentVariablesComponent.writeExternal(element, envs);
+    //}
   }
 
   public static class JavaApplicationCommandLineState<T extends ApplicationConfiguration> extends BaseJavaApplicationCommandLineState<T> {
@@ -258,20 +268,49 @@ public class ApplicationConfiguration extends ModuleBasedConfiguration<JavaRunCo
     protected JavaParameters createJavaParameters() throws ExecutionException {
       final JavaParameters params = new JavaParameters();
       params.setUseClasspathJar(true);
+
       final JavaRunConfigurationModule module = myConfiguration.getConfigurationModule();
       final String jreHome = myConfiguration.ALTERNATIVE_JRE_PATH_ENABLED ? myConfiguration.ALTERNATIVE_JRE_PATH : null;
-
       if (module.getModule() != null) {
-        final int classPathType = JavaParametersUtil.getClasspathType(module, myConfiguration.MAIN_CLASS_NAME, false);
-        JavaParametersUtil.configureModule(module, params, classPathType, jreHome);
+        DumbService.getInstance(module.getProject()).runWithAlternativeResolveEnabled(() -> {
+          int classPathType = JavaParametersUtil.getClasspathType(module, myConfiguration.MAIN_CLASS_NAME, false);
+          JavaParametersUtil.configureModule(module, params, classPathType, jreHome);
+        });
       }
       else {
         JavaParametersUtil.configureProject(module.getProject(), params, JavaParameters.JDK_AND_CLASSES_AND_TESTS, jreHome);
       }
+
       params.setMainClass(myConfiguration.MAIN_CLASS_NAME);
+
       setupJavaParameters(params);
 
+      setupModulePath(params, module);
+
       return params;
+    }
+
+    @NotNull
+    @Override
+    protected OSProcessHandler startProcess() throws ExecutionException {
+      OSProcessHandler processHandler = super.startProcess();
+      if (processHandler instanceof KillableProcessHandler && DebuggerSettings.getInstance().KILL_PROCESS_IMMEDIATELY) {
+        ((KillableProcessHandler)processHandler).setShouldKillProcessSoftly(false);
+      }
+      return processHandler;
+    }
+
+    private static void setupModulePath(JavaParameters params, JavaRunConfigurationModule module) {
+      if (JavaSdkUtil.isJdkAtLeast(params.getJdk(), JavaSdkVersion.JDK_1_9)) {
+        PsiJavaModule mainModule = DumbService.getInstance(module.getProject()).computeWithAlternativeResolveEnabled(
+          () -> JavaModuleGraphUtil.findDescriptorByElement(module.findClass(params.getMainClass())));
+        if (mainModule != null) {
+          params.setModuleName(mainModule.getName());
+          PathsList classPath = params.getClassPath(), modulePath = params.getModulePath();
+          modulePath.addAll(classPath.getPathList());
+          classPath.clear();
+        }
+      }
     }
   }
 }

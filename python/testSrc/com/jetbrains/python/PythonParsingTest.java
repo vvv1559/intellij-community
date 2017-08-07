@@ -41,6 +41,7 @@ public class PythonParsingTest extends ParsingTestCase {
     super.setUp();
     registerExtensionPoint(PythonDialectsTokenSetContributor.EP_NAME, PythonDialectsTokenSetContributor.class);
     registerExtension(PythonDialectsTokenSetContributor.EP_NAME, new PythonTokenSetContributor());
+    PythonDialectsTokenSetProvider.reset();
   }
 
   @Override
@@ -334,6 +335,11 @@ public class PythonParsingTest extends ParsingTestCase {
     doTest();
   }
 
+  // PY-24389
+  public void testCommaAfterStarArgAllowedInPython36() {
+    doTest(LanguageLevel.PYTHON36);
+  }
+
   public void testRangeAsLHS() {  // PY-6468
     doTest();
   }
@@ -506,12 +512,36 @@ public class PythonParsingTest extends ParsingTestCase {
     doTest(LanguageLevel.PYTHON35);
   }
 
+  // PY-18972
+  public void testFStrings() {
+    doTest(LanguageLevel.PYTHON36);
+  }
+
   // PY-19036
   public void testAwaitInNonAsyncNestedFunction() {
     doTest(LanguageLevel.PYTHON35);
   }
 
   public void testUnpackingExpressions() {
+    doTest(LanguageLevel.PYTHON35);
+  }
+
+  public void testVariableAnnotations() {
+    doTest(LanguageLevel.PYTHON36);
+  }
+
+  // PY-20770
+  public void testAsyncComprehensions() {
+    doTest(LanguageLevel.PYTHON36);
+  }
+
+  // PY-20770
+  public void testAwaitInComprehensions() {
+    doTest(LanguageLevel.PYTHON36);
+  }
+
+  // PY-20682
+  public void testAwaitOnTheSameLineAsFor() {
     doTest(LanguageLevel.PYTHON35);
   }
 

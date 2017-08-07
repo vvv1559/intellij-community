@@ -23,10 +23,7 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ex.ProjectManagerEx;
 import com.intellij.openapi.vcs.changes.ChangeListManager;
 import com.intellij.openapi.vcs.changes.ChangeListManagerEx;
-import com.intellij.openapi.vcs.changes.ChangeListManagerImpl;
 import org.jetbrains.annotations.NotNull;
-
-import static com.intellij.openapi.application.ModalityState.defaultModalityState;
 
 /**
  * Executes an action surrounding it with freezing-unfreezing of the ChangeListManager
@@ -82,7 +79,7 @@ public class GitFreezingProcess {
       FileDocumentManager.getInstance().saveAllDocuments();
       mySaveAndSyncHandler.blockSaveOnFrameDeactivation();
       mySaveAndSyncHandler.blockSyncOnFrameActivation();
-    }, defaultModalityState());
+    });
   }
 
   private void unblockInAwt() {
@@ -90,14 +87,14 @@ public class GitFreezingProcess {
       myProjectManager.unblockReloadingProjectOnExternalChanges();
       mySaveAndSyncHandler.unblockSaveOnFrameDeactivation();
       mySaveAndSyncHandler.unblockSyncOnFrameActivation();
-    }, defaultModalityState());
+    });
   }
 
   private void freeze() {
-    ((ChangeListManagerImpl)myChangeListManager).freeze("Local changes are not available until Git " + myOperationTitle + " is finished.");
+    myChangeListManager.freeze("Local changes are not available until Git " + myOperationTitle + " is finished.");
   }
 
   private void unfreeze() {
-    myChangeListManager.letGo();
+    myChangeListManager.unfreeze();
   }
 }

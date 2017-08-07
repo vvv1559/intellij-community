@@ -17,35 +17,50 @@ package com.intellij.credentialStore
 
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.util.text.StringUtil
-import com.intellij.util.nullize
+import com.intellij.util.EncryptionSupport
+import com.intellij.util.generateAesKey
+import com.intellij.util.io.toByteArray
+import java.nio.CharBuffer
 import java.security.MessageDigest
 import java.util.*
+import javax.crypto.spec.SecretKeySpec
 
 internal val LOG = Logger.getInstance(CredentialStore::class.java)
 
-internal interface CredentialStore {
-  fun get(key: String): String?
+private fun toOldKey(hash: ByteArray) = "old-hashed-key|" + Base64.getEncoder().encodeToString(hash)
 
-  // passed byte array will be cleared
-  fun set(key: String, password: ByteArray?)
+internal fun toOldKeyAsIdentity(hash: ByteArray) = CredentialAttributes(SERVICE_NAME_PREFIX, toOldKey(hash))
+
+fun toOldKey(requestor: Class<*>, userName: String): CredentialAttributes {
+  return CredentialAttributes(SERVICE_NAME_PREFIX, toOldKey(MessageDigest.getInstance("SHA-256").digest("${requestor.name}/$userName".toByteArray())))
 }
 
-internal fun getRawKey(key: String, requestor: Class<*>?) = if (requestor == null) key else "${requestor.name}/$key"
-
-internal fun toOldKey(hash: ByteArray) = "old-hashed-key|" + Base64.getEncoder().encodeToString(hash)
-
-internal fun toOldKey(newKey: String) = toOldKey(MessageDigest.getInstance("SHA-256").digest(newKey.toByteArray()))
-
-fun joinData(user: String?, password: String?) = "${StringUtil.escapeChars(user.orEmpty(), '\\', '@')}@$password"
-
-fun splitData(data: String): Credentials? {
-  if (data.isEmpty()) {
+fun joinData(user: String?, password: OneTimeString?): ByteArray? {
+  if (user == null && password == null) {
     return null
   }
 
-  val list = parseString(data, '@')
-  val result = Credentials(list.getOrNull(0), list.getOrNull(1))
-  return if (result.isFulfilled()) result else null
+  val builder = StringBuilder(user.orEmpty())
+  StringUtil.escapeChar(builder, '\\')
+  StringUtil.escapeChar(builder, '@')
+  if (password != null) {
+    builder.append('@')
+    password.appendTo(builder)
+  }
+
+  val buffer = Charsets.UTF_8.encode(CharBuffer.wrap(builder))
+  // clear password
+  builder.setLength(0)
+  return buffer.toByteArray()
+}
+
+fun splitData(data: String?): Credentials? {
+  if (data.isNullOrEmpty()) {
+    return null
+  }
+
+  val list = parseString(data!!, '@')
+  return Credentials(list.getOrNull(0), list.getOrNull(1))
 }
 
 private const val ESCAPING_CHAR = '\\'
@@ -70,24 +85,29 @@ private fun parseString(data: String, delimiter: Char): List<String> {
 
     result.add(part.toString())
     part.setLength(0)
+
+    if (i < data.length) {
+      result.add(data.substring(i))
+      break
+    }
   }
   while (c != null)
 
   return result
 }
 
-class Credentials(user: String?, password: String?) {
-  val user = user.nullize()
-  val password = password.nullize()
+// check isEmpty before
+@JvmOverloads
+fun Credentials.serialize(storePassword: Boolean = true) = joinData(userName, if (storePassword) password else null)!!
 
-  override fun equals(other: Any?): Boolean {
-    if (other !is Credentials) return false
-    return user == other.user && password == other.password
+fun SecureString(value: CharSequence) = SecureString(Charsets.UTF_8.encode(CharBuffer.wrap(value)).toByteArray())
+
+class SecureString(value: ByteArray) {
+  companion object {
+    private val encryptionSupport = EncryptionSupport(SecretKeySpec(generateAesKey(), "AES"))
   }
 
-  override fun hashCode() = (user?.hashCode() ?: 0) * 37 + (password?.hashCode() ?: 0)
+  private val data = encryptionSupport.encrypt(value)
 
-  override fun toString() = joinData(user, password)
+  fun get(clearable: Boolean = true) = OneTimeString(encryptionSupport.decrypt(data), clearable = clearable)
 }
-
-fun Credentials?.isFulfilled() = this != null && user != null && password != null

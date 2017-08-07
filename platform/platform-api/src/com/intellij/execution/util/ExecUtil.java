@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,9 +20,11 @@ import com.intellij.execution.configurations.GeneralCommandLine;
 import com.intellij.execution.process.CapturingProcessHandler;
 import com.intellij.execution.process.ProcessOutput;
 import com.intellij.openapi.application.PathManager;
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.util.NotNullLazyValue;
 import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.util.io.FileUtil;
+import com.intellij.openapi.util.io.PathExecLazyValue;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.CharsetToolkit;
 import com.intellij.util.containers.ContainerUtil;
@@ -36,53 +38,12 @@ import java.util.List;
 import java.util.Map;
 
 public class ExecUtil {
-  private static final NotNullLazyValue<Boolean> hasGkSudo = new NotNullLazyValue<Boolean>() {
-    @NotNull
-    @Override
-    protected Boolean compute() {
-      return new File("/usr/bin/gksudo").canExecute();
-    }
-  };
-
-  private static final NotNullLazyValue<Boolean> hasKdeSudo = new NotNullLazyValue<Boolean>() {
-    @NotNull
-    @Override
-    protected Boolean compute() {
-      return new File("/usr/bin/kdesudo").canExecute();
-    }
-  };
-
-  private static final NotNullLazyValue<Boolean> hasPkExec = new NotNullLazyValue<Boolean>() {
-    @NotNull
-    @Override
-    protected Boolean compute() {
-      return new File("/usr/bin/pkexec").canExecute();
-    }
-  };
-
-  private static final NotNullLazyValue<Boolean> hasGnomeTerminal = new NotNullLazyValue<Boolean>() {
-    @NotNull
-    @Override
-    protected Boolean compute() {
-      return new File("/usr/bin/gnome-terminal").canExecute();
-    }
-  };
-
-  private static final NotNullLazyValue<Boolean> hasKdeTerminal = new NotNullLazyValue<Boolean>() {
-    @NotNull
-    @Override
-    protected Boolean compute() {
-      return new File("/usr/bin/konsole").canExecute();
-    }
-  };
-
-  private static final NotNullLazyValue<Boolean> hasXTerm = new NotNullLazyValue<Boolean>() {
-    @NotNull
-    @Override
-    protected Boolean compute() {
-      return new File("/usr/bin/xterm").canExecute();
-    }
-  };
+  private static final NotNullLazyValue<Boolean> hasGkSudo = new PathExecLazyValue("gksudo");
+  private static final NotNullLazyValue<Boolean> hasKdeSudo = new PathExecLazyValue("kdesudo");
+  private static final NotNullLazyValue<Boolean> hasPkExec = new PathExecLazyValue("pkexec");
+  private static final NotNullLazyValue<Boolean> hasGnomeTerminal = new PathExecLazyValue("gnome-terminal");
+  private static final NotNullLazyValue<Boolean> hasKdeTerminal = new PathExecLazyValue("konsole");
+  private static final NotNullLazyValue<Boolean> hasXTerm = new PathExecLazyValue("xterm");
 
   private ExecUtil() { }
 
@@ -145,23 +106,19 @@ public class ExecUtil {
     try {
       return readFirstLine(commandLine.createProcess().getInputStream(), commandLine.getCharset());
     }
-    catch (ExecutionException ignored) {
+    catch (ExecutionException e) {
+      Logger.getInstance(ExecUtil.class).debug(e);
       return null;
     }
   }
 
   @Nullable
   public static String readFirstLine(@NotNull InputStream stream, @Nullable Charset cs) {
-    try {
-      BufferedReader reader = new BufferedReader(cs == null ? new InputStreamReader(stream) : new InputStreamReader(stream, cs));
-      try {
-        return reader.readLine();
-      }
-      finally {
-        reader.close();
-      }
+    try (BufferedReader reader = new BufferedReader(cs == null ? new InputStreamReader(stream) : new InputStreamReader(stream, cs))) {
+      return reader.readLine();
     }
-    catch (IOException ignored) {
+    catch (IOException e) {
+      Logger.getInstance(ExecUtil.class).debug(e);
       return null;
     }
   }
@@ -190,8 +147,17 @@ public class ExecUtil {
     command.add(commandLine.getExePath());
     command.addAll(commandLine.getParametersList().getList());
 
-    GeneralCommandLine sudoCommandLine;
-    if (SystemInfo.isMac) {
+    final GeneralCommandLine sudoCommandLine;
+    if (SystemInfo.isWinVistaOrNewer) {
+      // launcher.exe process with elevated permissions on UAC.
+      final File launcherExe = PathManager.findBinFileWithException("launcher.exe");
+      sudoCommandLine = new GeneralCommandLine(launcherExe.getPath());
+      sudoCommandLine.setWorkDirectory(commandLine.getWorkDirectory());
+      sudoCommandLine.addParameter(commandLine.getExePath());
+      sudoCommandLine.addParameters(commandLine.getParametersList().getParameters());
+      sudoCommandLine.getEnvironment().putAll(commandLine.getEffectiveEnvironment());
+    }
+    else if (SystemInfo.isMac) {
       String escapedCommandLine = StringUtil.join(command, ExecUtil::escapeAppleScriptArgument, " & \" \" & ");
       String escapedScript = "tell current application\n" +
                              "   activate\n" +
@@ -230,7 +196,7 @@ public class ExecUtil {
       sudoCommandLine = new GeneralCommandLine(getTerminalCommand("Install", script.getAbsolutePath()));
     }
     else {
-      throw new UnsupportedSystemException();
+      throw new UnsupportedOperationException("Unsupported OS/desktop: " + SystemInfo.OS_NAME + '/' + SystemInfo.SUN_DESKTOP);
     }
 
     return sudoCommandLine
@@ -262,66 +228,56 @@ public class ExecUtil {
   @NotNull
   public static List<String> getTerminalCommand(@Nullable String title, @NotNull String command) {
     if (SystemInfo.isWindows) {
-      title = title != null ? title.replace("\"", "'") : "";
+      title = title != null ? title.replace('"', '\'') : "";
       return Arrays.asList(getWindowsShellName(), "/c", "start", GeneralCommandLine.inescapableQuote(title), command);
     }
     else if (SystemInfo.isMac) {
       return Arrays.asList(getOpenCommandPath(), "-a", "Terminal", command);
     }
     else if (hasKdeTerminal.getValue()) {
-      return Arrays.asList("/usr/bin/konsole", "-e", command);
+      return title != null ? Arrays.asList("konsole", "-p", "tabtitle=\"" + title.replace('"', '\'') + "\"", "-e", command)
+                           : Arrays.asList("konsole", "-e", command);
     }
     else if (hasGnomeTerminal.getValue()) {
-      return title != null ? Arrays.asList("/usr/bin/gnome-terminal", "-t", title, "-x", command)
-                           : Arrays.asList("/usr/bin/gnome-terminal", "-x", command);
+      return title != null ? Arrays.asList("gnome-terminal", "-t", title, "-x", command)
+                           : Arrays.asList("gnome-terminal", "-x", command);
     }
     else if (hasXTerm.getValue()) {
-      return title != null ? Arrays.asList("/usr/bin/xterm", "-T", title, "-e", command)
-                           : Arrays.asList("/usr/bin/xterm", "-e", command);
+      return title != null ? Arrays.asList("xterm", "-T", title, "-e", command)
+                           : Arrays.asList("xterm", "-e", command);
     }
 
-    throw new UnsupportedSystemException();
+    throw new UnsupportedOperationException("Unsupported OS/desktop: " + SystemInfo.OS_NAME + '/' + SystemInfo.SUN_DESKTOP);
   }
 
-  public static class UnsupportedSystemException extends UnsupportedOperationException {
-    public UnsupportedSystemException() {
-      super("Unsupported OS/desktop: " + SystemInfo.OS_NAME + '/' + SystemInfo.SUN_DESKTOP);
-    }
-  }
-
-  // deprecated stuff
-
+  //<editor-fold desc="Deprecated stuff.">
   /** @deprecated use {@code new GeneralCommandLine(command).createProcess().waitFor()} (to be removed in IDEA 16) */
-  @SuppressWarnings("unused")
   public static int execAndGetResult(String... command) throws ExecutionException, InterruptedException {
     assert command != null && command.length > 0;
     return new GeneralCommandLine(command).createProcess().waitFor();
   }
 
   /** @deprecated use {@code new GeneralCommandLine(command).createProcess().waitFor()} (to be removed in IDEA 16) */
-  @SuppressWarnings("unused")
   public static int execAndGetResult(@NotNull List<String> command) throws ExecutionException, InterruptedException {
     return new GeneralCommandLine(command).createProcess().waitFor();
   }
 
   /** @deprecated use {@link #execAndGetOutput(GeneralCommandLine)} instead (to be removed in IDEA 16) */
-  @SuppressWarnings("unused")
   public static ProcessOutput execAndGetOutput(@NotNull List<String> command, @Nullable String workDir) throws ExecutionException {
     GeneralCommandLine commandLine = new GeneralCommandLine(command).withWorkDirectory(workDir);
     return new CapturingProcessHandler(commandLine).runProcess();
   }
 
   /** @deprecated use {@link #execAndReadLine(GeneralCommandLine)} instead (to be removed in IDEA 16) */
-  @SuppressWarnings("unused")
   public static String execAndReadLine(String... command) {
     return execAndReadLine(new GeneralCommandLine(command));
   }
 
   /** @deprecated use {@link #execAndReadLine(GeneralCommandLine)} instead (to be removed in IDEA 16) */
-  @SuppressWarnings("unused")
   public static String execAndReadLine(@Nullable Charset charset, String... command) {
     GeneralCommandLine commandLine = new GeneralCommandLine(command);
     if (charset != null) commandLine = commandLine.withCharset(charset);
     return execAndReadLine(commandLine);
   }
+  //</editor-fold>
 }

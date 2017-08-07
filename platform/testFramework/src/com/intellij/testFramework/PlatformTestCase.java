@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,10 +28,13 @@ import com.intellij.openapi.application.Result;
 import com.intellij.openapi.application.WriteAction;
 import com.intellij.openapi.command.CommandProcessor;
 import com.intellij.openapi.command.WriteCommandAction;
+import com.intellij.openapi.command.impl.DocumentReferenceManagerImpl;
 import com.intellij.openapi.command.impl.UndoManagerImpl;
+import com.intellij.openapi.command.undo.DocumentReferenceManager;
 import com.intellij.openapi.command.undo.UndoManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Document;
+import com.intellij.openapi.fileEditor.impl.text.AsyncHighlighterUpdater;
 import com.intellij.openapi.fileTypes.FileTypeManager;
 import com.intellij.openapi.fileTypes.impl.FileTypeManagerImpl;
 import com.intellij.openapi.module.EmptyModuleType;
@@ -41,6 +44,7 @@ import com.intellij.openapi.module.ModuleType;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectManager;
 import com.intellij.openapi.project.ex.ProjectManagerEx;
+import com.intellij.openapi.project.impl.ProjectImpl;
 import com.intellij.openapi.project.impl.ProjectManagerImpl;
 import com.intellij.openapi.project.impl.TooManyProjectLeakedException;
 import com.intellij.openapi.projectRoots.Sdk;
@@ -66,16 +70,21 @@ import com.intellij.psi.codeStyle.CodeStyleSettingsManager;
 import com.intellij.psi.impl.DocumentCommitThread;
 import com.intellij.psi.impl.PsiManagerImpl;
 import com.intellij.psi.impl.source.tree.injected.InjectedLanguageManagerImpl;
-import com.intellij.util.*;
+import com.intellij.util.MemoryDumpHelper;
+import com.intellij.util.PathUtilRt;
+import com.intellij.util.PlatformUtils;
+import com.intellij.util.ThrowableRunnable;
 import com.intellij.util.indexing.FileBasedIndex;
 import com.intellij.util.indexing.FileBasedIndexImpl;
 import com.intellij.util.indexing.IndexableSetContributor;
-import com.intellij.util.lang.CompoundRuntimeException;
 import com.intellij.util.ui.UIUtil;
+import gnu.trove.THashSet;
+import gnu.trove.TIntHashSet;
 import junit.framework.TestCase;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.TestOnly;
 
 import javax.swing.*;
 import java.io.File;
@@ -91,7 +100,6 @@ import java.net.URL;
 import java.nio.charset.Charset;
 import java.util.Collection;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Set;
 
 /**
@@ -103,9 +111,8 @@ public abstract class PlatformTestCase extends UsefulTestCase implements DataPro
   protected ProjectManagerEx myProjectManager;
   protected Project myProject;
   protected Module myModule;
-  protected static final Collection<File> myFilesToDelete = new HashSet<>();
+  protected static final Collection<File> myFilesToDelete = new THashSet<>();
   protected boolean myAssertionsInTestDetected;
-  protected static final Logger LOG = Logger.getInstance("#com.intellij.testFramework.PlatformTestCase");
   public static Thread ourTestThread;
   private static TestCase ourTestCase;
   private static final long DEFAULT_TEST_TIME = 300L;
@@ -136,7 +143,7 @@ public abstract class PlatformTestCase extends UsefulTestCase implements DataPro
   }
 
   private static final String[] PREFIX_CANDIDATES = {
-    "AppCode", "CLion", "CidrCommon",
+    "AppCode", "CLion", "CidrCommon", "Rider",
     "Python", "PyCharmCore", "Ruby", "UltimateLangXml", "Idea", "PlatformLangXml" };
 
   /**
@@ -186,7 +193,7 @@ public abstract class PlatformTestCase extends UsefulTestCase implements DataPro
     }
     IdeaLogger.ourErrorsOccurred = null;
 
-    LOG.info(getClass().getName() + ".setUp()");
+    LOG.debug(getClass().getName() + ".setUp()");
 
     initApplication();
 
@@ -244,12 +251,12 @@ public abstract class PlatformTestCase extends UsefulTestCase implements DataPro
   }
 
   @NotNull
-  public static Project createProject(File projectFile, String creationPlace) {
+  public static Project createProject(File projectFile, @NotNull String creationPlace) {
     return createProject(projectFile.getPath(), creationPlace);
   }
 
   @NotNull
-  public static Project createProject(@NotNull String path, String creationPlace) {
+  public static Project createProject(@NotNull String path, @NotNull String creationPlace) {
     String fileName = PathUtilRt.getFileName(path);
 
     try {
@@ -267,12 +274,9 @@ public abstract class PlatformTestCase extends UsefulTestCase implements DataPro
       }
       ourReportedLeakedProjects = true;
 
-      StringBuilder leakers = new StringBuilder();
-      leakers.append("Too many projects leaked: \n");
+      TIntHashSet hashCodes = new TIntHashSet();
       for (Project project : e.getLeakedProjects()) {
-        String presentableString = getCreationPlace(project);
-        leakers.append(presentableString);
-        leakers.append("\n");
+        hashCodes.add(System.identityHashCode(project));
       }
 
       String dumpPath = PathManager.getHomePath() + "/leakedProjects.hprof.zip";
@@ -284,12 +288,28 @@ public abstract class PlatformTestCase extends UsefulTestCase implements DataPro
       catch (Exception ex) {
         ex.printStackTrace();
       }
+
+      StringBuilder leakers = new StringBuilder();
+      leakers.append("Too many projects leaked: \n");
+      LeakHunter.processLeaks(LeakHunter.allRoots(), ProjectImpl.class, p -> hashCodes.contains(System.identityHashCode(p)), (leaked,backLink)->{
+        int hashCode = System.identityHashCode(leaked);
+        leakers.append("Leaked project found:" + leaked + "; hash: " +
+                           hashCode + "; place: " + getCreationPlace(leaked)+"\n");
+        leakers.append(backLink+"\n");
+        leakers.append(";-----\n");
+
+        hashCodes.remove(hashCode);
+
+        return !hashCodes.isEmpty();
+      });
+
       fail(leakers+"\nPlease see '"+dumpPath+"' for a memory dump");
       return null;
     }
   }
 
   @NotNull
+  @TestOnly
   public static String getCreationPlace(@NotNull Project project) {
     String place = project.getUserData(CREATION_PLACE);
     Object base;
@@ -324,22 +344,31 @@ public abstract class PlatformTestCase extends UsefulTestCase implements DataPro
     }.execute().throwException();
   }
 
+  @NotNull
   protected Module createMainModule() throws IOException {
     return createModule(myProject.getName());
   }
 
+  @NotNull
   protected Module createModule(@NonNls final String moduleName) {
     return doCreateRealModule(moduleName);
   }
 
+  @NotNull
   protected Module doCreateRealModule(final String moduleName) {
     return doCreateRealModuleIn(moduleName, myProject, getModuleType());
   }
 
+  @NotNull
   protected static Module doCreateRealModuleIn(String moduleName, final Project project, final ModuleType moduleType) {
     final VirtualFile baseDir = project.getBaseDir();
     assertNotNull(baseDir);
-    final File moduleFile = new File(FileUtil.toSystemDependentName(baseDir.getPath()), moduleName + ModuleFileType.DOT_DEFAULT_EXTENSION);
+    return createModuleAt(moduleName, project, moduleType, baseDir.getPath());
+  }
+
+  @NotNull
+  protected static Module createModuleAt(String moduleName, Project project, ModuleType moduleType, String path) {
+    File moduleFile = new File(FileUtil.toSystemDependentName(path), moduleName + ModuleFileType.DOT_DEFAULT_EXTENSION);
     FileUtil.createIfDoesntExist(moduleFile);
     myFilesToDelete.add(moduleFile);
     return new WriteAction<Module>() {
@@ -359,12 +388,13 @@ public abstract class PlatformTestCase extends UsefulTestCase implements DataPro
   }
 
   public static void cleanupApplicationCaches(Project project) {
-    if (project != null && !project.isDisposed()) {
       UndoManagerImpl globalInstance = (UndoManagerImpl)UndoManager.getGlobalInstance();
       if (globalInstance != null) {
         globalInstance.dropHistoryInTests();
       }
+    if (project != null && !project.isDisposed()) {
       ((UndoManagerImpl)UndoManager.getInstance(project)).dropHistoryInTests();
+      ((DocumentReferenceManagerImpl)DocumentReferenceManager.getInstance()).cleanupForNextTest();
 
       ((PsiManagerImpl)PsiManager.getInstance(project)).cleanupForNextTest();
     }
@@ -376,6 +406,8 @@ public abstract class PlatformTestCase extends UsefulTestCase implements DataPro
       Project defaultProject = projectManager.getDefaultProject();
       ((PsiManagerImpl)PsiManager.getInstance(defaultProject)).cleanupForNextTest();
     }
+
+    AsyncHighlighterUpdater.completeAsyncTasks();
 
     ((FileBasedIndexImpl) FileBasedIndex.getInstance()).cleanupForNextTest();
 
@@ -429,142 +461,79 @@ public abstract class PlatformTestCase extends UsefulTestCase implements DataPro
 
   @Override
   protected void tearDown() throws Exception {
-    List<Throwable> exceptions = new SmartList<>();
     Project project = myProject;
-    if (project != null) {
-      try {
-        LightPlatformTestCase.doTearDown(project, ourApplication, false, exceptions);
-      }
-      catch (Throwable e) {
-        exceptions.add(e);
-      }
 
-      disposeProject(exceptions);
-    }
-
-    try {
-      checkForSettingsDamage(exceptions);
-    }
-    catch (Throwable e) {
-      exceptions.add(e);
-    }
-    try {
-      if (project != null) {
-        try {
+    new RunAll()
+      .append(this::disposeRootDisposable)
+      .append(() -> {
+        if (project != null) {
+          LightPlatformTestCase.doTearDown(project, ourApplication);
+        }
+      })
+      .append(this::disposeProject)
+      .append(() -> UIUtil.dispatchAllInvocationEvents())
+      .append(this::checkForSettingsDamage)
+      .append(() -> {
+        if (project != null) {
           InjectedLanguageManagerImpl.checkInjectorsAreDisposed(project);
         }
-        catch (AssertionError e) {
-          exceptions.add(e);
-        }
-      }
-      try {
+      })
+      .append(() -> {
         for (final File fileToDelete : myFilesToDelete) {
           delete(fileToDelete);
         }
         LocalFileSystem.getInstance().refreshIoFiles(myFilesToDelete);
-      }
-      catch (Throwable e) {
-        exceptions.add(e);
-      }
-
-      if (!myAssertionsInTestDetected) {
-        if (IdeaLogger.ourErrorsOccurred != null) {
-          exceptions.add(IdeaLogger.ourErrorsOccurred);
+      })
+      .append(() -> {
+        if (!myAssertionsInTestDetected) {
+          if (IdeaLogger.ourErrorsOccurred != null) {
+            throw IdeaLogger.ourErrorsOccurred;
+          }
         }
-      }
-
-      try {
-        super.tearDown();
-      }
-      catch (Throwable e) {
-        exceptions.add(e);
-      }
-
-      try {
+      })
+      .append(super::tearDown)
+      .append(() -> {
         if (myEditorListenerTracker != null) {
           myEditorListenerTracker.checkListenersLeak();
         }
-      }
-      catch (AssertionError error) {
-        exceptions.add(error);
-      }
-      try {
+      })
+      .append(() -> {
         if (myThreadTracker != null) {
           myThreadTracker.checkLeak();
         }
-      }
-      catch (AssertionError error) {
-        exceptions.add(error);
-      }
-      try {
-        LightPlatformTestCase.checkEditorsReleased(exceptions);
-      }
-      catch (Throwable error) {
-        exceptions.add(error);
-      }
-    }
-    finally {
-      myProjectManager = null;
+      })
+      .append(LightPlatformTestCase::checkEditorsReleased)
+      .append(() -> {
+        myProjectManager = null;
+        myProject = null;
+        myModule = null;
+        myFilesToDelete.clear();
+        myEditorListenerTracker = null;
+        myThreadTracker = null;
+        //noinspection AssignmentToStaticFieldFromInstanceMethod
+        ourTestCase = null;
+      })
+      .run();
+  }
+
+  private void disposeProject() {
+    if (myProject != null) {
+      closeAndDisposeProjectAndCheckThatNoOpenProjects(myProject);
       myProject = null;
-      myModule = null;
-      myFilesToDelete.clear();
-      myEditorListenerTracker = null;
-      myThreadTracker = null;
-      ourTestCase = null;
-
-      CompoundRuntimeException.throwIfNotEmpty(exceptions);
     }
   }
 
-  private void disposeProject(@NotNull List<Throwable> exceptions) {
-    try {
-      DocumentCommitThread.getInstance().clearQueue();
-      // sometimes SwingUtilities maybe confused about EDT at this point
-      if (SwingUtilities.isEventDispatchThread()) {
-        UIUtil.dispatchAllInvocationEvents();
+  public static void closeAndDisposeProjectAndCheckThatNoOpenProjects(@NotNull final Project projectToClose) {
+    RunAll runAll = new RunAll();
+    ProjectManagerEx projectManager = ProjectManagerEx.getInstanceEx();
+    if (projectManager instanceof ProjectManagerImpl) {
+      for (Project project : projectManager.closeTestProject(projectToClose)) {
+        runAll = runAll
+          .append(() -> { throw new IllegalStateException("Test project is not disposed: " + project + ";\n created in: " + getCreationPlace(project)); })
+          .append(() -> ((ProjectManagerImpl)projectManager).forceCloseProject(project, true));
       }
     }
-    catch (Throwable e) {
-      exceptions.add(e);
-    }
-
-    Project project = myProject;
-    if (project == null) {
-      return;
-    }
-
-    closeAndDisposeProjectAndCheckThatNoOpenProjects(project, exceptions);
-    myProject = null;
-  }
-
-  public static void closeAndDisposeProjectAndCheckThatNoOpenProjects(@NotNull final Project projectToClose, @NotNull final List<Throwable> exceptions) {
-    try {
-      ProjectManagerEx projectManager = ProjectManagerEx.getInstanceEx();
-      if (projectManager instanceof ProjectManagerImpl) {
-        for (Project project : projectManager.closeTestProject(projectToClose)) {
-          exceptions.add(new IllegalStateException("Test project is not disposed: " + project + ";\n created in: " + getCreationPlace(project)));
-          try {
-            ((ProjectManagerImpl)projectManager).closeProject(project, false, true, false);
-          }
-          catch (Throwable e) {
-            exceptions.add(e);
-          }
-        }
-      }
-    }
-    catch (Throwable e) {
-      exceptions.add(e);
-    }
-    finally {
-      ApplicationManager.getApplication().runWriteAction(() -> {
-        try {
-          Disposer.dispose(projectToClose);
-        }
-        catch (Throwable e) {
-          exceptions.add(e);
-        }
-      });
-    }
+    runAll.append(() -> WriteAction.run(() -> Disposer.dispose(projectToClose))).run();
   }
 
   protected void resetAllFields() {
@@ -769,11 +738,11 @@ public abstract class PlatformTestCase extends UsefulTestCase implements DataPro
   }
 
   protected File createTempDirectory() throws IOException {
-    return createTempDir(getTestName(true));
+    return createTempDir("");
   }
 
   protected File createTempDirectory(final boolean refresh) throws IOException {
-    return createTempDir(getTestName(true), refresh);
+    return createTempDir("", refresh);
   }
 
   @NotNull
@@ -789,7 +758,7 @@ public abstract class PlatformTestCase extends UsefulTestCase implements DataPro
     return file;
   }
 
-  public static void setContentOnDisk(@NotNull File file, byte[] bom, @NotNull String content, @NotNull Charset charset) throws IOException {
+  public static void setContentOnDisk(@NotNull File file, @Nullable byte[] bom, @NotNull String content, @NotNull Charset charset) throws IOException {
     FileOutputStream stream = new FileOutputStream(file);
     if (bom != null) {
       stream.write(bom);
@@ -921,7 +890,7 @@ public abstract class PlatformTestCase extends UsefulTestCase implements DataPro
     }.execute().throwException();
   }
 
-  public static void setFileText(@NotNull final VirtualFile file, @NotNull final String text) throws IOException {
+  public static void setFileText(@NotNull final VirtualFile file, @NotNull final String text) {
     new WriteAction() {
       @Override
       protected void run(@NotNull Result result) throws Throwable {

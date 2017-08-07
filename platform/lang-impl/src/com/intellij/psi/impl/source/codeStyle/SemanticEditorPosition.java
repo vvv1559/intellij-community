@@ -18,6 +18,8 @@ package com.intellij.psi.impl.source.codeStyle;
 import com.intellij.lang.Language;
 import com.intellij.openapi.editor.ex.EditorEx;
 import com.intellij.openapi.editor.highlighter.HighlighterIterator;
+import com.intellij.openapi.util.Condition;
+import com.intellij.openapi.util.Conditions;
 import com.intellij.psi.tree.IElementType;
 import com.intellij.util.text.CharArrayUtil;
 import org.jetbrains.annotations.NotNull;
@@ -42,6 +44,20 @@ public abstract class SemanticEditorPosition {
   public SemanticEditorPosition beforeOptional(@NotNull SyntaxElement syntaxElement) {
     if (!myIterator.atEnd()) {
       if (syntaxElement.equals(map(myIterator.getTokenType()))) myIterator.retreat();
+    }
+    return this;
+  }
+  
+  public SemanticEditorPosition beforeOptionalMix(@NotNull SyntaxElement... elements) {
+    while (isAtAnyOf(elements)) {
+      myIterator.retreat();
+    }
+    return this;
+  }
+  
+  public SemanticEditorPosition afterOptionalMix(@NotNull SyntaxElement... elements)  {
+    while (isAtAnyOf(elements)) {
+      myIterator.advance();
     }
     return this;
   }
@@ -93,8 +109,17 @@ public abstract class SemanticEditorPosition {
   }
 
   public SemanticEditorPosition findLeftParenthesisBackwardsSkippingNested(@NotNull SyntaxElement leftParenthesis,
-                                                                            @NotNull SyntaxElement rightParenthesis) {
+                                                                           @NotNull SyntaxElement rightParenthesis) {
+    return findLeftParenthesisBackwardsSkippingNested(leftParenthesis, rightParenthesis, Conditions.alwaysFalse());
+  }
+  
+  public SemanticEditorPosition findLeftParenthesisBackwardsSkippingNested(@NotNull SyntaxElement leftParenthesis,
+                                                                           @NotNull SyntaxElement rightParenthesis,
+                                                                           @NotNull Condition<SyntaxElement> terminationCondition) {
     while (!myIterator.atEnd()) {
+      if (terminationCondition.value(map(myIterator.getTokenType()))) {
+        break;
+      }
       if (rightParenthesis.equals(map(myIterator.getTokenType()))) {
         beforeParentheses(leftParenthesis, rightParenthesis);
       }
@@ -121,6 +146,10 @@ public abstract class SemanticEditorPosition {
   public boolean isAt(@NotNull SyntaxElement syntaxElement) {
     return !myIterator.atEnd() && syntaxElement.equals(map(myIterator.getTokenType()));
   }
+
+  public boolean isAt(@NotNull IElementType elementType) {
+    return !myIterator.atEnd() && myIterator.getTokenType() == elementType;
+  }
   
   public boolean isAtEnd() {
     return myIterator.atEnd();
@@ -129,7 +158,7 @@ public abstract class SemanticEditorPosition {
   public int getStartOffset() {
     return myIterator.getStart();
   }
-  
+
   @SuppressWarnings("unused")
   public boolean isAtAnyOf(@NotNull SyntaxElement... syntaxElements) {
     if (!myIterator.atEnd()) {
@@ -152,6 +181,13 @@ public abstract class SemanticEditorPosition {
       myIterator.retreat();
     }
     return -1;
+  }
+
+  public boolean hasEmptyLineAfter(int offset) {
+    for (int i = offset + 1; i < myIterator.getEnd(); i++) {
+      if (myChars.charAt(i) == '\n') return true;
+    }
+    return false;
   }
 
   public EditorEx getEditor() {
@@ -183,5 +219,10 @@ public abstract class SemanticEditorPosition {
     boolean check(SemanticEditorPosition position);
   }
   
-  public abstract SyntaxElement map(@NotNull IElementType elementType); 
+  public abstract SyntaxElement map(@NotNull IElementType elementType);
+
+  @Override
+  public String toString() {
+    return myIterator.getTokenType().toString();
+  }
 }

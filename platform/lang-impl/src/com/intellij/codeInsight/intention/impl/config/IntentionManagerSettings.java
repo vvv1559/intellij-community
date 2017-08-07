@@ -14,14 +14,6 @@
  * limitations under the License.
  */
 
-/*
- * Created by IntelliJ IDEA.
- * User: mike
- * Date: Aug 23, 2002
- * Time: 8:15:58 PM
- * To change template for new class use 
- * Code Style | Class Templates options (Tools | IDE Options).
- */
 package com.intellij.codeInsight.intention.impl.config;
 
 import com.intellij.codeInsight.intention.IntentionAction;
@@ -36,7 +28,7 @@ import com.intellij.openapi.components.Storage;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.util.Alarm;
+import com.intellij.util.concurrency.AppExecutorUtil;
 import com.intellij.util.containers.StringInterner;
 import com.intellij.util.containers.WeakStringInterner;
 import org.jdom.Element;
@@ -45,12 +37,12 @@ import org.jetbrains.annotations.NotNull;
 
 import java.io.IOException;
 import java.util.*;
+import java.util.concurrent.ExecutorService;
 import java.util.regex.Pattern;
 
 @State(name = "IntentionManagerSettings", storages = @Storage("intentionSettings.xml"))
 public class IntentionManagerSettings implements PersistentStateComponent<Element> {
   private static final Logger LOG = Logger.getInstance("#com.intellij.codeInsight.intention.impl.config.IntentionManagerSettings");
-  private static final Alarm ourRegisterMetaDataAlarm = new Alarm(Alarm.ThreadToUse.SHARED_THREAD);
 
   private static class MetaDataKey extends Pair<String, String> {
     private static final StringInterner ourInterner = new WeakStringInterner();
@@ -159,12 +151,14 @@ public class IntentionManagerSettings implements PersistentStateComponent<Elemen
     myMetaData.put(key, metaData);
   }
 
+  private static final ExecutorService ourExecutor = AppExecutorUtil.createBoundedApplicationPoolExecutor("loader", 1);
+  
   private static synchronized void processMetaData(@NotNull final IntentionActionMetaData metaData) {
     final Application app = ApplicationManager.getApplication();
     if (app.isUnitTestMode() || app.isHeadlessEnvironment()) return;
 
     final TextDescriptor description = metaData.getDescription();
-    ourRegisterMetaDataAlarm.addRequest(() -> {
+    ourExecutor.execute(() -> {
       try {
         SearchableOptionsRegistrar registrar = SearchableOptionsRegistrar.getInstance();
         if (registrar == null) return;
@@ -179,7 +173,7 @@ public class IntentionManagerSettings implements PersistentStateComponent<Elemen
       catch (IOException e) {
         LOG.error(e);
       }
-    }, 0);
+    });
   }
 
   public synchronized void unregisterMetaData(@NotNull IntentionAction intentionAction) {

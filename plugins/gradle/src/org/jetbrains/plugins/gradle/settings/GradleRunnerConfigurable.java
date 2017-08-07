@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,11 +17,9 @@ package org.jetbrains.plugins.gradle.settings;
 
 import com.intellij.openapi.options.BaseConfigurable;
 import com.intellij.openapi.options.ConfigurationException;
-import com.intellij.openapi.options.SearchableConfigurable;
-import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.ComboBox;
+import com.intellij.ui.components.JBCheckBox;
 import org.jetbrains.annotations.Nls;
-import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.plugins.gradle.util.GradleBundle;
 
@@ -32,21 +30,15 @@ import java.util.Objects;
  * @author Vladislav.Soroka
  * @since 11/2/2015
  */
-public class GradleRunnerConfigurable extends BaseConfigurable implements SearchableConfigurable {
+public class GradleRunnerConfigurable extends BaseConfigurable {
 
   private JPanel myMainPanel;
+  private JBCheckBox myGradleAwareMakeCheckBox;
   private ComboBox myPreferredTestRunner;
   private static final TestRunnerItem[] TEST_RUNNER_ITEMS = new TestRunnerItem[]{
     new TestRunnerItem(GradleSystemRunningSettings.PreferredTestRunner.PLATFORM_TEST_RUNNER),
     new TestRunnerItem(GradleSystemRunningSettings.PreferredTestRunner.GRADLE_TEST_RUNNER),
     new TestRunnerItem(GradleSystemRunningSettings.PreferredTestRunner.CHOOSE_PER_TEST)};
-
-
-  private final Project myProject;
-
-  public GradleRunnerConfigurable(Project project) {
-    myProject = project;
-  }
 
   @Nls
   @Override
@@ -62,15 +54,19 @@ public class GradleRunnerConfigurable extends BaseConfigurable implements Search
 
   @Override
   public void apply() throws ConfigurationException {
-    GradleSystemRunningSettings.getInstance().setPreferredTestRunner(
-      ((TestRunnerItem)myPreferredTestRunner.getSelectedItem()).value);
+    boolean gradleMakeEnabled = myGradleAwareMakeCheckBox.isSelected();
+    GradleSystemRunningSettings settings = GradleSystemRunningSettings.getInstance();
+    settings.setUseGradleAwareMake(gradleMakeEnabled);
+    settings.setPreferredTestRunner(((TestRunnerItem)myPreferredTestRunner.getSelectedItem()).value);
   }
 
   @Override
   public void reset() {
     GradleSystemRunningSettings settings = GradleSystemRunningSettings.getInstance();
-    final TestRunnerItem item = getItem(settings.getPreferredTestRunner());
+    final TestRunnerItem item = getItem(settings.getLastPreferredTestRunner());
     myPreferredTestRunner.setSelectedItem(item);
+    boolean gradleMakeEnabled = settings.isUseGradleAwareMake();
+    enableGradleMake(gradleMakeEnabled);
   }
 
   @Nullable
@@ -86,22 +82,20 @@ public class GradleRunnerConfigurable extends BaseConfigurable implements Search
     GradleSystemRunningSettings.PreferredTestRunner preferredTestRunner =
       selectedItem == null ? GradleSystemRunningSettings.PreferredTestRunner.CHOOSE_PER_TEST : selectedItem.value;
     uiSettings.setPreferredTestRunner(preferredTestRunner);
+    uiSettings.setUseGradleAwareMake(myGradleAwareMakeCheckBox.isSelected());
     GradleSystemRunningSettings settings = GradleSystemRunningSettings.getInstance();
     return !settings.equals(uiSettings);
   }
 
-  @Override
-  public void disposeUIResources() {
-  }
-
-  @NotNull
-  @Override
-  public String getId() {
-    return "reference.settings.project.gradle.running";
-  }
-
   private void createUIComponents() {
-    myPreferredTestRunner = new ComboBox(getItems());
+    myGradleAwareMakeCheckBox = new JBCheckBox(GradleBundle.message("gradle.settings.text.use.gradle.aware.make"));
+    myGradleAwareMakeCheckBox.addActionListener(e -> enableGradleMake(myGradleAwareMakeCheckBox.isSelected()));
+    myPreferredTestRunner = new ComboBox<>(getItems());
+  }
+
+  private void enableGradleMake(boolean enable) {
+    myGradleAwareMakeCheckBox.setSelected(enable);
+    myPreferredTestRunner.setEnabled(!enable);
   }
 
   private static TestRunnerItem getItem(GradleSystemRunningSettings.PreferredTestRunner preferredTestRunner) {

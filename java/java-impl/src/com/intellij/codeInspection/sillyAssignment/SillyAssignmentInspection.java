@@ -25,10 +25,6 @@ import com.intellij.psi.util.PsiUtil;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 
-/**
- * User: anna
- * Date: 15-Nov-2005
- */
 public class SillyAssignmentInspection extends SillyAssignmentInspectionBase {
 
   @Override
@@ -48,15 +44,8 @@ public class SillyAssignmentInspection extends SillyAssignmentInspectionBase {
     @Nls
     @NotNull
     @Override
-    public String getName() {
-      return InspectionsBundle.message("assignment.to.itself.quickfix.name");
-    }
-
-    @Nls
-    @NotNull
-    @Override
     public String getFamilyName() {
-      return getName();
+      return InspectionsBundle.message("assignment.to.itself.quickfix.name");
     }
 
     @Override

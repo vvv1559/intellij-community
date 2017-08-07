@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,9 +24,6 @@ import org.jetbrains.annotations.NotNull;
 
 import java.util.List;
 
-/**
- * User: anna
- */
 public class TypeCompatibilityConstraint implements ConstraintFormula {
   private PsiType myT;
   private PsiType myS;
@@ -61,7 +58,7 @@ public class TypeCompatibilityConstraint implements ConstraintFormula {
     }
 
     if (isUncheckedConversion(myT, myS)) {
-      session.setErased();
+      session.setErasedDuringApplicabilityCheck();
       return true;
     }
 
@@ -87,7 +84,7 @@ public class TypeCompatibilityConstraint implements ConstraintFormula {
         }
       }
     } 
-    else if (t instanceof PsiArrayType && t.getArrayDimensions() == s.getArrayDimensions()) {
+    else if (t instanceof PsiArrayType && s != null && t.getArrayDimensions() == s.getArrayDimensions()) {
       return isUncheckedConversion(t.getDeepComponentType(), s.getDeepComponentType());
     }
     return false;

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -43,6 +43,7 @@ import com.intellij.openapi.vfs.VirtualFileManager;
 import com.intellij.psi.PsiDocumentManager;
 import com.intellij.psi.PsiFile;
 import com.intellij.util.messages.MessageBus;
+import com.intellij.util.messages.MessageBusConnection;
 import com.intellij.util.ui.UIUtil;
 import org.jdom.Element;
 import org.jetbrains.annotations.NotNull;
@@ -59,7 +60,7 @@ import java.util.List;
     @Storage(StoragePathMacros.WORKSPACE_FILE)
   }
 )
-public class BookmarkManager extends AbstractProjectComponent implements PersistentStateComponent<Element> {
+public class BookmarkManager implements PersistentStateComponent<Element> {
   private static final int MAX_AUTO_DESCRIPTION_SIZE = 50;
   private static final Key<List<Bookmark>> BOOKMARKS_KEY = Key.create("bookmarks");
 
@@ -69,26 +70,27 @@ public class BookmarkManager extends AbstractProjectComponent implements Persist
   private final Map<Document, List<Trinity<Bookmark, Integer, String>>> myBeforeChangeData = new HashMap<>();
 
   private final MessageBus myBus;
+  private final Project myProject;
 
   private boolean mySortedState;
 
   public static BookmarkManager getInstance(Project project) {
-    return project.getComponent(BookmarkManager.class);
+    return ServiceManager.getService(project, BookmarkManager.class);
   }
 
   public BookmarkManager(Project project,
-                         MessageBus bus,
                          PsiDocumentManager documentManager,
                          EditorColorsManager colorsManager,
                          EditorFactory editorFactory) {
-    super(project);
-    colorsManager.addEditorColorsListener(new EditorColorsListener() {
+    myProject = project;
+    myBus = project.getMessageBus();
+    MessageBusConnection connection = project.getMessageBus().connect();
+    connection.subscribe(EditorColorsManager.TOPIC, new EditorColorsListener() {
       @Override
       public void globalSchemeChange(EditorColorsScheme scheme) {
         colorsChanged();
       }
-    }, project);
-    myBus = bus;
+    });
     EditorEventMulticaster multicaster = editorFactory.getEventMulticaster();
     multicaster.addDocumentListener(new MyDocumentListener(), myProject);
     multicaster.addEditorMouseListener(new MyEditorMouseListener(), myProject);
@@ -113,16 +115,13 @@ public class BookmarkManager extends AbstractProjectComponent implements Persist
       public void fileCreated(@NotNull PsiFile file, @NotNull Document document) {
       }
     });
-    mySortedState = UISettings.getInstance().SORT_BOOKMARKS;
-    UISettings.getInstance().addUISettingsListener(new UISettingsListener() {
-      @Override
-      public void uiSettingsChanged(UISettings source) {
-        if (mySortedState != UISettings.getInstance().SORT_BOOKMARKS) {
-          mySortedState = UISettings.getInstance().SORT_BOOKMARKS;
-          EventQueue.invokeLater(() -> myBus.syncPublisher(BookmarksListener.TOPIC).bookmarksOrderChanged());
-        }
+    mySortedState = UISettings.getInstance().getSortBookmarks();
+    connection.subscribe(UISettingsListener.TOPIC, uiSettings -> {
+      if (mySortedState != uiSettings.getSortBookmarks()) {
+        mySortedState = uiSettings.getSortBookmarks();
+        EventQueue.invokeLater(() -> myBus.syncPublisher(BookmarksListener.TOPIC).bookmarksOrderChanged());
       }
-    }, project);
+    });
   }
 
   private static void map(Document document, Bookmark bookmark) {
@@ -137,7 +136,6 @@ public class BookmarkManager extends AbstractProjectComponent implements Persist
 
   private static void unmap(Document document, Bookmark bookmark) {
     if (document == null || bookmark == null) return;
-    ApplicationManager.getApplication().assertIsDispatchThread();
     List<Bookmark> list = document.getUserData(BOOKMARKS_KEY);
     if (list != null && list.remove(bookmark) && list.isEmpty()) {
       document.putUserData(BOOKMARKS_KEY, null);
@@ -162,12 +160,6 @@ public class BookmarkManager extends AbstractProjectComponent implements Persist
     if (description != null) {
       setDescription(bookmark, description);
     }
-  }
-
-  @NotNull
-  @Override
-  public String getComponentName() {
-    return "BookmarkManager";
   }
 
   public void addEditorBookmark(@NotNull Editor editor, int lineIndex) {
@@ -222,7 +214,7 @@ public class BookmarkManager extends AbstractProjectComponent implements Persist
     for (Bookmark bookmark : myBookmarks) {
       if (bookmark.isValid()) answer.add(bookmark);
     }
-    if (UISettings.getInstance().SORT_BOOKMARKS) {
+    if (UISettings.getInstance().getSortBookmarks()) {
       Collections.sort(answer);
     }
     return answer;
@@ -286,19 +278,14 @@ public class BookmarkManager extends AbstractProjectComponent implements Persist
 
   @Override
   public void loadState(final Element state) {
-    StartupManager.getInstance(myProject).runWhenProjectIsInitialized(new DumbAwareRunnable() {
-      @Override
-      public void run() {
-        BookmarksListener publisher = myBus.syncPublisher(BookmarksListener.TOPIC);
-        for (Bookmark bookmark : myBookmarks) {
-          bookmark.release();
-          publisher.bookmarkRemoved(bookmark);
-          unmap(bookmark.getDocument(), bookmark);
-        }
-        myBookmarks.clear();
-
-        readExternal(state);
+    StartupManager.getInstance(myProject).runWhenProjectIsInitialized((DumbAwareRunnable)() -> {
+      for (Bookmark bookmark : myBookmarks) {
+        bookmark.release();
+        unmap(bookmark.getDocument(), bookmark);
       }
+      myBookmarks.clear();
+
+      readExternal(state);
     });
   }
 
@@ -461,7 +448,7 @@ public class BookmarkManager extends AbstractProjectComponent implements Persist
     }
   }
 
-  private class MyDocumentListener extends DocumentAdapter {
+  private class MyDocumentListener implements DocumentListener {
     @Override
     public void beforeDocumentChange(DocumentEvent e) {
       for (Bookmark bookmark : myBookmarks) {

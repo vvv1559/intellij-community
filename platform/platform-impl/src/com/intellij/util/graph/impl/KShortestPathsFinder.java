@@ -27,7 +27,7 @@ import org.jetbrains.annotations.NotNull;
 import java.util.*;
 
 /**
- * Algorithm to search k shortest paths between to vertices in unweighted directed graph.
+ * Algorithm to search k shortest paths between two vertices in unweighted directed graph.
  * Based on article "Finding the k shortest paths" by D. Eppstein, 1997.
  *
  * @author nik
@@ -171,7 +171,7 @@ public class KShortestPathsFinder<Node> {
 
       PriorityQueue<Sidetracks<Node>> queue = new PriorityQueue<>();
       List<FList<HeapNode<Node>>> sidetracks = new ArrayList<>();
-      sidetracks.add(FList.<HeapNode<Node>>emptyList());
+      sidetracks.add(FList.emptyList());
 
       final Heap<Node> heap = myHeaps.get(myStart);
       if (heap != null) {

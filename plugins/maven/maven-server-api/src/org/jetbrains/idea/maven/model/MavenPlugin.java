@@ -22,6 +22,8 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.Serializable;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 import static org.jetbrains.idea.maven.model.MavenId.append;
@@ -35,6 +37,7 @@ public class MavenPlugin implements Serializable {
   private final String myVersion;
 
   private final boolean myDefault;
+  private final boolean myExtensions;
 
   private final Element myConfiguration;
   private final List<Execution> myExecutions;
@@ -45,6 +48,7 @@ public class MavenPlugin implements Serializable {
                      String artifactId,
                      String version,
                      boolean aDefault,
+                     boolean extensions,
                      Element configuration,
                      List<Execution> executions,
                      List<MavenId> dependencies) {
@@ -52,6 +56,7 @@ public class MavenPlugin implements Serializable {
     myArtifactId = artifactId;
     myVersion = version;
     myDefault = aDefault;
+    myExtensions = extensions;
     myConfiguration = configuration;
     myExecutions = executions;
     myDependencies = dependencies;
@@ -75,6 +80,10 @@ public class MavenPlugin implements Serializable {
 
   public boolean isDefault() {
     return myDefault;
+  }
+
+  public boolean isExtensions() {
+    return myExtensions;
   }
 
   @Nullable
@@ -134,6 +143,7 @@ public class MavenPlugin implements Serializable {
     MavenPlugin that = (MavenPlugin)o;
 
     if (myDefault != that.myDefault) return false;
+    if (myExtensions != that.myExtensions) return false;
     if (myGroupId != null ? !myGroupId.equals(that.myGroupId) : that.myGroupId != null) return false;
     if (myArtifactId != null ? !myArtifactId.equals(that.myArtifactId) : that.myArtifactId != null) return false;
     if (myVersion != null ? !myVersion.equals(that.myVersion) : that.myVersion != null) return false;
@@ -147,6 +157,7 @@ public class MavenPlugin implements Serializable {
   @Override
   public int hashCode() {
     int result = myDefault ? 1 : 0;
+    result = 31 * result + (myExtensions ? 1 : 0);
     result = 31 * result + (myGroupId != null ? myGroupId.hashCode() : 0);
     result = 31 * result + (myArtifactId != null ? myArtifactId.hashCode() : 0);
     result = 31 * result + (myVersion != null ? myVersion.hashCode() : 0);
@@ -167,7 +178,7 @@ public class MavenPlugin implements Serializable {
     }
 
     public Execution(String executionId, String phase, List<String> goals, Element configuration) {
-      myGoals = goals;
+      myGoals = goals == null ? Collections.<String>emptyList() : new ArrayList<String>(goals);
       myConfiguration = configuration;
       myExecutionId = executionId;
       myPhase = phase;
@@ -197,7 +208,7 @@ public class MavenPlugin implements Serializable {
 
       Execution that = (Execution)o;
 
-      if (myGoals != null ? !myGoals.equals(that.myGoals) : that.myGoals != null) return false;
+      if (!myGoals.equals(that.myGoals)) return false;
       if (myExecutionId != null ? !myExecutionId.equals(that.myExecutionId) : that.myExecutionId != null) return false;
       if (myPhase != null ? !myPhase.equals(that.myPhase) : that.myPhase != null) return false;
       if (!JDOMUtil.areElementsEqual(myConfiguration, that.myConfiguration)) return false;
@@ -207,7 +218,7 @@ public class MavenPlugin implements Serializable {
 
     @Override
     public int hashCode() {
-      int result = myGoals != null ? myGoals.hashCode() : 0;
+      int result = myGoals.hashCode();
       if (myExecutionId != null) {
         result = 31 * result + myExecutionId.hashCode();
       }

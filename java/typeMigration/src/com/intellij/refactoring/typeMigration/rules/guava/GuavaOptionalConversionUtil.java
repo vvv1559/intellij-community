@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,12 +17,9 @@ package com.intellij.refactoring.typeMigration.rules.guava;
 
 import com.intellij.openapi.fileTypes.StdFileTypes;
 import com.intellij.psi.*;
-import com.intellij.psi.util.PsiMatcherExpression;
-import com.intellij.refactoring.typeMigration.TypeConversionDescriptor;
 import com.intellij.structuralsearch.MatchOptions;
 import com.intellij.structuralsearch.MatchResult;
 import com.intellij.structuralsearch.Matcher;
-import com.intellij.structuralsearch.plugin.replace.impl.Replacer;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.List;
@@ -53,9 +50,9 @@ public class GuavaOptionalConversionUtil {
       final PsiExpression expression = expressions[0];
       Matcher matcher = new Matcher(methodCall.getProject());
       final MatchOptions options = new MatchOptions();
+      options.setSearchPattern(GuavaOptionalConversionRule.OPTIONAL_CONVERTOR_PATTERN);
       options.setFileType(StdFileTypes.JAVA);
-      final List<MatchResult> results =
-        matcher.testFindMatches(expression.getText(), GuavaOptionalConversionRule.OPTIONAL_CONVERTOR_PATTERN, options, false);
+      final List<MatchResult> results = matcher.testFindMatches(expression.getText(), options, false);
       if (!results.isEmpty()) {
         final MatchResult result = results.get(0);
         if (result.getStart() == 0 && result.getEnd() == -1) {

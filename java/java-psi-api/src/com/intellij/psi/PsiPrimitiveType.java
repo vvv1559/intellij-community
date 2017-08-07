@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
  */
 package com.intellij.psi;
 
+import com.intellij.lang.jvm.types.JvmPrimitiveType;
 import com.intellij.pom.java.LanguageLevel;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.psi.util.PsiUtil;
@@ -29,9 +30,10 @@ import java.util.Map;
 /**
  * Represents primitive types of Java language.
  */
-public class PsiPrimitiveType extends PsiType.Stub {
-  private static final Map<String, PsiPrimitiveType> ourQNameToUnboxed = new THashMap<String, PsiPrimitiveType>();
-  private static final Map<PsiPrimitiveType, String> ourUnboxedToQName = new THashMap<PsiPrimitiveType, String>();
+public class PsiPrimitiveType extends PsiType.Stub implements JvmPrimitiveType {
+
+  private static final Map<String, PsiPrimitiveType> ourQNameToUnboxed = new THashMap<>();
+  private static final Map<PsiPrimitiveType, String> ourUnboxedToQName = new THashMap<>();
 
   private final String myName;
 
@@ -74,11 +76,11 @@ public class PsiPrimitiveType extends PsiType.Stub {
   @NotNull
   @Override
   public String getInternalCanonicalText() {
-    return getText(true, true);
+    return getCanonicalText(true);
   }
 
   private String getText(boolean qualified, boolean annotated) {
-    PsiAnnotation[] annotations = annotated ? getAnnotations() : PsiAnnotation.EMPTY_ARRAY; ;
+    PsiAnnotation[] annotations = annotated ? getAnnotations() : PsiAnnotation.EMPTY_ARRAY;
     if (annotations.length == 0) return myName;
 
     StringBuilder sb = new StringBuilder();
@@ -92,6 +94,9 @@ public class PsiPrimitiveType extends PsiType.Stub {
    */
   @Override
   public boolean isValid() {
+    for (PsiAnnotation annotation : getAnnotations()) {
+      if (!annotation.isValid()) return false;
+    }
     return true;
   }
 
@@ -126,7 +131,7 @@ public class PsiPrimitiveType extends PsiType.Stub {
   public static PsiPrimitiveType getUnboxedType(PsiType type) {
     if (!(type instanceof PsiClassType)) return null;
 
-    assert type.isValid() : type;
+    PsiUtil.ensureValidType(type);
     LanguageLevel languageLevel = ((PsiClassType)type).getLanguageLevel();
     if (!languageLevel.isAtLeast(LanguageLevel.JDK_1_5)) return null;
 
@@ -137,6 +142,11 @@ public class PsiPrimitiveType extends PsiType.Stub {
     if (unboxed == null) return null;
 
     return unboxed.annotate(type.getAnnotationProvider());
+  }
+
+  @Nullable
+  public static PsiPrimitiveType getOptionallyUnboxedType(PsiType type) {
+    return type instanceof PsiPrimitiveType ? (PsiPrimitiveType)type : getUnboxedType(type);
   }
 
   public String getBoxedTypeName() {
@@ -153,6 +163,7 @@ public class PsiPrimitiveType extends PsiType.Stub {
   @Nullable
   public PsiClassType getBoxedType(@NotNull PsiElement context) {
     PsiFile file = context.getContainingFile();
+    if (file == null) return null;
     LanguageLevel languageLevel = PsiUtil.getLanguageLevel(file);
     if (!languageLevel.isAtLeast(LanguageLevel.JDK_1_5)) return null;
 

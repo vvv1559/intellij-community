@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,7 +20,6 @@ import com.intellij.codeInsight.hint.HintManagerImpl;
 import com.intellij.ide.CopyPasteDelegator;
 import com.intellij.ide.DataManager;
 import com.intellij.ide.IdeView;
-import com.intellij.ide.dnd.DnDActionInfo;
 import com.intellij.ide.dnd.DnDDragStartBean;
 import com.intellij.ide.dnd.DnDSupport;
 import com.intellij.ide.dnd.TransferableWrapper;
@@ -37,6 +36,7 @@ import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.*;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.editor.Editor;
+import com.intellij.openapi.extensions.Extensions;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleUtilCore;
 import com.intellij.openapi.project.Project;
@@ -56,21 +56,21 @@ import com.intellij.openapi.wm.WindowManager;
 import com.intellij.pom.Navigatable;
 import com.intellij.psi.PsiDirectory;
 import com.intellij.psi.PsiElement;
-import com.intellij.psi.PsiFile;
-import com.intellij.psi.PsiFileSystemItem;
+import com.intellij.psi.util.PsiUtilCore;
 import com.intellij.ui.*;
 import com.intellij.ui.awt.RelativePoint;
 import com.intellij.ui.components.JBList;
 import com.intellij.ui.popup.AbstractPopup;
 import com.intellij.ui.popup.PopupOwner;
 import com.intellij.util.Consumer;
-import com.intellij.util.Function;
+import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
 import javax.swing.border.LineBorder;
+import javax.swing.event.PopupMenuEvent;
 import javax.swing.plaf.PanelUI;
 import javax.swing.tree.TreeNode;
 import java.awt.*;
@@ -268,8 +268,8 @@ public class NavBarPanel extends JPanel implements DataProvider, PopupOwner, Dis
     for (NavBarItem item : myList) {
       item.update();
     }
-    if (UISettings.getInstance().SHOW_NAVIGATION_BAR) {
-      NavBarRootPaneExtension.NavBarWrapperPanel wrapperPanel = (NavBarRootPaneExtension.NavBarWrapperPanel) 
+    if (UISettings.getInstance().getShowNavigationBar()) {
+      NavBarRootPaneExtension.NavBarWrapperPanel wrapperPanel = (NavBarRootPaneExtension.NavBarWrapperPanel)
         SwingUtilities.getAncestorOfClass(NavBarRootPaneExtension.NavBarWrapperPanel.class, this);
 
       if (wrapperPanel != null) {
@@ -277,6 +277,11 @@ public class NavBarPanel extends JPanel implements DataProvider, PopupOwner, Dis
         wrapperPanel.repaint();
       }
     }
+  }
+
+  void resetSelection() {
+    int size = myModel.size();
+    if (size > 0) myModel.setSelectedIndex(size - 1);
   }
 
   public void rebuildAndSelectTail(final boolean requestFocus) {
@@ -540,6 +545,12 @@ public class NavBarPanel extends JPanel implements DataProvider, PopupOwner, Dis
     final ActionPopupMenu popupMenu = actionManager.createActionPopupMenu(ActionPlaces.NAVIGATION_BAR_POPUP, group);
     final NavBarItem item = getItem(index);
     if (item != null) {
+      popupMenu.getComponent().addPopupMenuListener(new PopupMenuListenerAdapter() {
+        @Override
+        public void popupMenuCanceled(PopupMenuEvent event) {
+          resetSelection(); // select last item if popup cancelled
+        }
+      });
       popupMenu.getComponent().show(this, item.getX(), item.getY() + item.getHeight());
     }
   }
@@ -576,6 +587,12 @@ public class NavBarPanel extends JPanel implements DataProvider, PopupOwner, Dis
   @Override
   @Nullable
   public Object getData(String dataId) {
+    // First of all try to obtain data from extension
+    for (NavBarModelExtension modelExtension : Extensions.getExtensions(NavBarModelExtension.EP_NAME)) {
+      Object data = modelExtension.getData(dataId, this);
+      if (data != null) return data;
+    }
+
     if (CommonDataKeys.PROJECT.is(dataId)) {
       return !myProject.isDisposed() ? myProject : null;
     }
@@ -617,17 +634,10 @@ public class NavBarPanel extends JPanel implements DataProvider, PopupOwner, Dis
     if (CommonDataKeys.VIRTUAL_FILE_ARRAY.is(dataId)) {
       PsiElement[] psiElements = (PsiElement[])getData(LangDataKeys.PSI_ELEMENT_ARRAY.getName());
       if (psiElements == null) return null;
-      Set<VirtualFile> files = new LinkedHashSet<>();
+      Set<VirtualFile> files = ContainerUtil.newLinkedHashSet();
       for (PsiElement element : psiElements) {
-        PsiFile file = element.getContainingFile();
-        if (file != null) {
-          final VirtualFile virtualFile = file.getVirtualFile();
-          if (virtualFile != null) {
-            files.add(virtualFile);
-          }
-        } else if (element instanceof PsiFileSystemItem) {
-          files.add(((PsiFileSystemItem)element).getVirtualFile());
-        }
+        VirtualFile virtualFile = PsiUtilCore.getVirtualFile(element);
+        ContainerUtil.addIfNotNull(files, virtualFile);
       }
       return !files.isEmpty() ? VfsUtilCore.toVirtualFileArray(files) : null;
     }
@@ -758,28 +768,22 @@ public class NavBarPanel extends JPanel implements DataProvider, PopupOwner, Dis
     myUpdateQueue.rebuildUi();
     if (editor == null) {
       myContextComponent = PlatformDataKeys.CONTEXT_COMPONENT.getData(dataContext);
-      getHintContainerShowPoint().doWhenDone(new Consumer<RelativePoint>() {
-        @Override
-        public void consume(RelativePoint relativePoint) {
-          final Component owner = focusManager.getFocusOwner();
-          final Component cmp = relativePoint.getComponent();
-          if (cmp instanceof JComponent && cmp.isShowing()) {
-            myHint.show((JComponent)cmp, relativePoint.getPoint().x, relativePoint.getPoint().y,
-                        owner instanceof JComponent ? (JComponent)owner : null,
-                        new HintHint(relativePoint.getComponent(), relativePoint.getPoint()));
-          }
+      getHintContainerShowPoint().doWhenDone((Consumer<RelativePoint>)relativePoint -> {
+        final Component owner = focusManager.getFocusOwner();
+        final Component cmp = relativePoint.getComponent();
+        if (cmp instanceof JComponent && cmp.isShowing()) {
+          myHint.show((JComponent)cmp, relativePoint.getPoint().x, relativePoint.getPoint().y,
+                      owner instanceof JComponent ? (JComponent)owner : null,
+                      new HintHint(relativePoint.getComponent(), relativePoint.getPoint()));
         }
       });
     }
     else {
       myHintContainer = editor.getContentComponent();
-      getHintContainerShowPoint().doWhenDone(new Consumer<RelativePoint>() {
-        @Override
-        public void consume(RelativePoint rp) {
-          Point p = rp.getPointOn(myHintContainer).getPoint();
-          final HintHint hintInfo = new HintHint(editor, p);
-          HintManagerImpl.getInstanceImpl().showEditorHint(myHint, editor, p, HintManager.HIDE_BY_ESCAPE, 0, true, hintInfo);
-        }
+      getHintContainerShowPoint().doWhenDone((Consumer<RelativePoint>)rp -> {
+        Point p = rp.getPointOn(myHintContainer).getPoint();
+        final HintHint hintInfo = new HintHint(editor, p);
+        HintManagerImpl.getInstanceImpl().showEditorHint(myHint, editor, p, HintManager.HIDE_BY_ESCAPE, 0, true, hintInfo);
       });
     }
 
@@ -797,12 +801,9 @@ public class NavBarPanel extends JPanel implements DataProvider, PopupOwner, Dis
         if (myContextComponent != null) {
           myLocationCache = JBPopupFactory.getInstance().guessBestPopupLocation(DataManager.getInstance().getDataContext(myContextComponent));
         } else {
-          DataManager.getInstance().getDataContextFromFocus().doWhenDone(new Consumer<DataContext>() {
-            @Override
-            public void consume(DataContext dataContext) {
-              myContextComponent = PlatformDataKeys.CONTEXT_COMPONENT.getData(dataContext);
-              myLocationCache = JBPopupFactory.getInstance().guessBestPopupLocation(DataManager.getInstance().getDataContext(myContextComponent));
-            }
+          DataManager.getInstance().getDataContextFromFocus().doWhenDone((Consumer<DataContext>)dataContext -> {
+            myContextComponent = PlatformDataKeys.CONTEXT_COMPONENT.getData(dataContext);
+            myLocationCache = JBPopupFactory.getInstance().guessBestPopupLocation(DataManager.getInstance().getDataContext(myContextComponent));
           });
         }
       }

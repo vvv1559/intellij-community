@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -33,44 +33,44 @@ class GrUnusedDefTest extends GrHighlightingTestBase {
      new UnusedDeclarationInspectionBase(true)]
   }
 
-  public void testUnusedVariable() { doTest() }
+  void testUnusedVariable() { doTest() }
 
-  public void testDefinitionUsedInClosure() { doTest() }
+  void testDefinitionUsedInClosure() { doTest() }
 
-  public void testDefinitionUsedInClosure2() { doTest() }
+  void testDefinitionUsedInClosure2() { doTest() }
 
-  public void testDefinitionUsedInSwitchCase() { doTest() }
+  void testDefinitionUsedInSwitchCase() { doTest() }
 
-  public void testUnusedDefinitionForMethodMissing() { doTest() }
+  void testUnusedDefinitionForMethodMissing() { doTest() }
 
-  public void testPrefixIncrementCfa() { doTest() }
+  void testPrefixIncrementCfa() { doTest() }
 
-  public void testIfIncrementElseReturn() { doTest() }
+  void testIfIncrementElseReturn() { doTest() }
 
-  public void testSwitchControlFlow() { doTest() }
+  void testSwitchControlFlow() { doTest() }
 
-  public void testUsageInInjection() { doTest() }
+  void testUsageInInjection() { doTest() }
 
-  public void testUnusedDefsForArgs() { doTest() }
+  void testUnusedDefsForArgs() { doTest() }
 
-  public void testUsedDefBeforeTry1() { doTest() }
+  void testUsedDefBeforeTry1() { doTest() }
 
-  public void testUsedDefBeforeTry2() { doTest() }
+  void testUsedDefBeforeTry2() { doTest() }
 
-  public void testUnusedInc() { doTest() }
+  void testUnusedInc() { doTest() }
 
-  public void testUsedInCatch() { doTest() }
+  void testUsedInCatch() { doTest() }
 
-  public void testGloballyUnusedSymbols() { doTest() }
+  void testGloballyUnusedSymbols() { doTest() }
 
-  public void testGloballyUnusedInnerMethods() {
+  void testGloballyUnusedInnerMethods() {
     myFixture.addClass 'package junit.framework; public class TestCase {}'
     doTest()
   }
 
-  public void testUnusedParameter() { doTest() }
+  void testUnusedParameter() { doTest() }
 
-  public void testSuppressUnusedMethod() {
+  void testSuppressUnusedMethod() {
     testHighlighting('''\
 class <warning descr="Class Foo is unused">Foo</warning> {
     @SuppressWarnings("GroovyUnusedDeclaration")
@@ -124,4 +124,32 @@ def <warning descr="Method f2 is unused">f2</warning>(String foo, int mode) {
 def <warning descr="Variable is not used">abc</warning>
 ''')
   }
+
+  void 'test method referenced via incapplicable call is used'() {
+    testHighlighting '''\
+static boolean fsdasdfsgsdsfadfgs(a, b) { a == b }
+def bar() { fsdasdfsgsdsfadfgs("s") }
+bar()
+'''
+  }
+
+  void 'test delegate'() {
+    fixture.addClass '''
+package groovy.lang;
+@Target({ElementType.FIELD, ElementType.METHOD})
+public @interface Delegate {}
+'''
+
+    testHighlighting '''\
+class Foo {
+  @Delegate
+  Integer i
+  @Delegate
+  String bar() {}
+}
+
+new Foo()
+'''
+  }
+
 }

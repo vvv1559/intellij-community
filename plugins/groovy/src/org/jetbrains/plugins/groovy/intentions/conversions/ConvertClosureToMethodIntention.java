@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -69,7 +69,7 @@ public class ConvertClosureToMethodIntention extends Intention {
   }
 
   @Override
-  protected void processIntention(@NotNull PsiElement element, Project project, Editor editor) throws IncorrectOperationException {
+  protected void processIntention(@NotNull PsiElement element, @NotNull Project project, Editor editor) throws IncorrectOperationException {
     final GrField field;
     if (element.getParent() instanceof GrField) {
       field = (GrField)element.getParent();
@@ -213,7 +213,7 @@ public class ConvertClosureToMethodIntention extends Intention {
 
   private static class MyPredicate implements PsiElementPredicate {
     @Override
-    public boolean satisfiedBy(PsiElement element) {
+    public boolean satisfiedBy(@NotNull PsiElement element) {
       if (element.getLanguage() != GroovyLanguage.INSTANCE) return false;
       final PsiReference ref = element.getReference();
       GrField field;

@@ -45,7 +45,7 @@ import java.io.IOException;
 import java.util.*;
 
 public class TestIntegrationUtils {
-  private static final Logger LOG = Logger.getInstance("#" + TestIntegrationUtils.class.getName());
+  private static final Logger LOG = Logger.getInstance(TestIntegrationUtils.class);
 
   public enum MethodKind {
     SET_UP("setUp") {
@@ -251,7 +251,7 @@ public class TestIntegrationUtils {
       }
     }
 
-    templateText = StringUtil.replace(templateText, "${BODY}", "");
+    templateText = StringUtil.replace(templateText, "${BODY}\n", "");
 
     int from = 0;
     while (true) {

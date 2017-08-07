@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -37,12 +37,16 @@ import com.intellij.util.indexing.FileBasedIndex;
 import com.intellij.util.indexing.IndexableFileSet;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.jps.model.java.JavaSourceRootType;
+import org.jetbrains.jps.model.module.JpsModuleSourceRootType;
 
 import java.io.File;
 import java.io.IOException;
 
 public class LightProjectDescriptor {
   public static final LightProjectDescriptor EMPTY_PROJECT_DESCRIPTOR = new LightProjectDescriptor();
+
+  public static final String TEST_MODULE_NAME = "light_idea_test_case";
 
   public void setUpProject(@NotNull Project project, @NotNull SetupHandler handler) throws Exception {
     WriteAction.run(() -> {
@@ -58,7 +62,7 @@ public class LightProjectDescriptor {
 
   @NotNull
   public Module createMainModule(@NotNull Project project) {
-    return createModule(project, FileUtil.join(FileUtil.getTempDirectory(), "light_idea_test_case.iml"));
+    return createModule(project, FileUtil.join(FileUtil.getTempDirectory(), TEST_MODULE_NAME + ".iml"));
   }
 
   protected Module createModule(@NotNull Project project, @NotNull String moduleFilePath) {
@@ -86,20 +90,29 @@ public class LightProjectDescriptor {
     VirtualFile dummyRoot = VirtualFileManager.getInstance().findFileByUrl("temp:///");
     assert dummyRoot != null;
     dummyRoot.refresh(false, false);
+    VirtualFile srcRoot = doCreateSourceRoot(dummyRoot, srcPath);
+    registerSourceRoot(module.getProject(), srcRoot);
+    return srcRoot;
+  }
 
+  protected VirtualFile doCreateSourceRoot(VirtualFile root, String srcPath) {
     VirtualFile srcRoot;
     try {
-      srcRoot = dummyRoot.createChildDirectory(this, srcPath);
+      srcRoot = root.createChildDirectory(this, srcPath);
       cleanSourceRoot(srcRoot);
     }
     catch (IOException e) {
       throw new RuntimeException(e);
     }
 
+    return srcRoot;
+  }
+
+  protected void registerSourceRoot(Project project, VirtualFile srcRoot) {
     IndexableFileSet indexableFileSet = new IndexableFileSet() {
       @Override
       public boolean isInSet(@NotNull VirtualFile file) {
-        return file.getFileSystem() == srcRoot.getFileSystem() && module.getProject().isOpen();
+        return file.getFileSystem() == srcRoot.getFileSystem() && project.isOpen();
       }
 
       @Override
@@ -114,12 +127,10 @@ public class LightProjectDescriptor {
       }
     };
     FileBasedIndex.getInstance().registerIndexableSet(indexableFileSet, null);
-    Disposer.register(module.getProject(), () -> FileBasedIndex.getInstance().removeIndexableSet(indexableFileSet));
-
-    return srcRoot;
+    Disposer.register(project, () -> FileBasedIndex.getInstance().removeIndexableSet(indexableFileSet));
   }
 
-  private void createContentEntry(@NotNull Module module, @NotNull VirtualFile srcRoot) {
+  protected void createContentEntry(@NotNull Module module, @NotNull VirtualFile srcRoot) {
     ModuleRootModificationUtil.updateModel(module, model -> {
       Sdk sdk = getSdk();
       if (sdk != null) {
@@ -127,10 +138,15 @@ public class LightProjectDescriptor {
       }
 
       ContentEntry contentEntry = model.addContentEntry(srcRoot);
-      contentEntry.addSourceFolder(srcRoot, false);
+      contentEntry.addSourceFolder(srcRoot, getSourceRootType());
 
       configureModule(module, model, contentEntry);
     });
+  }
+
+  @NotNull
+  protected JpsModuleSourceRootType<?> getSourceRootType() {
+    return JavaSourceRootType.SOURCE;
   }
 
   @Nullable

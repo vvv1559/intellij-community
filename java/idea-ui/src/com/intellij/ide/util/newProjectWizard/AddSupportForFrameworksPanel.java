@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -33,8 +33,6 @@ import com.intellij.ide.util.newProjectWizard.impl.FrameworkSupportModelBase;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.module.Module;
-import com.intellij.openapi.project.DumbModePermission;
-import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.project.ProjectBundle;
 import com.intellij.openapi.roots.IdeaModifiableModelsProvider;
 import com.intellij.openapi.roots.ModifiableRootModel;
@@ -43,10 +41,8 @@ import com.intellij.openapi.roots.ui.configuration.projectRoot.LibrariesContaine
 import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.ui.Splitter;
 import com.intellij.openapi.util.Comparing;
-import com.intellij.openapi.util.Ref;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.ui.CheckedTreeNode;
-import com.intellij.ui.IdeBorderFactory;
 import com.intellij.ui.ScrollPaneFactory;
 import com.intellij.util.Function;
 import com.intellij.util.containers.ContainerUtil;
@@ -143,7 +139,7 @@ public class AddSupportForFrameworksPanel implements Disposable {
   }
 
   public void setProviders(List<FrameworkSupportInModuleProvider> providers) {
-    setProviders(providers, Collections.<String>emptySet(), Collections.<String>emptySet());
+    setProviders(providers, Collections.emptySet(), Collections.emptySet());
   }
 
   public void setProviders(List<FrameworkSupportInModuleProvider> providers, Set<String> associated, Set<String> preselected) {
@@ -276,7 +272,7 @@ public class AddSupportForFrameworksPanel implements Disposable {
   private static JScrollPane wrapInScrollPane(JPanel panel) {
     JPanel wrapper = new JPanel(new BorderLayout());
     wrapper.add(panel);
-    wrapper.setBorder(IdeBorderFactory.createEmptyBorder(5));
+    wrapper.setBorder(JBUI.Borders.empty(5));
     return ScrollPaneFactory.createScrollPane(wrapper, ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED,
                                               ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
   }
@@ -402,26 +398,16 @@ public class AddSupportForFrameworksPanel implements Disposable {
   }
 
   public boolean downloadLibraries(@NotNull final JComponent parentComponent) {
-    final Ref<Boolean> result = Ref.create(true);
-    DumbService.allowStartingDumbModeInside(DumbModePermission.MAY_START_BACKGROUND, () -> {
-      applyLibraryOptionsForSelected();
-      List<LibraryCompositionSettings> list = getLibrariesCompositionSettingsList();
-      for (LibraryCompositionSettings compositionSettings : list) {
-        if (!compositionSettings.downloadFiles(parentComponent)) {
-          result.set(false);
-          return;
-        }
-      }
-    });
-
-    if (!result.get()) {
-      int answer = Messages.showYesNoDialog(parentComponent,
-                                            ProjectBundle.message("warning.message.some.required.libraries.wasn.t.downloaded"),
-                                            CommonBundle.getWarningTitle(), Messages.getWarningIcon());
-      if (answer != Messages.YES) {
-        return false;
+    applyLibraryOptionsForSelected();
+    for (LibraryCompositionSettings compositionSettings : getLibrariesCompositionSettingsList()) {
+      if (!compositionSettings.downloadFiles(parentComponent)) {
+        int answer = Messages.showYesNoDialog(parentComponent,
+                                              ProjectBundle.message("warning.message.some.required.libraries.wasn.t.downloaded"),
+                                              CommonBundle.getWarningTitle(), Messages.getWarningIcon());
+        return answer == Messages.YES;
       }
     }
+
     return true;
   }
 

@@ -19,12 +19,12 @@ import com.intellij.vcs.log.graph.*;
 import com.intellij.vcs.log.graph.actions.ActionController;
 import com.intellij.vcs.log.graph.actions.GraphAction;
 import com.intellij.vcs.log.graph.actions.GraphAnswer;
+import com.intellij.vcs.log.graph.api.LinearGraph;
 import com.intellij.vcs.log.graph.api.elements.GraphEdge;
 import com.intellij.vcs.log.graph.api.elements.GraphEdgeType;
 import com.intellij.vcs.log.graph.api.elements.GraphElement;
 import com.intellij.vcs.log.graph.api.elements.GraphNodeType;
 import com.intellij.vcs.log.graph.api.permanent.PermanentGraphInfo;
-import com.intellij.vcs.log.graph.api.printer.PrintElementGenerator;
 import com.intellij.vcs.log.graph.impl.facade.LinearGraphController.LinearGraphAction;
 import com.intellij.vcs.log.graph.impl.print.PrintElementGeneratorImpl;
 import com.intellij.vcs.log.graph.impl.print.elements.PrintElementWithGraphElement;
@@ -43,7 +43,7 @@ public class VisibleGraphImpl<CommitId> implements VisibleGraph<CommitId> {
   @NotNull private final GraphColorManager<CommitId> myColorManager;
 
   private PrintElementManagerImpl myPrintElementManager;
-  private PrintElementGenerator myPrintElementGenerator;
+  private PrintElementGeneratorImpl myPrintElementGenerator;
   private boolean myShowLongEdges = false;
 
   public VisibleGraphImpl(@NotNull LinearGraphController graphController,
@@ -63,42 +63,13 @@ public class VisibleGraphImpl<CommitId> implements VisibleGraph<CommitId> {
   @NotNull
   @Override
   public RowInfo<CommitId> getRowInfo(final int visibleRow) {
-    final int nodeId = myGraphController.getCompiledGraph().getNodeId(visibleRow);
+    final int nodeId = getNodeId(visibleRow);
     assert nodeId >= 0; // todo remake for all id
-    return new RowInfo<CommitId>() {
-      @NotNull
-      @Override
-      public CommitId getCommit() {
-        return myPermanentGraph.getPermanentCommitsInfo().getCommitId(nodeId);
-      }
+    return new RowInfoImpl(nodeId, visibleRow);
+  }
 
-      @NotNull
-      @Override
-      public CommitId getOneOfHeads() {
-        int headNodeId = myPermanentGraph.getPermanentGraphLayout().getOneOfHeadNodeIndex(nodeId);
-        return myPermanentGraph.getPermanentCommitsInfo().getCommitId(headNodeId);
-      }
-
-      @NotNull
-      @Override
-      public Collection<? extends PrintElement> getPrintElements() {
-        return myPrintElementGenerator.getPrintElements(visibleRow);
-      }
-
-      @NotNull
-      @Override
-      public RowType getRowType() {
-        GraphNodeType nodeType = myGraphController.getCompiledGraph().getGraphNode(visibleRow).getType();
-        switch (nodeType) {
-          case USUAL:
-            return RowType.NORMAL;
-          case UNMATCHED:
-            return RowType.UNMATCHED;
-          default:
-            throw new UnsupportedOperationException("Unsupported node type: " + nodeType);
-        }
-      }
-    };
+  public int getNodeId(int visibleRow) {
+    return myGraphController.getCompiledGraph().getNodeId(visibleRow);
   }
 
   @Override
@@ -121,10 +92,24 @@ public class VisibleGraphImpl<CommitId> implements VisibleGraph<CommitId> {
 
   @NotNull
   public SimpleGraphInfo<CommitId> buildSimpleGraphInfo() {
-    return SimpleGraphInfo
-      .build(myGraphController.getCompiledGraph(), myPermanentGraph.getPermanentGraphLayout(), myPermanentGraph.getPermanentCommitsInfo(),
-             myPermanentGraph.getLinearGraph().nodesCount(),
-             myPermanentGraph.getBranchNodeIds());
+    return SimpleGraphInfo.build(myGraphController.getCompiledGraph(),
+                                 myPermanentGraph.getPermanentGraphLayout(),
+                                 myPermanentGraph.getPermanentCommitsInfo(),
+                                 myPermanentGraph.getLinearGraph().nodesCount(),
+                                 myPermanentGraph.getBranchNodeIds());
+  }
+
+  public int getRecommendedWidth() {
+    return myPrintElementGenerator.getRecommendedWidth();
+  }
+
+  public LinearGraph getLinearGraph() {
+    return myGraphController.getCompiledGraph();
+  }
+
+  @NotNull
+  public PermanentGraphInfo<CommitId> getPermanentGraph() {
+    return myPermanentGraph;
   }
 
   private class ActionControllerImpl implements ActionController<CommitId> {
@@ -132,7 +117,7 @@ public class VisibleGraphImpl<CommitId> implements VisibleGraph<CommitId> {
     @Nullable
     private Integer convertToNodeId(@Nullable Integer nodeIndex) {
       if (nodeIndex == null) return null;
-      return myGraphController.getCompiledGraph().getNodeId(nodeIndex);
+      return getNodeId(nodeIndex);
     }
 
     @Nullable
@@ -178,7 +163,7 @@ public class VisibleGraphImpl<CommitId> implements VisibleGraph<CommitId> {
     @NotNull
     @Override
     public GraphAnswer<CommitId> performAction(@NotNull GraphAction graphAction) {
-      myPrintElementManager.setSelectedElements(Collections.<Integer>emptySet());
+      myPrintElementManager.setSelectedElements(Collections.emptySet());
 
       LinearGraphAction action = convert(graphAction);
       GraphAnswer<CommitId> graphAnswer = performArrowAction(action);
@@ -212,12 +197,9 @@ public class VisibleGraphImpl<CommitId> implements VisibleGraph<CommitId> {
 
     private GraphAnswer<CommitId> convert(@NotNull final LinearGraphController.LinearGraphAnswer answer) {
       final Runnable graphUpdater = answer.getGraphUpdater();
-      return new GraphAnswerImpl<>(answer.getCursorToSet(), null, graphUpdater == null ? null : new Runnable() {
-        @Override
-        public void run() {
-          graphUpdater.run();
-          updatePrintElementGenerator();
-        }
+      return new GraphAnswerImpl<>(answer.getCursorToSet(), null, graphUpdater == null ? null : (Runnable)() -> {
+        graphUpdater.run();
+        updatePrintElementGenerator();
       }, false);
     }
   }
@@ -278,6 +260,49 @@ public class VisibleGraphImpl<CommitId> implements VisibleGraph<CommitId> {
     @Override
     public Type getType() {
       return myType;
+    }
+  }
+
+  private class RowInfoImpl implements RowInfo<CommitId> {
+    private final int myNodeId;
+    private final int myVisibleRow;
+
+    public RowInfoImpl(int nodeId, int visibleRow) {
+      myNodeId = nodeId;
+      myVisibleRow = visibleRow;
+    }
+
+    @NotNull
+    @Override
+    public CommitId getCommit() {
+      return myPermanentGraph.getPermanentCommitsInfo().getCommitId(myNodeId);
+    }
+
+    @NotNull
+    @Override
+    public CommitId getOneOfHeads() {
+      int headNodeId = myPermanentGraph.getPermanentGraphLayout().getOneOfHeadNodeIndex(myNodeId);
+      return myPermanentGraph.getPermanentCommitsInfo().getCommitId(headNodeId);
+    }
+
+    @NotNull
+    @Override
+    public Collection<? extends PrintElement> getPrintElements() {
+      return myPrintElementGenerator.getPrintElements(myVisibleRow);
+    }
+
+    @NotNull
+    @Override
+    public RowType getRowType() {
+      GraphNodeType nodeType = myGraphController.getCompiledGraph().getGraphNode(myVisibleRow).getType();
+      switch (nodeType) {
+        case USUAL:
+          return RowType.NORMAL;
+        case UNMATCHED:
+          return RowType.UNMATCHED;
+        default:
+          throw new UnsupportedOperationException("Unsupported node type: " + nodeType);
+      }
     }
   }
 }

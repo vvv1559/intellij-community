@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@ package com.intellij.execution.junit;
 import com.intellij.CommonBundle;
 import com.intellij.codeInsight.AnnotationUtil;
 import com.intellij.codeInsight.intention.AddAnnotationFix;
+import com.intellij.execution.configurations.ConfigurationType;
 import com.intellij.execution.junit2.info.MethodLocation;
 import com.intellij.icons.AllIcons;
 import com.intellij.ide.fileTemplates.FileTemplateDescriptor;
@@ -26,7 +27,6 @@ import com.intellij.openapi.roots.ExternalLibraryDescriptor;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.psi.*;
 import com.intellij.psi.codeStyle.JavaCodeStyleManager;
-import com.intellij.psi.util.PsiUtil;
 import com.intellij.testIntegration.JavaTestFramework;
 import com.intellij.util.IncorrectOperationException;
 import org.jetbrains.annotations.NotNull;
@@ -63,7 +63,7 @@ public class JUnit4Framework extends JavaTestFramework {
 
   public boolean isTestClass(PsiClass clazz, boolean canBePotential) {
     if (canBePotential) return isUnderTestSources(clazz);
-    return JUnitUtil.isJUnit4TestClass(clazz);
+    return JUnitUtil.isJUnit4TestClass(clazz, false);
   }
 
   @Nullable
@@ -87,6 +87,12 @@ public class JUnit4Framework extends JavaTestFramework {
   @Override
   @Nullable
   protected PsiMethod findOrCreateSetUpMethod(PsiClass clazz) throws IncorrectOperationException {
+    String beforeClassAnnotationName = JUnitUtil.BEFORE_CLASS_ANNOTATION_NAME;
+    String beforeAnnotationName = JUnitUtil.BEFORE_ANNOTATION_NAME;
+    return findOrCreateSetUpMethod(clazz, beforeClassAnnotationName, beforeAnnotationName);
+  }
+
+  private PsiMethod findOrCreateSetUpMethod(PsiClass clazz, String beforeClassAnnotationName, String beforeAnnotationName) {
     PsiMethod method = findSetUpMethod(clazz);
     if (method != null) return method;
 
@@ -96,14 +102,14 @@ public class JUnit4Framework extends JavaTestFramework {
     method = createSetUpPatternMethod(factory);
     PsiMethod existingMethod = clazz.findMethodBySignature(method, false);
     if (existingMethod != null) {
-      if (AnnotationUtil.isAnnotated(existingMethod, JUnitUtil.BEFORE_CLASS_ANNOTATION_NAME, false)) return existingMethod;
+      if (AnnotationUtil.isAnnotated(existingMethod, beforeClassAnnotationName, false)) return existingMethod;
       int exit = ApplicationManager.getApplication().isUnitTestMode() ?
                  Messages.OK :
-                       Messages.showOkCancelDialog("Method setUp already exist but is not annotated as @Before. Annotate?",
-                                                   CommonBundle.getWarningTitle(),
-                                                   Messages.getWarningIcon());
+                 Messages.showOkCancelDialog("Method setUp already exist but is not annotated as @Before. Annotate?",
+                                             CommonBundle.getWarningTitle(),
+                                             Messages.getWarningIcon());
       if (exit == Messages.OK) {
-        new AddAnnotationFix(JUnitUtil.BEFORE_ANNOTATION_NAME, existingMethod).invoke(existingMethod.getProject(), null, existingMethod.getContainingFile());
+        new AddAnnotationFix(beforeAnnotationName, existingMethod).invoke(existingMethod.getProject(), null, existingMethod.getContainingFile());
         return existingMethod;
       }
     }
@@ -125,13 +131,18 @@ public class JUnit4Framework extends JavaTestFramework {
   }
 
   @Override
-  public boolean isTestMethod(PsiElement element) {
-    return element instanceof PsiMethod && JUnitUtil.getTestMethod(element) != null;
+  public boolean isTestMethod(PsiElement element, boolean checkAbstract) {
+    return element instanceof PsiMethod && JUnitUtil.getTestMethod(element, checkAbstract) != null;
   }
 
   @Override
   public boolean isTestMethod(PsiMethod method, PsiClass myClass) {
     return JUnitUtil.isTestMethod(MethodLocation.elementInClass(method, myClass));
+  }
+
+  @Override
+  public boolean isMyConfigurationType(ConfigurationType type) {
+    return type instanceof JUnitConfigurationType;
   }
 
   public FileTemplateDescriptor getSetUpMethodFileTemplateDescriptor() {
@@ -142,6 +153,7 @@ public class JUnit4Framework extends JavaTestFramework {
     return new FileTemplateDescriptor("JUnit4 TearDown Method.java");
   }
 
+  @NotNull
   public FileTemplateDescriptor getTestMethodFileTemplateDescriptor() {
     return new FileTemplateDescriptor("JUnit4 Test Method.java");
   }
@@ -163,16 +175,8 @@ public class JUnit4Framework extends JavaTestFramework {
 
   @Override
   public boolean isParameterized(PsiClass clazz) {
-    final PsiAnnotation annotation = AnnotationUtil.findAnnotation(clazz, JUnitUtil.RUN_WITH);
-    if (annotation != null) {
-      final PsiAnnotationMemberValue value = annotation.findAttributeValue(PsiAnnotation.DEFAULT_REFERENCED_METHOD_NAME);
-      if (value instanceof PsiClassObjectAccessExpression) {
-        final PsiTypeElement operand = ((PsiClassObjectAccessExpression)value).getOperand();
-        final PsiClass psiClass = PsiUtil.resolveClassInClassTypeOnly(operand.getType());
-        return psiClass != null && "org.junit.runners.Parameterized".equals(psiClass.getQualifiedName());
-      }
-    }
-    return false;
+    PsiAnnotation annotation = JUnitUtil.getRunWithAnnotation(clazz);
+    return annotation != null && JUnitUtil.isParameterized(annotation);
   }
 
   @Override

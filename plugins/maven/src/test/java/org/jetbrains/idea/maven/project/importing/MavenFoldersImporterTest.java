@@ -22,7 +22,6 @@ import com.intellij.openapi.roots.*;
 import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.vcs.changes.ChangeListManager;
 import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.util.Consumer;
 import org.jetbrains.idea.maven.MavenImportingTestCase;
 import org.jetbrains.idea.maven.importing.MavenFoldersImporter;
 import org.jetbrains.idea.maven.importing.MavenRootModelAdapter;
@@ -45,7 +44,7 @@ public class MavenFoldersImporterTest extends MavenImportingTestCase {
     new File(myProjectRoot.getPath(), "target/generated-sources/xxx/z").mkdirs();
     updateProjectFolders();
 
-    assertExcludes("project", "target/foo");
+    assertExcludes("project", "target");
     assertGeneratedSources("project", "target/generated-sources/xxx");
     
     assertNull(myProjectRoot.findChild("target"));
@@ -101,10 +100,10 @@ public class MavenFoldersImporterTest extends MavenImportingTestCase {
 
     updateProjectFolders();
 
-    assertExcludes("m1", "target/foo");
+    assertExcludes("m1", "target");
     assertGeneratedSources("m1", "target/generated-sources/xxx");
 
-    assertExcludes("m2", "target/bar");
+    assertExcludes("m2", "target");
     assertGeneratedSources("m2", "target/generated-sources/yyy");
   }
 
@@ -148,7 +147,7 @@ public class MavenFoldersImporterTest extends MavenImportingTestCase {
     updateProjectFolders();
 
     assertSources("project", "target/src");
-    assertExcludes("project", "target/foo");
+    assertExcludes("project", "target");
   }
 
   public void testDoesNothingWithNonMavenModules() throws Exception {
@@ -189,7 +188,7 @@ public class MavenFoldersImporterTest extends MavenImportingTestCase {
                   "<version>1</version>");
 
     final int[] count = new int[]{0};
-    myProject.getMessageBus().connect().subscribe(ProjectTopics.PROJECT_ROOTS, new ModuleRootAdapter() {
+    myProject.getMessageBus().connect().subscribe(ProjectTopics.PROJECT_ROOTS, new ModuleRootListener() {
       @Override
       public void rootsChanged(ModuleRootEvent event) {
         count[0]++;
@@ -225,7 +224,7 @@ public class MavenFoldersImporterTest extends MavenImportingTestCase {
     importProject();
 
     final int[] count = new int[]{0};
-    myProject.getMessageBus().connect().subscribe(ProjectTopics.PROJECT_ROOTS, new ModuleRootAdapter() {
+    myProject.getMessageBus().connect().subscribe(ProjectTopics.PROJECT_ROOTS, new ModuleRootListener() {
       @Override
       public void rootsChanged(ModuleRootEvent event) {
         count[0]++;
@@ -260,6 +259,39 @@ public class MavenFoldersImporterTest extends MavenImportingTestCase {
     assertGeneratedSources("project");
 
     importProject();
+    assertGeneratedSources("project", "target/generated-sources/xxx");
+  }
+
+  public void testCustomPomFileName() throws Exception {
+    createProjectSubFile("m1/customName.xml", createPomXml(
+                  "<artifactId>m1</artifactId>" +
+                  "<version>1</version>" +
+
+                  "<parent>" +
+                  "  <groupId>test</groupId>" +
+                  "  <artifactId>project</artifactId>" +
+                  "  <version>1</version>" +
+                  "</parent>" +
+
+                  "<build>" +
+                  "  <sourceDirectory>sources</sourceDirectory>" +
+                  "  <testSourceDirectory>tests</testSourceDirectory>" +
+                  "</build>"));
+
+    new File(myProjectRoot.getPath(), "m1/sources").mkdirs();
+    new File(myProjectRoot.getPath(), "m1/tests").mkdirs();
+    new File(myProjectRoot.getPath(), "target/generated-sources/xxx/z").mkdirs();
+
+    importProject("<groupId>test</groupId>" +
+                  "<artifactId>project</artifactId>" +
+                  "<packaging>pom</packaging>" +
+                  "<version>1</version>" +
+
+                  "<modules>" +
+                  "  <module>m1/customName.xml</module>" +
+                  "</modules>");
+
+    assertContentRoots("m1", getProjectPath() + "/m1/sources", getProjectPath() + "/m1/tests");
     assertGeneratedSources("project", "target/generated-sources/xxx");
   }
 

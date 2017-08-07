@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,11 +19,12 @@ import com.intellij.lang.ant.ReflectedProject;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.module.Module;
-import com.intellij.openapi.module.ModuleUtil;
+import com.intellij.openapi.module.ModuleUtilCore;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.roots.OrderEnumerator;
 import com.intellij.openapi.roots.ProjectRootManager;
+import com.intellij.openapi.util.ClassLoaderUtil;
 import com.intellij.openapi.util.Key;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VfsUtilCore;
@@ -44,7 +45,6 @@ import org.jetbrains.plugins.groovy.runner.GroovyScriptUtil;
 
 import java.net.URL;
 import java.util.*;
-import java.util.concurrent.Callable;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -54,7 +54,6 @@ import java.util.concurrent.TimeoutException;
  */
 public class AntTasksProvider {
   private static final Logger LOG = Logger.getInstance("#org.jetbrains.plugins.groovy.gant.AntTasksProvider");
-  public static final boolean antAvailable;
   private static final Key<CachedValue<Set<LightMethodBuilder>>> GANT_METHODS = Key.create("gantMethods");
   private static final Object ourLock = new Object();
   public static final ParameterizedCachedValueProvider<Map<List<URL>,AntClassLoader>,Project> PROVIDER =
@@ -70,17 +69,6 @@ public class AntTasksProvider {
     Key.create("ANtClassLoader");
 
   private AntTasksProvider() {
-  }
-
-  static {
-    boolean ant = false;
-    try {
-      Class.forName("com.intellij.lang.ant.ReflectedProject");
-      ant = true;
-    }
-    catch (ClassNotFoundException ignored) {
-    }
-    antAvailable = ant;
   }
 
   public static Set<LightMethodBuilder> getAntTasks(PsiElement place) {
@@ -109,7 +97,7 @@ public class AntTasksProvider {
   private static Map<String, Class> getAntObjects(final GroovyFile groovyFile) {
     final Project project = groovyFile.getProject();
 
-    final Module module = ModuleUtil.findModuleForPsiElement(groovyFile);
+    final Module module = ModuleUtilCore.findModuleForPsiElement(groovyFile);
     Set<VirtualFile> jars = new HashSet<>();
     if (module != null) {
       ContainerUtil.addAll(jars, OrderEnumerator.orderEntries(module).getAllLibrariesAndSdkClassesRoots());
@@ -145,7 +133,7 @@ public class AntTasksProvider {
     private final Future<Map<String, Class>> myFuture;
 
     public AntClassLoader(ArrayList<URL> urls) {
-      super(build().urls(urls).allowUnescaped().noPreload());
+      super(getBuilder(urls));
       myFuture = ApplicationManager.getApplication().executeOnPooledThread(() -> {
         try {
           final ReflectedProject antProject = ReflectedProject.getProject(this);
@@ -167,6 +155,15 @@ public class AntTasksProvider {
           return null;
         }
       });
+    }
+
+    private static Builder getBuilder(ArrayList<URL> urls) {
+      Builder builder = build()
+        .urls(urls)
+        .allowUnescaped()
+        .noPreload();
+      ClassLoaderUtil.addPlatformLoaderParentIfOnJdk9(builder);
+      return builder;
     }
 
     @NotNull

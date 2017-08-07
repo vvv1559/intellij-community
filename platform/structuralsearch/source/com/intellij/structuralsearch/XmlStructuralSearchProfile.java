@@ -1,7 +1,23 @@
+/*
+ * Copyright 2000-2017 JetBrains s.r.o.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package com.intellij.structuralsearch;
 
 import com.intellij.codeInsight.template.TemplateContextType;
 import com.intellij.codeInsight.template.XmlContextType;
+import com.intellij.dupLocator.util.NodeFilter;
 import com.intellij.lang.Language;
 import com.intellij.lang.StdLanguages;
 import com.intellij.lang.xml.XMLLanguage;
@@ -16,8 +32,6 @@ import com.intellij.psi.xml.XmlText;
 import com.intellij.structuralsearch.impl.matcher.*;
 import com.intellij.structuralsearch.impl.matcher.compiler.GlobalCompilingVisitor;
 import com.intellij.structuralsearch.impl.matcher.compiler.XmlCompilingVisitor;
-import com.intellij.structuralsearch.impl.matcher.filters.LexicalNodesFilter;
-import com.intellij.structuralsearch.impl.matcher.filters.XmlLexicalNodesFilter;
 import com.intellij.structuralsearch.plugin.replace.ReplaceOptions;
 import com.intellij.structuralsearch.plugin.replace.ReplacementInfo;
 import com.intellij.structuralsearch.plugin.replace.impl.ReplacementContext;
@@ -37,12 +51,12 @@ import static com.intellij.structuralsearch.PredefinedConfigurationUtil.createSe
  */
 public class XmlStructuralSearchProfile extends StructuralSearchProfile {
 
-  private XmlLexicalNodesFilter myLexicalNodesFilter;
-
+  @Override
   public void compile(PsiElement[] elements, @NotNull GlobalCompilingVisitor globalVisitor) {
     elements[0].getParent().accept(new XmlCompilingVisitor(globalVisitor));
   }
 
+  @Override
   @NotNull
   public PsiElementVisitor createMatchingVisitor(@NotNull GlobalMatchingVisitor globalVisitor) {
     return new XmlMatchingVisitor(globalVisitor);
@@ -50,18 +64,23 @@ public class XmlStructuralSearchProfile extends StructuralSearchProfile {
 
   @NotNull
   @Override
-  public PsiElementVisitor getLexicalNodesFilter(@NotNull LexicalNodesFilter filter) {
-    if (myLexicalNodesFilter == null) {
-      myLexicalNodesFilter = new XmlLexicalNodesFilter(filter);
-    }
-    return myLexicalNodesFilter;
+  public NodeFilter getLexicalNodesFilter() {
+    return element -> {
+      if (element instanceof XmlText) {
+        final PsiElement child = element.getFirstChild();
+        return child == element.getLastChild() && child instanceof PsiWhiteSpace;
+      }
+      return element instanceof PsiWhiteSpace || element instanceof PsiErrorElement;
+    };
   }
 
+  @Override
   @NotNull
   public CompiledPattern createCompiledPattern() {
     return new XmlCompiledPattern();
   }
 
+  @Override
   public boolean isMyLanguage(@NotNull Language language) {
     return language instanceof XMLLanguage;
   }
@@ -197,7 +216,7 @@ public class XmlStructuralSearchProfile extends StructuralSearchProfile {
   }
 
   @Override
-  Configuration[] getPredefinedTemplates() {
+  public Configuration[] getPredefinedTemplates() {
     return XmlPredefinedConfigurations.createPredefinedTemplates();
   }
 
@@ -212,8 +231,8 @@ public class XmlStructuralSearchProfile extends StructuralSearchProfile {
         createSearchTemplateInfo("xml attribute value", "<'_tag '_attribute=\"'value\"/>", HTML_XML, StdFileTypes.XML),
         createSearchTemplateInfo("html attribute value", "<'_tag '_attribute='value />", HTML_XML, StdFileTypes.HTML),
         createSearchTemplateInfo("xml/html tag value", "<table>'_content*</table>", HTML_XML, StdFileTypes.HTML),
-        createSearchTemplateInfo("<li> not contained in <ul> or <ol>", "[!within( \"<'_tag:[regex( ul|ol )] />\" )]<li />",
-                                 HTML_XML, StdFileTypes.HTML)
+        createSearchTemplateInfo("<ul> or <ol>", "<'_tag:[regex( ul|ol )] />", HTML_XML, StdFileTypes.HTML),
+        createSearchTemplateInfo("<li> not contained in <ul> or <ol>", "[!within( \"<ul> or <ol>\" )]<li />", HTML_XML, StdFileTypes.HTML)
       };
     }
   }

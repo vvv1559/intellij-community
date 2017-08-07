@@ -14,10 +14,6 @@
  * limitations under the License.
  */
 
-/*
- * User: anna
- * Date: 27-Jul-2007
- */
 package com.intellij.ide.todo;
 
 import com.intellij.ide.IdeBundle;
@@ -48,7 +44,7 @@ public abstract class ChangeListTodosPanel extends TodoPanel{
         ChangeListManager.getInstance(myProject).removeChangeListListener(myChangeListManagerListener);
       }
     });
-    myAlarm = new Alarm(Alarm.ThreadToUse.POOLED_THREAD, project);
+    myAlarm = new Alarm(Alarm.ThreadToUse.POOLED_THREAD, this);
   }
 
   private final class MyChangeListManagerListener extends ChangeListAdapter {

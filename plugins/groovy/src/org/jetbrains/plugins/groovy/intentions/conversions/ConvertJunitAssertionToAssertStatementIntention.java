@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -96,7 +96,7 @@ public class ConvertJunitAssertionToAssertStatementIntention extends Intention i
     
     statement.acceptChildren(new GroovyRecursiveElementVisitor() {
       @Override
-      public void visitExpression(GrExpression expression) {
+      public void visitExpression(@NotNull GrExpression expression) {
         Matcher matcher = PATTERN.matcher(expression.getText());
         if (matcher.matches()) {
           int index = Integer.parseInt(matcher.group(1));
@@ -116,7 +116,7 @@ public class ConvertJunitAssertionToAssertStatementIntention extends Intention i
   }
 
   @Override
-  protected void processIntention(@NotNull PsiElement element, Project project, Editor editor) throws IncorrectOperationException {
+  protected void processIntention(@NotNull PsiElement element, @NotNull Project project, Editor editor) throws IncorrectOperationException {
     GrMethodCall methodCall = (GrMethodCall)element;
 
     PsiMethod method = methodCall.resolveMethod();
@@ -135,7 +135,7 @@ public class ConvertJunitAssertionToAssertStatementIntention extends Intention i
   }
 
   @Override
-  public boolean satisfiedBy(PsiElement element) {
+  public boolean satisfiedBy(@NotNull PsiElement element) {
     if (!(element instanceof GrMethodCall)) return false;
     
     GrMethodCall methodCall = (GrMethodCall)element;

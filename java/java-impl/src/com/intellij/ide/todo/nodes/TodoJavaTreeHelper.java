@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,10 +14,6 @@
  * limitations under the License.
  */
 
-/*
- * User: anna
- * Date: 18-Jan-2008
- */
 package com.intellij.ide.todo.nodes;
 
 import com.intellij.ide.projectView.impl.nodes.PackageElement;
@@ -133,7 +129,9 @@ public class TodoJavaTreeHelper extends TodoTreeHelper {
         }
       }
     }
-    super.addPackagesToChildren(children, module, builder);
+    final List<VirtualFile> roots = collectContentRoots(module);
+    roots.removeAll(sourceRoots);
+    addDirsToChildren(roots, children, builder);
   }
 
    @Nullable

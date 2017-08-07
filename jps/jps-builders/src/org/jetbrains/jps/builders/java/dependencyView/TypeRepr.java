@@ -15,7 +15,6 @@
  */
 package org.jetbrains.jps.builders.java.dependencyView;
 
-import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.util.io.DataExternalizer;
 import com.intellij.util.io.DataInputOutputUtil;
 import org.jetbrains.annotations.NotNull;
@@ -32,7 +31,7 @@ import java.util.Set;
  * @author: db
  * Date: 14.02.11
  */
-class TypeRepr {
+public class TypeRepr {
   private static final byte PRIMITIVE_TYPE = 0x0;
   private static final byte CLASS_TYPE = 0x1;
   private static final byte ARRAY_TYPE = 0x2;
@@ -241,7 +240,7 @@ class TypeRepr {
 
     switch (t.getSort()) {
       case Type.OBJECT:
-        return context.getType(new ClassType(context.get(StringUtil.replaceChar(t.getClassName(), '.', '/'))));
+        return context.getType(new ClassType(context.get(t.getClassName().replace('.', '/'))));
 
       case Type.ARRAY:
         return context.getType(new ArrayType(getType(context, t.getElementType())));

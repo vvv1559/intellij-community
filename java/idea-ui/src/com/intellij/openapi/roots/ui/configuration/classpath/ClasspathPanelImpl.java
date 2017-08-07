@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ package com.intellij.openapi.roots.ui.configuration.classpath;
 
 import com.intellij.CommonBundle;
 import com.intellij.analysis.AnalysisScope;
+import com.intellij.analysis.AnalysisScopeBundle;
 import com.intellij.find.FindBundle;
 import com.intellij.openapi.actionSystem.*;
 import com.intellij.openapi.diagnostic.Logger;
@@ -39,6 +40,7 @@ import com.intellij.openapi.roots.ui.configuration.ProjectStructureConfigurable;
 import com.intellij.openapi.roots.ui.configuration.dependencyAnalysis.AnalyzeDependenciesDialog;
 import com.intellij.openapi.roots.ui.configuration.libraries.LibraryEditingUtil;
 import com.intellij.openapi.roots.ui.configuration.libraryEditor.EditExistingLibraryDialog;
+import com.intellij.openapi.roots.ui.configuration.projectRoot.ConvertModuleLibraryToRepositoryLibraryAction;
 import com.intellij.openapi.roots.ui.configuration.projectRoot.FindUsagesInProjectStructureActionBase;
 import com.intellij.openapi.roots.ui.configuration.projectRoot.ModuleStructureConfigurable;
 import com.intellij.openapi.roots.ui.configuration.projectRoot.StructureConfigurableContext;
@@ -56,6 +58,7 @@ import com.intellij.openapi.ui.popup.util.BaseListPopupStep;
 import com.intellij.openapi.wm.IdeFocusManager;
 import com.intellij.openapi.wm.ToolWindowId;
 import com.intellij.packageDependencies.DependenciesBuilder;
+import com.intellij.packageDependencies.DependencyVisitorFactory;
 import com.intellij.packageDependencies.actions.AnalyzeDependenciesOnSpecifiedTargetHandler;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.search.GlobalSearchScope;
@@ -65,6 +68,7 @@ import com.intellij.ui.table.JBTable;
 import com.intellij.util.EventDispatcher;
 import com.intellij.util.IconUtil;
 import com.intellij.util.containers.ContainerUtil;
+import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.TextTransferable;
 import gnu.trove.TIntArrayList;
 import org.jetbrains.annotations.NotNull;
@@ -84,6 +88,8 @@ import java.awt.event.KeyEvent;
 import java.awt.event.MouseEvent;
 import java.util.*;
 import java.util.List;
+
+import static com.intellij.openapi.wm.IdeFocusManager.getGlobalInstance;
 
 public class ClasspathPanelImpl extends JPanel implements ClasspathPanel {
   private static final Logger LOG = Logger.getInstance("#com.intellij.openapi.roots.ui.configuration.classpath.ClasspathPanelImpl");
@@ -194,8 +200,9 @@ public class ClasspathPanelImpl extends JPanel implements ClasspathPanel {
         }
       }
     };
-    setFixedColumnWidth(ClasspathTableModel.EXPORT_COLUMN);
-    setFixedColumnWidth(ClasspathTableModel.SCOPE_COLUMN);  // leave space for combobox border
+    setFixedColumnWidth(ClasspathTableModel.EXPORT_COLUMN, ClasspathTableModel.EXPORT_COLUMN_NAME);
+    setFixedColumnWidth(ClasspathTableModel.SCOPE_COLUMN, DependencyScope.COMPILE.toString() + "     ");  // leave space for combobox border
+    myEntryTable.getTableHeader().getColumnModel().getColumn(ClasspathTableModel.ITEM_COLUMN).setPreferredWidth(10000); // consume all available space
 
     myEntryTable.registerKeyboardAction(
       new ActionListener() {
@@ -282,6 +289,7 @@ public class ClasspathPanelImpl extends JPanel implements ClasspathPanel {
     addChangeLibraryLevelAction(actionGroup, LibraryTablesRegistrar.PROJECT_LEVEL);
     addChangeLibraryLevelAction(actionGroup, LibraryTablesRegistrar.APPLICATION_LEVEL);
     addChangeLibraryLevelAction(actionGroup, LibraryTableImplUtil.MODULE_LEVEL);
+    actionGroup.add(new ConvertModuleLibraryToRepositoryLibraryAction(this, getStructureConfigurableContext()));
     PopupHandler.installPopupHandler(myEntryTable, actionGroup, ActionPlaces.UNKNOWN, ActionManager.getInstance());
   }
 
@@ -320,10 +328,13 @@ public class ClasspathPanelImpl extends JPanel implements ClasspathPanel {
     return getItemAt(myEntryTable.getSelectedRow());
   }
 
-  private void setFixedColumnWidth(final int columnIndex) {
+  private void setFixedColumnWidth(final int columnIndex, String sampleText) {
     final TableColumn column = myEntryTable.getTableHeader().getColumnModel().getColumn(columnIndex);
+    final FontMetrics fontMetrics = myEntryTable.getFontMetrics(myEntryTable.getFont());
+    final int width = fontMetrics.stringWidth(" " + sampleText + " ") + JBUI.scale(4);
+    column.setPreferredWidth(width);
+    column.setMinWidth(width);
     column.setResizable(false);
-    column.setMaxWidth(column.getPreferredWidth());
   }
 
   @Override
@@ -534,7 +545,9 @@ public class ClasspathPanelImpl extends JPanel implements ClasspathPanel {
     }
     finally {
       enableModelUpdate();
-      myEntryTable.requestFocus();
+      getGlobalInstance().doWhenFocusSettlesDown(() -> {
+        getGlobalInstance().requestFocus(myEntryTable, true);
+      });
     }
   }
 
@@ -812,8 +825,14 @@ public class ClasspathPanelImpl extends JPanel implements ClasspathPanel {
               }
             }
           }
+          String message = "No code dependencies were found.";
+          if (DependencyVisitorFactory.VisitorOptions.fromSettings(myProject).skipImports()) {
+            message += " ";
+            message += AnalysisScopeBundle.message("dependencies.in.imports.message");
+          }
+          message += " Would you like to remove the dependency?";
           if (Messages.showOkCancelDialog(myProject,
-                                          "No code dependencies were found. Would you like to remove the dependency?",
+                                          message,
                                           CommonBundle.getWarningTitle(), Messages.getWarningIcon()) == Messages.OK) {
             removeSelectedItems(TableUtil.removeSelectedItems(myEntryTable));
           }

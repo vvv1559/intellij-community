@@ -42,10 +42,6 @@ import java.awt.*;
 import java.util.*;
 import java.util.List;
 
-/**
- * User: anna
- * Date: 24-Feb-2006
- */
 public class SeverityRegistrar implements Comparator<HighlightSeverity> {
   /**
    * Always first {@link HighlightDisplayLevel#DO_NOT_SHOW} must be skipped during navigation, editing settings, etc.
@@ -159,6 +155,11 @@ public class SeverityRegistrar implements Comparator<HighlightSeverity> {
         read.add(severity);
       }
     }
+    myOrderMap = ensureAllStandardIncluded(read, knownSeverities);
+    severitiesChanged();
+  }
+
+  private OrderMap ensureAllStandardIncluded(List<HighlightSeverity> read, final List<HighlightSeverity> knownSeverities) {
     OrderMap orderMap = fromList(read);
     if (orderMap.isEmpty()) {
       orderMap = fromList(knownSeverities);
@@ -182,8 +183,7 @@ public class SeverityRegistrar implements Comparator<HighlightSeverity> {
       }
       orderMap = fromList(list);
     }
-    myOrderMap = orderMap;
-    severitiesChanged();
+    return orderMap;
   }
 
   public void writeExternal(Element element) {
@@ -345,7 +345,7 @@ public class SeverityRegistrar implements Comparator<HighlightSeverity> {
   }
 
   public void setOrder(@NotNull List<HighlightSeverity> orderList) {
-    myOrderMap = fromList(orderList);
+    myOrderMap = ensureAllStandardIncluded(orderList, getDefaultOrder());
     myReadOrder = null;
     severitiesChanged();
   }

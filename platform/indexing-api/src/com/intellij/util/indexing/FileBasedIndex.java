@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,22 +16,18 @@
 package com.intellij.util.indexing;
 
 import com.intellij.openapi.application.ApplicationManager;
-import com.intellij.openapi.components.BaseComponent;
 import com.intellij.openapi.fileTypes.FileType;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.roots.ContentIterator;
 import com.intellij.openapi.roots.ProjectFileIndex;
 import com.intellij.openapi.util.Condition;
-import com.intellij.openapi.vfs.VfsUtilCore;
-import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.openapi.vfs.VirtualFileVisitor;
-import com.intellij.openapi.vfs.VirtualFileWithId;
+import com.intellij.openapi.util.registry.Registry;
+import com.intellij.openapi.vfs.*;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.util.Consumer;
 import com.intellij.util.Processor;
 import com.intellij.util.SystemProperties;
-import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -42,7 +38,7 @@ import java.util.Set;
 /**
  * Author: dmitrylomov
  */
-public abstract class FileBasedIndex implements BaseComponent {
+public abstract class FileBasedIndex {
   public abstract void iterateIndexableFiles(@NotNull ContentIterator processor, @NotNull Project project, ProgressIndicator indicator);
 
   public void iterateIndexableFilesConcurrently(@NotNull ContentIterator processor, @NotNull Project project, ProgressIndicator indicator) {
@@ -68,17 +64,10 @@ public abstract class FileBasedIndex implements BaseComponent {
   // note: upsource implementation requires access to Project here, please don't remove
   public abstract VirtualFile findFileById(Project project, int id);
 
-  public void requestRebuild(ID<?, ?> indexId) {
+  public void requestRebuild(@NotNull ID<?, ?> indexId) {
     requestRebuild(indexId, new Throwable());
   }
-
-
-  @NonNls
-  @NotNull
-  public String getComponentName() {
-    return "FileBasedIndex";
-  }
-
+  
   @NotNull
   public abstract <K, V> List<V> getValues(@NotNull ID<K, V> indexId, @NotNull K dataKey, @NotNull GlobalSearchScope filter);
 
@@ -127,7 +116,7 @@ public abstract class FileBasedIndex implements BaseComponent {
    */
   public abstract <K> void ensureUpToDate(@NotNull ID<K, ?> indexId, @Nullable Project project, @Nullable GlobalSearchScope filter);
 
-  public abstract void requestRebuild(ID<?, ?> indexId, Throwable throwable);
+  public abstract void requestRebuild(@NotNull ID<?, ?> indexId, Throwable throwable);
 
   public abstract <K> void scheduleRebuild(@NotNull ID<K, ?> indexId, @NotNull Throwable e);
 
@@ -160,32 +149,44 @@ public abstract class FileBasedIndex implements BaseComponent {
     VfsUtilCore.visitChildrenRecursively(root, new VirtualFileVisitor() {
       @Override
       public boolean visitFile(@NotNull VirtualFile file) {
-        if (visitedRoots != null && !root.equals(file) && file.isDirectory() && !visitedRoots.add(file)) {
-          return false; // avoid visiting files more than once, e.g. additional indexed roots intersect sometimes
-        }
-        if (projectFileIndex != null && projectFileIndex.isExcluded(file)) {
-          return false;
+        if (!acceptsFile(file)) return false;
+        if (file.is(VFileProperty.SYMLINK)) {
+          if(!Registry.is("indexer.follows.symlinks")) return false;
+          VirtualFile canonicalFile = file.getCanonicalFile();
+
+          if (canonicalFile != null) {
+            if(!acceptsFile(canonicalFile)) return false;
+          }
         }
         if (indicator != null) indicator.checkCanceled();
 
         processor.processFile(file);
         return true;
       }
+
+      private boolean acceptsFile(@NotNull VirtualFile file) {
+        if (visitedRoots != null && !root.equals(file) && file.isDirectory() && !visitedRoots.add(file)) {
+          return false;
+        }
+        if (projectFileIndex != null && projectFileIndex.isExcluded(file)) {
+          return false;
+        }
+        return true;
+      }
     });
   }
 
+  @FunctionalInterface
   public interface ValueProcessor<V> {
     /**
      * @param value a value to process
      * @param file the file the value came from
      * @return false if no further processing is needed, true otherwise
      */
-    boolean process(VirtualFile file, V value);
+    boolean process(@NotNull VirtualFile file, V value);
   }
 
-  /**
-  * Author: dmitrylomov
-  */
+  @FunctionalInterface
   public interface InputFilter {
     boolean acceptInput(@NotNull VirtualFile file);
   }

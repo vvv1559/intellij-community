@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,12 +17,11 @@ package com.intellij.openapi.vfs.impl;
 
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.util.Pair;
-import com.intellij.openapi.util.io.FileAttributes;
-import com.intellij.openapi.util.io.FileSystemUtil;
-import com.intellij.openapi.util.io.FileUtil;
+import com.intellij.openapi.util.io.*;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.util.io.FileAccessorCache;
 import com.intellij.util.text.ByteArrayCharSequence;
+import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -32,6 +31,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.util.Enumeration;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
@@ -48,9 +48,7 @@ public class ZipHandler extends ArchiveHandler {
     @Override
     protected ZipFile createAccessor(ZipHandler key) throws IOException {
       final String canonicalPathToZip = key.getCanonicalPathToZip();
-      FileAttributes attributes = FileSystemUtil.getAttributes(canonicalPathToZip);
-      key.myFileStamp = attributes != null ? attributes.lastModified : DEFAULT_TIMESTAMP;
-      key.myFileLength = attributes != null ? attributes.length : DEFAULT_LENGTH;
+      setFileStampAndLength(key, canonicalPathToZip);
 
       return new ZipFile(canonicalPathToZip);
     }
@@ -67,6 +65,13 @@ public class ZipHandler extends ArchiveHandler {
     }
   };
 
+  protected static synchronized void setFileStampAndLength(ZipHandler zipHandler, String pathToZip) {
+    FileAttributes attributes = FileSystemUtil.getAttributes(pathToZip);
+
+    zipHandler.myFileStamp = attributes != null ? attributes.lastModified : DEFAULT_TIMESTAMP;
+    zipHandler.myFileLength = attributes != null ? attributes.length : DEFAULT_LENGTH;
+  }
+
   @NotNull
   private String getCanonicalPathToZip() throws IOException {
     String value = myCanonicalPathToZip;
@@ -79,50 +84,62 @@ public class ZipHandler extends ArchiveHandler {
   @NotNull
   @Override
   protected Map<String, EntryInfo> createEntriesMap() throws IOException {
-    FileAccessorCache.Handle<ZipFile> zipRef = getZipFileHandle();
+    FileAccessorCache.Handle<ZipFile> existingZipRef = getCachedZipFileHandle(true);
     try {
-      ZipFile zip = zipRef.get();
-
-      Map<String, EntryInfo> map = new ZipEntryMap(zip.size());
-      map.put("", createRootEntry());
-
-      Enumeration<? extends ZipEntry> entries = zip.entries();
-      while (entries.hasMoreElements()) {
-        getOrCreate(entries.nextElement(), map, zip);
-      }
-
-      return map;
+      return buildEntryMapForZipFile(existingZipRef.get());
     }
     finally {
-      zipRef.release();
+      existingZipRef.release();
     }
   }
 
   @NotNull
-  private FileAccessorCache.Handle<ZipFile> getZipFileHandle() throws IOException {
-    FileAccessorCache.Handle<ZipFile> handle = ourZipFileFileAccessorCache.get(this);
+  protected Map<String, EntryInfo> buildEntryMapForZipFile(ZipFile zip) {
+    Map<String, EntryInfo> map = new ZipEntryMap(zip.size());
+    map.put("", createRootEntry());
 
-    if (getFile() == getFileToUse()) { // files are canonicalized
-      // IDEA-148458, http://bugs.java.com/view_bug.do?bug_id=4425695, JVM crashes on use of opened ZipFile after it was updated
-      // Reopen file if the file has been changed
-      FileAttributes attributes = FileSystemUtil.getAttributes(getCanonicalPathToZip());
-      if (attributes == null) {
-        throw new FileNotFoundException(getCanonicalPathToZip());
-      }
-
-      if (attributes.lastModified == myFileStamp && attributes.length == myFileLength) return handle;
-
-      // Note that zip_util.c#ZIP_Get_From_Cache will allow us to have duplicated ZipFile instances without a problem
-      removeZipHandlerFromCache();
-      handle.release();
-      handle = ourZipFileFileAccessorCache.get(this);
+    Enumeration<? extends ZipEntry> entries = zip.entries();
+    while (entries.hasMoreElements()) {
+      getOrCreate(entries.nextElement(), map, zip);
     }
 
-    return handle;
+    return map;
+  }
+
+  @Contract("true -> !null")
+  protected FileAccessorCache.Handle<ZipFile> getCachedZipFileHandle(boolean createIfNeeded) throws IOException {
+    try {
+      FileAccessorCache.Handle<ZipFile> handle = createIfNeeded ? ourZipFileFileAccessorCache.get(this) : ourZipFileFileAccessorCache.getIfCached(this);
+
+      // check handle is valid
+      if (handle != null && getFile() == getFileToUse()) { // files are canonicalized
+        // IDEA-148458, http://bugs.java.com/view_bug.do?bug_id=4425695, JVM crashes on use of opened ZipFile after it was updated
+        // Reopen file if the file has been changed
+        FileAttributes attributes = FileSystemUtil.getAttributes(getCanonicalPathToZip());
+        if (attributes == null) {
+          throw new FileNotFoundException(getCanonicalPathToZip());
+        }
+
+        if (attributes.lastModified == myFileStamp && attributes.length == myFileLength) return handle;
+
+        // Note that zip_util.c#ZIP_Get_From_Cache will allow us to have duplicated ZipFile instances without a problem
+        removeZipHandlerFromCache();
+        handle.release();
+        handle = ourZipFileFileAccessorCache.get(this);
+      }
+
+      return handle;
+    }
+    catch (RuntimeException e) {
+      Throwable cause = e.getCause();
+      if (cause instanceof IOException) throw (IOException)cause;
+      throw e;
+    }
   }
 
   private void removeZipHandlerFromCache() {
     ourZipFileFileAccessorCache.remove(this);
+    clearCaches();
   }
 
   @NotNull
@@ -197,26 +214,20 @@ public class ZipHandler extends ArchiveHandler {
   @NotNull
   @Override
   public byte[] contentsToByteArray(@NotNull String relativePath) throws IOException {
-    FileAccessorCache.Handle<ZipFile> zipRef;
-
-    try {
-      zipRef = getZipFileHandle();
-    }
-    catch (RuntimeException ex) {
-      Throwable cause = ex.getCause();
-      if (cause instanceof IOException) throw (IOException)cause;
-      throw ex;
-    }
-
+    FileAccessorCache.Handle<ZipFile> zipRef = getCachedZipFileHandle(true);
     try {
       ZipFile zip = zipRef.get();
       ZipEntry entry = zip.getEntry(relativePath);
       if (entry != null) {
+        long length = entry.getSize();
+        if (FileUtilRt.isTooLarge(length)) {
+          throw new FileTooBigException(getFile() + "!/" + relativePath);
+        }
         InputStream stream = zip.getInputStream(entry);
         if (stream != null) {
           // ZipFile.c#Java_java_util_zip_ZipFile_read reads data in 8K (stack allocated) blocks - no sense to create BufferedInputStream
           try {
-            return FileUtil.loadBytes(stream, (int)entry.getSize());
+            return FileUtil.loadBytes(stream, (int)length);
           }
           finally {
             stream.close();
@@ -229,6 +240,78 @@ public class ZipHandler extends ArchiveHandler {
     }
 
     throw new FileNotFoundException(getFile() + "!/" + relativePath);
+  }
+
+  @NotNull
+  @Override
+  public InputStream getInputStream(@NotNull String relativePath) throws IOException {
+    boolean release = true;
+    final FileAccessorCache.Handle<ZipFile> zipRef = getCachedZipFileHandle(true);
+    try {
+      ZipFile zip = zipRef.get();
+      ZipEntry entry = zip.getEntry(relativePath);
+      if (entry != null) {
+        InputStream stream = zip.getInputStream(entry);
+        if (stream != null) {
+          long length = entry.getSize();
+          if (!FileUtilRt.isTooLarge(length)) {
+            try {
+              return new BufferExposingByteArrayInputStream(FileUtil.loadBytes(stream, (int)length));
+            }
+            finally {
+              stream.close();
+            }
+          }
+          else {
+            release = false;
+            return new InputStreamWrapper(stream, zipRef);
+          }
+        }
+      }
+    }
+    finally {
+      if (release) zipRef.release();
+    }
+
+    throw new FileNotFoundException(getFile() + "!/" + relativePath);
+  }
+
+  private static class InputStreamWrapper extends InputStream {
+    private final InputStream myStream;
+    private final FileAccessorCache.Handle<ZipFile> myZipRef;
+    private final AtomicBoolean closed = new AtomicBoolean(false);
+
+    public InputStreamWrapper(InputStream stream, FileAccessorCache.Handle<ZipFile> zipRef) {
+      myStream = stream;
+      myZipRef = zipRef;
+    }
+
+    @Override
+    public int read() throws IOException {
+      return myStream.read();
+    }
+
+    @Override
+    public int read(@NotNull byte[] b, int off, int len) throws IOException {
+      return myStream.read(b, off, len);
+    }
+
+    @Override
+    public int available() throws IOException {
+      return myStream.available();
+    }
+
+    @Override
+    public void close() throws IOException {
+      if (!closed.getAndSet(true)) {
+        try {
+          myStream.close();
+        }
+        finally {
+          myZipRef.release();
+        }
+      }
+    }
   }
 
   // also used in Kotlin

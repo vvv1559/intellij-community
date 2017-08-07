@@ -155,6 +155,7 @@ public class Maven2ServerEmbedderImpl extends MavenRemoteObject implements Maven
     return result;
   }
 
+  @NotNull
   public static MavenModel interpolateAndAlignModel(MavenModel model, File basedir) throws RemoteException {
     Model result = Maven2ModelConverter.toNativeModel(model);
     result = doInterpolate(result, basedir);
@@ -630,13 +631,15 @@ public class Maven2ServerEmbedderImpl extends MavenRemoteObject implements Maven
                         boolean failOnUnresolvedDependency,
                         @NotNull MavenServerConsole console,
                         @NotNull MavenServerProgressIndicator indicator,
-                        boolean alwaysUpdateSnapshots) {
+                        boolean alwaysUpdateSnapshots,
+                        @Nullable Properties userProperties) {
     try {
       ((CustomArtifactFactory)getComponent(ArtifactFactory.class)).customize();
       ((CustomArtifactFactory)getComponent(ProjectArtifactFactory.class)).customize();
       ((CustomArtifactResolver)getComponent(ArtifactResolver.class)).customize(workspaceMap, failOnUnresolvedDependency);
       ((CustomRepositoryMetadataManager)getComponent(RepositoryMetadataManager.class)).customize(workspaceMap);
       ((CustomWagonManager)getComponent(WagonManager.class)).customize(failOnUnresolvedDependency);
+      myImpl.setUserProperties(userProperties);
 
       setConsoleAndIndicator(console, indicator);
     }
@@ -728,6 +731,11 @@ public class Maven2ServerEmbedderImpl extends MavenRemoteObject implements Maven
         return null;
       }
     });
+  }
+
+  @Override
+  public MavenModel readModel(File file) throws RemoteException {
+    return null;
   }
 
   private void withProjectCachesDo(Function<Map, ?> func) throws RemoteException {

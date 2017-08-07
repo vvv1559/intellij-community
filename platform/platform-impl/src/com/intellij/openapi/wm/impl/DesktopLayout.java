@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,7 +16,6 @@
 package com.intellij.openapi.wm.impl;
 
 import com.intellij.ide.ui.UISettings;
-import com.intellij.openapi.util.JDOMExternalizable;
 import com.intellij.openapi.wm.ToolWindow;
 import com.intellij.openapi.wm.ToolWindowAnchor;
 import com.intellij.util.ArrayUtil;
@@ -31,14 +30,14 @@ import java.util.*;
 /**
  * @author Vladimir Kondratyev
  */
-public final class DesktopLayout implements JDOMExternalizable {
+public final class DesktopLayout {
   @NonNls static final String TAG = "layout";
   /**
-   * Map between <code>id</code>s and registered <code>WindowInfo</code>s.
+   * Map between {@code id}s and registered {@code WindowInfo}s.
    */
   private final Map<String, WindowInfoImpl> myRegisteredId2Info = new HashMap<>();
   /**
-   * Map between <code>id</code>s and unregistered <code>WindowInfo</code>s.
+   * Map between {@code id}s and unregistered {@code WindowInfo}s.
    */
   private final Map<String, WindowInfoImpl> myUnregisteredId2Info = new HashMap<>();
   /**
@@ -46,20 +45,20 @@ public final class DesktopLayout implements JDOMExternalizable {
    */
   private static final MyWindowInfoComparator ourWindowInfoComparator = new MyWindowInfoComparator();
   /**
-   * Don't use this member directly. Get it only by <code>getInfos</code> method.
-   * It exists here only for optimization purposes. This member can be <code>null</code>
+   * Don't use this member directly. Get it only by {@code getInfos} method.
+   * It exists here only for optimization purposes. This member can be {@code null}
    * if the cached data is invalid.
    */
   private WindowInfoImpl[] myRegisteredInfos;
   /**
-   * Don't use this member directly. Get it only by <code>getUnregisteredInfos</code> method.
-   * It exists here only for optimization purposes. This member can be <code>null</code>
+   * Don't use this member directly. Get it only by {@code getUnregisteredInfos} method.
+   * It exists here only for optimization purposes. This member can be {@code null}
    * if the cached data is invalid.
    */
   private WindowInfoImpl[] myUnregisteredInfos;
   /**
-   * Don't use this member directly. Get it only by <code>getAllInfos</code> method.
-   * It exists here only for optimization purposes. This member can be <code>null</code>
+   * Don't use this member directly. Get it only by {@code getAllInfos} method.
+   * It exists here only for optimization purposes. This member can be {@code null}
    * if the cached data is invalid.
    */
   private WindowInfoImpl[] myAllInfos;
@@ -72,8 +71,7 @@ public final class DesktopLayout implements JDOMExternalizable {
    * @param layout to be copied.
    */
   public final void copyFrom(@NotNull DesktopLayout layout) {
-    final WindowInfoImpl[] infos = layout.getAllInfos();
-    for (WindowInfoImpl info1 : infos) {
+    for (WindowInfoImpl info1 : layout.getAllInfos()) {
       WindowInfoImpl info = myRegisteredId2Info.get(info1.getId());
       if (info != null) {
         info.copyFrom(info1);
@@ -99,10 +97,10 @@ public final class DesktopLayout implements JDOMExternalizable {
   }
 
   /**
-   * Creates or gets <code>WindowInfo</code> for the specified <code>id</code>. If tool
-   * window is being registered first time the method uses <code>anchor</code>.
+   * Creates or gets {@code WindowInfo} for the specified {@code id}. If tool
+   * window is being registered first time the method uses {@code anchor}.
    *
-   * @param id     <code>id</code> of tool window to be registered.
+   * @param id     {@code id} of tool window to be registered.
    * @param anchor the default tool window anchor.
    */
   final WindowInfoImpl register(@NotNull String id, @NotNull ToolWindowAnchor anchor, final boolean splitMode) {
@@ -134,9 +132,9 @@ public final class DesktopLayout implements JDOMExternalizable {
   }
 
   /**
-   * @return <code>WindowInfo</code> for the window with specified <code>id</code>.
-   *         If <code>onlyRegistered</code> is <code>true</code> then returns not <code>null</code>
-   *         value if and only if window with <code>id</code> is registered one.
+   * @return {@code WindowInfo} for the window with specified {@code id}.
+   *         If {@code onlyRegistered} is {@code true} then returns not {@code null}
+   *         value if and only if window with {@code id} is registered one.
    */
   final WindowInfoImpl getInfo(String id, final boolean onlyRegistered) {
     final WindowInfoImpl info = myRegisteredId2Info.get(id);
@@ -158,7 +156,7 @@ public final class DesktopLayout implements JDOMExternalizable {
   }
 
   /**
-   * @return <code>WindowInfo</code>s for all registered tool windows.
+   * @return {@code WindowInfo}s for all registered tool windows.
    */
   @NotNull
   final WindowInfoImpl[] getInfos() {
@@ -169,7 +167,7 @@ public final class DesktopLayout implements JDOMExternalizable {
   }
 
   /**
-   * @return <code>WindowInfos</code>s for all windows that are currently unregistered.
+   * @return {@code WindowInfos}s for all windows that are currently unregistered.
    */
   @NotNull
   private WindowInfoImpl[] getUnregisteredInfos() {
@@ -180,7 +178,7 @@ public final class DesktopLayout implements JDOMExternalizable {
   }
 
   /**
-   * @return <code>WindowInfo</code>s of all (registered and unregistered) tool windows.
+   * @return {@code WindowInfo}s of all (registered and unregistered) tool windows.
    */
   @NotNull
   private WindowInfoImpl[] getAllInfos() {
@@ -191,7 +189,7 @@ public final class DesktopLayout implements JDOMExternalizable {
   }
 
   /**
-   * @return all (registered and not unregistered) <code>WindowInfos</code> for the specified <code>anchor</code>.
+   * @return all (registered and not unregistered) {@code WindowInfos} for the specified {@code anchor}.
    *         Returned infos are sorted by order.
    */
   @NotNull
@@ -210,7 +208,7 @@ public final class DesktopLayout implements JDOMExternalizable {
 
   /**
    * Normalizes order of windows in the passed array. Note, that array should be
-   * sorted by order (by ascending). Order of first window will be <code>0</code>.
+   * sorted by order (by ascending). Order of first window will be {@code 0}.
    */
   private static void normalizeOrder(@NotNull WindowInfoImpl[] infos) {
     for (int i = 0; i < infos.length; i++) {
@@ -222,9 +220,13 @@ public final class DesktopLayout implements JDOMExternalizable {
     return myRegisteredId2Info.containsKey(id);
   }
 
+  final boolean isToolWindowUnregistered(final String id) {
+    return myUnregisteredId2Info.containsKey(id);
+  }
+
   /**
-   * @return comparator which compares <code>StripeButtons</code> in the stripe with
-   *         specified <code>anchor</code>.
+   * @return comparator which compares {@code StripeButtons} in the stripe with
+   *         specified {@code anchor}.
    */
   @NotNull
   final Comparator<StripeButton> comparator(@NotNull ToolWindowAnchor anchor) {
@@ -233,7 +235,7 @@ public final class DesktopLayout implements JDOMExternalizable {
 
   /**
    * @param anchor anchor of the stripe.
-   * @return maximum ordinal number in the specified stripe. Returns <code>-1</code>
+   * @return maximum ordinal number in the specified stripe. Returns {@code -1}
    *         if there is no any tool window with the specified anchor.
    */
   private int getMaxOrder(@NotNull ToolWindowAnchor anchor) {
@@ -248,7 +250,7 @@ public final class DesktopLayout implements JDOMExternalizable {
   }
 
   /**
-   * Sets new <code>anchor</code> and <code>id</code> for the specified tool window.
+   * Sets new {@code anchor} and {@code id} for the specified tool window.
    * Also the method properly updates order of all other tool windows.
    *
    * @param newAnchor new anchor
@@ -283,11 +285,9 @@ public final class DesktopLayout implements JDOMExternalizable {
     info.setSplit(split);
   }
 
-  @Override
-  public final void readExternal(final Element layoutElement) {
+  public final void readExternal(@NotNull Element layoutElement) {
     myUnregisteredInfos = null;
-    for (Object o : layoutElement.getChildren()) {
-      final Element e = (Element)o;
+    for (Element e : layoutElement.getChildren()) {
       if (WindowInfoImpl.TAG.equals(e.getName())) {
         String id = e.getAttributeValue(ID_ATTR);
         assert id != null;
@@ -301,14 +301,20 @@ public final class DesktopLayout implements JDOMExternalizable {
     }
   }
 
-  @Override
-  public final void writeExternal(final Element layoutElement) {
-    final WindowInfoImpl[] infos = getAllInfos();
-    for (WindowInfoImpl info : infos) {
-      final Element element = new Element(WindowInfoImpl.TAG);
-      info.writeExternal(element);
-      layoutElement.addContent(element);
+  @Nullable
+  public final Element writeExternal(@NotNull String tagName) {
+    WindowInfoImpl[] infos = getAllInfos();
+    if (infos.length == 0) {
+      return null;
     }
+
+    Element state = new Element(tagName);
+    for (WindowInfoImpl info : infos) {
+      Element element = new Element(WindowInfoImpl.TAG);
+      info.writeExternal(element);
+      state.addContent(element);
+    }
+    return state;
   }
 
   @NotNull
@@ -317,7 +323,7 @@ public final class DesktopLayout implements JDOMExternalizable {
     for (WindowInfoImpl each : getAllInfos(anchor)) {
       final ToolWindow window = manager.getToolWindow(each.getId());
       if (window == null) continue;
-      if (window.isAvailable() || UISettings.getInstance().ALWAYS_SHOW_WINDOW_BUTTONS) {
+      if (window.isAvailable() || UISettings.getInstance().getAlwaysShowWindowsButton()) {
         ids.add(each.getId());
       }
     }

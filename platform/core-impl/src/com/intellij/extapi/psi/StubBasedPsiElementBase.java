@@ -19,11 +19,13 @@ package com.intellij.extapi.psi;
 import com.intellij.lang.ASTNode;
 import com.intellij.lang.Language;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.diagnostic.Attachment;
+import com.intellij.openapi.diagnostic.RuntimeExceptionWithAttachments;
 import com.intellij.openapi.progress.ProgressIndicatorProvider;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectCoreUtil;
 import com.intellij.openapi.util.Key;
-import com.intellij.openapi.util.text.StringUtil;
+import com.intellij.openapi.util.RecursionManager;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
@@ -46,6 +48,8 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.lang.reflect.Array;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * A base class for PSI elements that support both stub and AST substrates. The purpose of stubs is to hold the most important information
@@ -127,7 +131,7 @@ public class StubBasedPsiElementBase<T extends StubElement> extends ASTDelegateP
     if (mySubstrateRef instanceof SubstrateRef.StubRef) {
       ApplicationManager.getApplication().assertReadAccessAllowed();
       PsiFileImpl file = (PsiFileImpl)getContainingFile();
-      if (!file.isValid()) throw new PsiInvalidElementAccessException(this);
+      if (!file.isValid()) throw new PsiInvalidElementAccessException(file);
 
       FileElement treeElement = file.getTreeElement();
       if (treeElement != null && mySubstrateRef instanceof SubstrateRef.StubRef) {
@@ -143,25 +147,31 @@ public class StubBasedPsiElementBase<T extends StubElement> extends ASTDelegateP
     return mySubstrateRef.getNode();
   }
 
-  private ASTNode failedToBindStubToAst(@NotNull PsiFileImpl file, @NotNull FileElement fileElement) {
+  private ASTNode failedToBindStubToAst(@NotNull PsiFileImpl file, @NotNull final FileElement fileElement) {
     VirtualFile vFile = file.getVirtualFile();
     StubTree stubTree = file.getStubTree();
-    String stubString = stubTree != null ? ((PsiFileStubImpl)stubTree.getRoot()).printTree() : "is null";
-    String astString = DebugUtil.treeToString(fileElement, true);
-    if (!ourTraceStubAstBinding) {
-      stubString = StringUtil.trimLog(stubString, 1024);
-      astString = StringUtil.trimLog(astString, 1024);
+    final String stubString = stubTree != null ? ((PsiFileStubImpl)stubTree.getRoot()).printTree() : null;
+    final String astString = RecursionManager.doPreventingRecursion("failedToBindStubToAst", true,
+                                                                    () -> DebugUtil.treeToString(fileElement, true));
+
+    @NonNls final String message = "Failed to bind stub to AST for element " + getClass() + " in " +
+                                   (vFile == null ? "<unknown file>" : vFile.getPath()) +
+                                   "\nFile:\n" + file + "@" + System.identityHashCode(file);
+
+    final String creationTraces = ourTraceStubAstBinding ? dumpCreationTraces(fileElement) : null;
+
+    List<Attachment> attachments = new ArrayList<>();
+    if (stubString != null) {
+      attachments.add(new Attachment("stubTree.txt", stubString));
+    }
+    if (astString != null) {
+      attachments.add(new Attachment("ast.txt", astString));
+    }
+    if (creationTraces != null) {
+      attachments.add(new Attachment("creationTraces.txt", creationTraces));
     }
 
-    @NonNls String message = "Failed to bind stub to AST for element " + getClass() + " in " +
-                             (vFile == null ? "<unknown file>" : vFile.getPath()) +
-                             "\nFile:\n" + file + "@" + System.identityHashCode(file) +
-                             "\nFile stub tree:\n" + stubString +
-                             "\nLoaded file AST:\n" + astString;
-    if (ourTraceStubAstBinding) {
-      message += dumpCreationTraces(fileElement);
-    }
-    throw new IllegalArgumentException(message);
+    throw new RuntimeExceptionWithAttachments(message, attachments.toArray(Attachment.EMPTY_ARRAY));
   }
 
   @NotNull
@@ -240,6 +250,13 @@ public class StubBasedPsiElementBase<T extends StubElement> extends ASTDelegateP
   /**
    * Don't invoke this method, it's public for implementation reasons.
    */
+  public int getStubIndex() {
+    return myStubIndex;
+  }
+
+  /**
+   * Don't invoke this method, it's public for implementation reasons.
+   */
   @NotNull
   public final SubstrateRef getSubstrateRef() {
     return mySubstrateRef;
@@ -312,12 +329,7 @@ public class StubBasedPsiElementBase<T extends StubElement> extends ASTDelegateP
   }
 
   /**
-   * In cases when stub hierarchy corresponds to AST hierarchy, i.e. both a parent and its child nodes support stubs, {@link #getParent()}
-   * can be implemented efficiently without loading AST, using this method instead. It checks if there is a stub present, takes its parent
-   * and returns the PSI corresponding to that parent. Please be careful when using this method and use it only in the described case,
-   * because if there are AST-only elements in the hierarchy, it'll return different results depending on whether this element is stub-based
-   * or has already been switched to PSI.
-   *
+   * Please consider using {@link #getParent()} instead, because this method can return different results before and after AST is loaded.
    * @return a PSI element taken from parent stub (if present) or parent AST node.
    */
   protected final PsiElement getParentByStub() {
@@ -330,10 +342,9 @@ public class StubBasedPsiElementBase<T extends StubElement> extends ASTDelegateP
   }
 
   /**
-   * @return parent PSI element taken from the parent of the corresponding AST node. If AST has not been loaded, it is loaded
-   * (in {@link #getNode()}), which might take significant time and memory cost. If possible, {@link #getParentByStub()}
-   * should be used instead.
+   * Please use {@link #getParent()} instead
    */
+  @Deprecated
   protected final PsiElement getParentByTree() {
     return SharedImplUtil.getParent(getNode());
   }
@@ -344,7 +355,7 @@ public class StubBasedPsiElementBase<T extends StubElement> extends ASTDelegateP
    */
   @Override
   public PsiElement getParent() {
-    T stub = getStub();
+    T stub = getGreenStub();
     if (stub != null && !((ObjectStubBase)stub).isDangling()) {
       return stub.getParentStub().getPsi();
     }
@@ -355,12 +366,13 @@ public class StubBasedPsiElementBase<T extends StubElement> extends ASTDelegateP
   @NotNull
   public IStubElementType getElementType() {
     if (!(myElementType instanceof IStubElementType)) {
-      throw new AssertionError("Not a stub type: " + myElementType + " in " + getClass());
+      throw new ClassCastException("Not a stub type: " + myElementType + " in " + getClass());
     }
     return (IStubElementType)myElementType;
   }
 
   /**
+   * Note: for most clients (where the logic doesn't crucially differ for stub and AST cases), {@link #getGreenStub()} should be preferred.
    * @return the stub that this element is built upon, or null if the element is currently AST-based. The latter can happen
    * if the file text was loaded from the very beginning, or if it was loaded via {@link #getNode()} on this or any other element
    * in the containing file.
@@ -369,7 +381,7 @@ public class StubBasedPsiElementBase<T extends StubElement> extends ASTDelegateP
   public T getStub() {
     ProgressIndicatorProvider.checkCanceled(); // Hope, this is called often
     //noinspection unchecked
-    return (T)mySubstrateRef.getStub();
+    return (T)mySubstrateRef.getStub(myStubIndex);
   }
 
   /**

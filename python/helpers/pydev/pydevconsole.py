@@ -16,6 +16,7 @@ import os
 import sys
 
 from _pydev_imps._pydev_saved_modules import threading
+from _pydevd_bundle.pydevd_constants import INTERACTIVE_MODE_AVAILABLE
 
 import traceback
 from _pydev_bundle import fix_getpass
@@ -142,9 +143,6 @@ class InterpreterInterface(BaseInterpreterInterface):
     def close(self):
         sys.exit(0)
 
-    def get_greeting_msg(self):
-        return 'PyDev console: starting.\n'
-
 
 class _ProcessExecQueueHelper:
     _debug_hook = None
@@ -154,9 +152,8 @@ def set_debug_hook(debug_hook):
     _ProcessExecQueueHelper._debug_hook = debug_hook
 
 
-def process_exec_queue(interpreter):
-
-    from pydev_ipython.inputhook import get_inputhook, set_return_control_callback
+def init_mpl_in_console(interpreter):
+    from pydev_ipython.inputhook import set_return_control_callback
 
     def return_control():
         ''' A function that the inputhooks can call (via inputhook.stdin_ready()) to find
@@ -178,6 +175,9 @@ def process_exec_queue(interpreter):
 
     set_return_control_callback(return_control)
 
+    if not INTERACTIVE_MODE_AVAILABLE:
+        return
+
     from _pydev_bundle.pydev_import_hook import import_hook_manager
     from pydev_ipython.matplotlibtools import activate_matplotlib, activate_pylab, activate_pyplot
     import_hook_manager.add_module_name("matplotlib", lambda: activate_matplotlib(interpreter.enableGui))
@@ -185,6 +185,11 @@ def process_exec_queue(interpreter):
     # interpreter.enableGui which put it into the interpreter's exec_queue and executes it in the main thread.
     import_hook_manager.add_module_name("pylab", activate_pylab)
     import_hook_manager.add_module_name("pyplot", activate_pyplot)
+
+
+def process_exec_queue(interpreter):
+    init_mpl_in_console(interpreter)
+    from pydev_ipython.inputhook import get_inputhook
 
     while 1:
         # Running the request may have changed the inputhook in use
@@ -245,6 +250,7 @@ try:
 except:
     IPYTHON = False
     pass
+
 
 #=======================================================================================================================
 # _DoExit
@@ -308,6 +314,7 @@ def start_console_server(host, port, interpreter):
     server.register_function(interpreter.hello)
     server.register_function(interpreter.getArray)
     server.register_function(interpreter.evaluate)
+    server.register_function(interpreter.ShowConsole)
 
     # Functions for GUI main loop integration
     server.register_function(interpreter.enableGui)
@@ -317,10 +324,6 @@ def start_console_server(host, port, interpreter):
 
         print(port)
         print(interpreter.client_port)
-
-
-    sys.stderr.write(interpreter.get_greeting_msg())
-    sys.stderr.flush()
 
     while True:
         try:
@@ -337,20 +340,29 @@ def start_console_server(host, port, interpreter):
                 pass
             if not retry:
                 raise
-            # Otherwise, keep on going
+                # Otherwise, keep on going
     return server
 
 
-def start_server(host, port, client_port):
+def start_server(host, port, client_port, client_host = None):
+    if not client_host:
+        client_host = host
+
     #replace exit (see comments on method)
     #note that this does not work in jython!!! (sys method can't be replaced).
     sys.exit = do_exit
 
-    interpreter = InterpreterInterface(host, client_port, threading.currentThread())
+    interpreter = InterpreterInterface(client_host, client_port, threading.currentThread())
 
     start_new_thread(start_console_server,(host, port, interpreter))
 
     process_exec_queue(interpreter)
+
+
+def get_ipython_hidden_vars():
+    if IPYTHON and hasattr(__builtin__, 'interpreter'):
+        interpreter = get_interpreter()
+        return interpreter.get_ipython_hidden_vars_dict()
 
 
 def get_interpreter():
@@ -359,6 +371,7 @@ def get_interpreter():
     except AttributeError:
         interpreterInterface = InterpreterInterface(None, None, threading.currentThread())
         setattr(__builtin__, 'interpreter', interpreterInterface)
+        print(interpreterInterface.get_greeting_msg())
 
     return interpreterInterface
 
@@ -448,6 +461,7 @@ def console_exec(thread_id, frame_id, expression, dbg):
     """
     frame = pydevd_vars.find_frame(thread_id, frame_id)
 
+    is_multiline = expression.count('@LINE@') > 1
     expression = str(expression.replace('@LINE@', '\n'))
 
     #Not using frame.f_globals because of https://sourceforge.net/tracker2/?func=detail&aid=2541355&group_id=85796&atid=577329
@@ -466,16 +480,18 @@ def console_exec(thread_id, frame_id, expression, dbg):
 
     interpreter = ConsoleWriter()
 
-    try:
-        code = compile_command(expression)
-    except (OverflowError, SyntaxError, ValueError):
-        # Case 1
-        interpreter.showsyntaxerror()
-        return False
-
-    if code is None:
-        # Case 2
-        return True
+    if not is_multiline:
+        try:
+            code = compile_command(expression)
+        except (OverflowError, SyntaxError, ValueError):
+            # Case 1
+            interpreter.showsyntaxerror()
+            return False
+        if code is None:
+            # Case 2
+            return True
+    else:
+        code = expression
 
     #Case 3
 
@@ -509,4 +525,10 @@ if __name__ == '__main__':
 
         client_port = p
 
-    pydevconsole.start_server(pydev_localhost.get_localhost(), int(port), int(client_port))
+    if len(sys.argv) > 4:
+        host = sys.argv[3]
+        client_host = sys.argv[4]
+    else:
+        host = client_host = pydev_localhost.get_localhost()
+
+    pydevconsole.start_server(host, int(port), int(client_port), client_host)

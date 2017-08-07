@@ -32,6 +32,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 
+import static com.intellij.lang.folding.CompositeFoldingBuilder.FOLDING_BUILDER;
+
 /**
  * Builds custom folding regions. If custom folding is supported for a language, its FoldingBuilder must be inherited from this class.
  * 
@@ -40,13 +42,13 @@ import java.util.Set;
 public abstract class CustomFoldingBuilder extends FoldingBuilderEx implements PossiblyDumbAware {
   private CustomFoldingProvider myDefaultProvider;
   private static final RegistryValue myMaxLookupDepth = Registry.get("custom.folding.max.lookup.depth");
-  private static final ThreadLocal<Set<ASTNode>> ourCustomRegionElements = new ThreadLocal<Set<ASTNode>>();
+  private static final ThreadLocal<Set<ASTNode>> ourCustomRegionElements = new ThreadLocal<>();
 
   @NotNull
   @Override
   public final FoldingDescriptor[] buildFoldRegions(@NotNull PsiElement root, @NotNull Document document, boolean quick) {
-    ourCustomRegionElements.set(new HashSet<ASTNode>());
-    List<FoldingDescriptor> descriptors = new ArrayList<FoldingDescriptor>();
+    ourCustomRegionElements.set(new HashSet<>());
+    List<FoldingDescriptor> descriptors = new ArrayList<>();
     try {
       if (CustomFoldingProvider.getAllProviders().length > 0) {
         myDefaultProvider = null;
@@ -97,6 +99,7 @@ public abstract class CustomFoldingBuilder extends FoldingBuilderEx implements P
           ASTNode startNode = localFoldingStack.pop();
           int startOffset = startNode.getTextRange().getStartOffset();
           TextRange range = new TextRange(startOffset, child.getTextRange().getEndOffset());
+          startNode.getPsi().putUserData(FOLDING_BUILDER, this);
           descriptors.add(new FoldingDescriptor(startNode, range));
           Set<ASTNode> nodeSet = ourCustomRegionElements.get();
           nodeSet.add(startNode);
@@ -207,6 +210,11 @@ public abstract class CustomFoldingBuilder extends FoldingBuilderEx implements P
    */
   protected boolean isCustomFoldingCandidate(@NotNull ASTNode node) {
     return node.getPsi() instanceof PsiComment;
+  }
+
+  public final boolean isCustomFoldingCandidate(@NotNull PsiElement element) {
+    ASTNode node = element.getNode();
+    return node != null && isCustomFoldingCandidate(node);
   }
 
   /**

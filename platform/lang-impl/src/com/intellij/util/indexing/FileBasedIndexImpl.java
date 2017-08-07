@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,15 +16,19 @@
 
 package com.intellij.util.indexing;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.intellij.AppTopics;
 import com.intellij.history.LocalHistory;
+import com.intellij.ide.PowerSaveMode;
 import com.intellij.ide.plugins.PluginManager;
 import com.intellij.lang.ASTNode;
 import com.intellij.notification.NotificationDisplayType;
 import com.intellij.notification.NotificationGroup;
 import com.intellij.notification.NotificationType;
+import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.ex.ActionUtil;
 import com.intellij.openapi.application.*;
+import com.intellij.openapi.components.BaseComponent;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.impl.EditorHighlighterCache;
@@ -33,14 +37,14 @@ import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.fileEditor.FileDocumentManagerAdapter;
 import com.intellij.openapi.fileTypes.*;
 import com.intellij.openapi.fileTypes.impl.FileTypeManagerImpl;
-import com.intellij.openapi.module.Module;
-import com.intellij.openapi.module.ModuleManager;
 import com.intellij.openapi.progress.ProcessCanceledException;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.progress.impl.BackgroundableProcessIndicator;
+import com.intellij.openapi.progress.util.ProgressIndicatorUtils;
 import com.intellij.openapi.project.*;
-import com.intellij.openapi.roots.*;
+import com.intellij.openapi.roots.CollectingContentIterator;
+import com.intellij.openapi.roots.ContentIterator;
 import com.intellij.openapi.roots.impl.PushedFilePropertiesUpdaterImpl;
 import com.intellij.openapi.util.*;
 import com.intellij.openapi.util.io.FileUtil;
@@ -63,7 +67,6 @@ import com.intellij.psi.SingleRootFileViewProvider;
 import com.intellij.psi.impl.PsiDocumentTransactionListener;
 import com.intellij.psi.impl.PsiManagerImpl;
 import com.intellij.psi.impl.PsiTreeChangeEventImpl;
-import com.intellij.psi.impl.PsiTreeChangePreprocessor;
 import com.intellij.psi.impl.cache.impl.id.IdIndex;
 import com.intellij.psi.impl.cache.impl.id.PlatformIdTableBuilding;
 import com.intellij.psi.impl.source.PsiFileImpl;
@@ -71,15 +74,23 @@ import com.intellij.psi.search.EverythingGlobalScope;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.psi.stubs.SerializationManagerEx;
 import com.intellij.util.*;
+import com.intellij.util.concurrency.AppExecutorUtil;
 import com.intellij.util.containers.ConcurrentIntObjectMap;
 import com.intellij.util.containers.ContainerUtil;
-import com.intellij.util.containers.JBIterable;
+import com.intellij.util.gist.GistManager;
+import com.intellij.util.gist.GistManagerImpl;
+import com.intellij.util.indexing.impl.InvertedIndexValueIterator;
+import com.intellij.util.indexing.impl.MapReduceIndex;
 import com.intellij.util.io.DataOutputStream;
 import com.intellij.util.io.IOUtil;
 import com.intellij.util.io.storage.HeavyProcessLatch;
 import com.intellij.util.messages.MessageBus;
 import com.intellij.util.messages.MessageBusConnection;
-import gnu.trove.*;
+import gnu.trove.THashMap;
+import gnu.trove.THashSet;
+import gnu.trove.TIntArrayList;
+import gnu.trove.TIntHashSet;
+import one.util.streamex.StreamEx;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.TestOnly;
@@ -88,18 +99,23 @@ import java.io.*;
 import java.lang.ref.SoftReference;
 import java.lang.ref.WeakReference;
 import java.util.*;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
+import java.util.concurrent.Phaser;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.stream.Stream;
 
 /**
  * @author Eugene Zhuravlev
  * @since Dec 20, 2007
  */
-public class FileBasedIndexImpl extends FileBasedIndex {
+public class FileBasedIndexImpl extends FileBasedIndex implements BaseComponent, Disposable {
   static final Logger LOG = Logger.getInstance("#com.intellij.util.indexing.FileBasedIndexImpl");
   private static final String CORRUPTION_MARKER_NAME = "corruption.marker";
   private static final NotificationGroup NOTIFICATIONS = new NotificationGroup("Indexing", NotificationDisplayType.BALLOON, false);
@@ -126,8 +142,6 @@ public class FileBasedIndexImpl extends FileBasedIndex {
   private final Set<ID<?, ?>> myUpToDateIndicesForUnsavedOrTransactedDocuments = ContainerUtil.newConcurrentSet();
   private volatile SmartFMap<Document, PsiFile> myTransactionMap = SmartFMap.emptyMap();
 
-  @Nullable private final String myConfigPath;
-  @Nullable private final String myLogPath;
   private final boolean myIsUnitTestMode;
   @Nullable private ScheduledFuture<?> myFlushingFuture;
   private volatile int myLocalModCount;
@@ -150,8 +164,9 @@ public class FileBasedIndexImpl extends FileBasedIndex {
     IndexConfiguration state = myState; // memory barrier
     if (state == null) {
       try {
-        state = myState = myStateFuture.get();
-      } catch (Throwable t) {
+        myState = state = myStateFuture.get();
+      }
+      catch (Throwable t) {
         throw new RuntimeException(t);
       }
     }
@@ -165,8 +180,6 @@ public class FileBasedIndexImpl extends FileBasedIndex {
     myFileDocumentManager = fdm;
     myFileTypeManager = fileTypeManager;
     myIsUnitTestMode = ApplicationManager.getApplication().isUnitTestMode();
-    myConfigPath = calcConfigPath(PathManager.getConfigPath());
-    myLogPath = calcConfigPath(PathManager.getLogPath());
 
     final MessageBusConnection connection = bus.connect();
     connection.subscribe(PsiDocumentTransactionListener.TOPIC, new PsiDocumentTransactionListener() {
@@ -230,16 +243,7 @@ public class FileBasedIndexImpl extends FileBasedIndex {
       }
 
       private void rebuildAllIndices() {
-        waitUntilIndicesAreInitialized();
-        IndexingStamp.flushCaches();
-        for (ID<?, ?> indexId : getState().getIndexIDs()) {
-          try {
-            clearIndex(indexId);
-          }
-          catch (StorageException e) {
-            LOG.info(e);
-          }
-        }
+        doClearIndices();
         scheduleIndexRebuild("File type change");
       }
     });
@@ -265,6 +269,22 @@ public class FileBasedIndexImpl extends FileBasedIndex {
 
     myChangedFilesCollector = new ChangedFilesCollector();
     myConnection = connection;
+
+    myConnection.subscribe(VirtualFileManager.VFS_CHANGES, myChangedFilesCollector);
+  }
+
+  @VisibleForTesting
+  void doClearIndices() {
+    waitUntilIndicesAreInitialized();
+    IndexingStamp.flushCaches();
+    for (ID<?, ?> indexId : getState().getIndexIDs()) {
+      try {
+        clearIndex(indexId);
+      }
+      catch (StorageException e) {
+        LOG.info(e);
+      }
+    }
   }
 
   public static boolean isProjectOrWorkspaceFile(@NotNull VirtualFile file, @Nullable FileType fileType) {
@@ -277,8 +297,7 @@ public class FileBasedIndexImpl extends FileBasedIndex {
     }
 
     if (restrictedTo != null && !Comparing.equal(file, restrictedTo) ||
-        filter != null && restrictedTo == null && !filter.accept(file)
-      ) {
+        filter != null && restrictedTo == null && !filter.accept(file)) {
       return false;
     }
     return true;
@@ -286,7 +305,9 @@ public class FileBasedIndexImpl extends FileBasedIndex {
 
   @Override
   public void requestReindex(@NotNull final VirtualFile file) {
+    ((GistManagerImpl)GistManager.getInstance()).invalidateData();
     myChangedFilesCollector.invalidateIndicesRecursively(file, true);
+    if (myInitialized) myChangedFilesCollector.ensureUpToDateAsync();
   }
 
   @Override
@@ -297,6 +318,12 @@ public class FileBasedIndexImpl extends FileBasedIndex {
     started = System.nanoTime();
 
     myStateFuture = IndexInfrastructure.submitGenesisTask(new FileIndexDataInitialization(extensions));
+    IndexInfrastructure.submitGenesisTask(() -> {
+      if (!myShutdownPerformed.get()) {
+        myChangedFilesCollector.ensureUpToDateAsync();
+      }
+      return null;
+    });
     LOG.info("Index scheduled:" + (System.nanoTime() - started) / 1000000);
     if (!IndexInfrastructure.ourDoAsyncIndicesInitialization) {
       waitUntilIndicesAreInitialized();
@@ -306,20 +333,9 @@ public class FileBasedIndexImpl extends FileBasedIndex {
   private void waitUntilIndicesAreInitialized() {
     try {
       myStateFuture.get();
-    } catch (Throwable t) {
+    }
+    catch (Throwable t) {
       LOG.error(t);
-    }
-  }
-
-  @Nullable
-  private static String calcConfigPath(@NotNull String path) {
-    try {
-      final String _path = FileUtil.toSystemIndependentName(new File(path).getCanonicalPath());
-      return _path.endsWith("/") ? _path : _path + "/";
-    }
-    catch (IOException e) {
-      LOG.info(e);
-      return null;
     }
   }
 
@@ -331,9 +347,11 @@ public class FileBasedIndexImpl extends FileBasedIndex {
     final int version = extension.getVersion();
 
     final File versionFile = IndexInfrastructure.getVersionFile(name);
-    final boolean versionFileExisted = versionFile.exists();
     boolean versionChanged = false;
-    if (IndexingStamp.versionDiffers(versionFile, version)) {
+    
+    if (IndexingStamp.versionDiffers(name, version)) {
+      final boolean versionFileExisted = versionFile.exists();
+
       if (versionFileExisted) {
         versionChanged = true;
         LOG.info("Version has changed for index " + name + ". The index will be rebuilt.");
@@ -343,17 +361,19 @@ public class FileBasedIndexImpl extends FileBasedIndex {
       }
       File rootDir = IndexInfrastructure.getIndexRootDir(name);
       if (versionFileExisted) FileUtil.deleteWithRenaming(rootDir);
-      IndexingStamp.rewriteVersion(versionFile, version);
+      IndexingStamp.rewriteVersion(name, version);
     }
 
-    initIndexStorage(extension, version, versionFile, state);
+    initIndexStorage(extension, version, state);
 
     return versionChanged;
   }
 
-  private static <K, V> void initIndexStorage(@NotNull FileBasedIndexExtension<K, V> extension, int version, @NotNull File versionFile, IndexConfiguration state)
+  private static <K, V> void initIndexStorage(@NotNull FileBasedIndexExtension<K, V> extension,
+                                              int version,
+                                              IndexConfiguration state)
     throws IOException {
-    MapIndexStorage<K, V> storage = null;
+    VfsAwareMapIndexStorage<K, V> storage = null;
     final ID<K, V> name = extension.getName();
     boolean contentHashesEnumeratorOk = false;
 
@@ -363,7 +383,7 @@ public class FileBasedIndexImpl extends FileBasedIndex {
           ContentHashesSupport.initContentHashesEnumerator();
           contentHashesEnumeratorOk = true;
         }
-        storage = new MapIndexStorage<>(
+        storage = new VfsAwareMapIndexStorage<>(
           IndexInfrastructure.getStorageFile(name),
           extension.getKeyDescriptor(),
           extension.getValueExternalizer(),
@@ -383,13 +403,7 @@ public class FileBasedIndexImpl extends FileBasedIndex {
 
         state.registerIndex(name,
                             createIndex(extension, new MemoryIndexStorage<>(storage, name)),
-                            new FileBasedIndex.InputFilter() {
-
-                              @Override
-                              public boolean acceptInput(@NotNull VirtualFile file) {
-                                return file instanceof VirtualFileWithId && inputFilter.acceptInput(file);
-                              }
-                            },
+                            file -> file instanceof VirtualFileWithId && inputFilter.acceptInput(file),
                             version,
                             addedTypes);
         break;
@@ -409,7 +423,7 @@ public class FileBasedIndexImpl extends FileBasedIndex {
         if (extension.hasSnapshotMapping() && (!contentHashesEnumeratorOk || instantiatedStorage)) {
           FileUtil.deleteWithRenaming(IndexInfrastructure.getPersistentIndexRootDir(name)); // todo there is possibility of corruption of storage and content hashes
         }
-        IndexingStamp.rewriteVersion(versionFile, version);
+        IndexingStamp.rewriteVersion(name, version);
       }
     }
   }
@@ -419,24 +433,17 @@ public class FileBasedIndexImpl extends FileBasedIndex {
       return;
     }
     final File registeredIndicesFile = new File(PathManager.getIndexRoot(), "registered");
-    final Set<String> result = new THashSet<>();
-    try {
-      final DataInputStream in = new DataInputStream(new BufferedInputStream(new FileInputStream(registeredIndicesFile)));
-      try {
-        final int size = in.readInt();
-        for (int idx = 0; idx < size; idx++) {
-          result.add(IOUtil.readString(in));
-        }
-      }
-      finally {
-        in.close();
+    final Set<String> indicesToDrop = new THashSet<>();
+    try (DataInputStream in = new DataInputStream(new BufferedInputStream(new FileInputStream(registeredIndicesFile)))) {
+      final int size = in.readInt();
+      for (int idx = 0; idx < size; idx++) {
+        indicesToDrop.add(IOUtil.readString(in));
       }
     }
-    catch (IOException ignored1) {
+    catch (IOException ignored) {
     }
-    final Set<String> indicesToDrop = result;
     for (ID<?, ?> key : ids) {
-      indicesToDrop.remove(key.toString());
+      indicesToDrop.remove(key.getName());
     }
     if (!indicesToDrop.isEmpty()) {
       LOG.info("Dropping indices:" + StringUtil.join(indicesToDrop, ","));
@@ -445,17 +452,11 @@ public class FileBasedIndexImpl extends FileBasedIndex {
       }
     }
 
-    try {
-      FileUtil.createIfDoesntExist(registeredIndicesFile);
-      final DataOutputStream os = new DataOutputStream(new BufferedOutputStream(new FileOutputStream(registeredIndicesFile)));
-      try {
-        os.writeInt(ids.size());
-        for (ID<?, ?> id : ids) {
-          IOUtil.writeString(id.toString(), os);
-        }
-      }
-      finally {
-        os.close();
+    FileUtil.createIfDoesntExist(registeredIndicesFile);
+    try (DataOutputStream os = new DataOutputStream(new BufferedOutputStream(new FileOutputStream(registeredIndicesFile)))) {
+      os.writeInt(ids.size());
+      for (ID<?, ?> id : ids) {
+        IOUtil.writeString(id.getName(), os);
       }
     }
     catch (IOException ignored) {
@@ -466,24 +467,24 @@ public class FileBasedIndexImpl extends FileBasedIndex {
   private static <K, V> UpdatableIndex<K, V, FileContent> createIndex(@NotNull final FileBasedIndexExtension<K, V> extension,
                                                                @NotNull final MemoryIndexStorage<K, V> storage)
     throws StorageException, IOException {
-    final MapReduceIndex<K, V, FileContent> index;
+    final VfsAwareMapReduceIndex<K, V, FileContent> index;
     if (extension instanceof CustomImplementationFileBasedIndexExtension) {
       final UpdatableIndex<K, V, FileContent> custom =
         ((CustomImplementationFileBasedIndexExtension<K, V, FileContent>)extension).createIndexImplementation(extension, storage);
-      if (!(custom instanceof MapReduceIndex)) {
+      if (!(custom instanceof VfsAwareMapReduceIndex)) {
         return custom;
       }
-      index = (MapReduceIndex<K, V, FileContent>)custom;
+      index = (VfsAwareMapReduceIndex<K, V, FileContent>)custom;
     }
     else {
-      index = new MapReduceIndex<>(extension, storage);
+      index = new VfsAwareMapReduceIndex<>(extension, storage);
     }
 
     return index;
   }
 
   @Override
-  public void disposeComponent() {
+  public void dispose() {
     performShutdown();
   }
 
@@ -547,10 +548,6 @@ public class FileBasedIndexImpl extends FileBasedIndex {
     for (ID<?, ?> indexId : affectedIndices) {
       try {
         updateSingleIndex(indexId, null, inputId, null);
-      }
-      catch (StorageException e) {
-        LOG.info(e);
-        requestRebuild(indexId);
       }
       catch (ProcessCanceledException pce) {
         LOG.error(pce);
@@ -660,12 +657,7 @@ public class FileBasedIndexImpl extends FileBasedIndex {
   }
 
 
-  private final ThreadLocal<Boolean> myReentrancyGuard = new ThreadLocal<Boolean>() {
-    @Override
-    protected Boolean initialValue() {
-      return Boolean.FALSE;
-    }
-  };
+  private final ThreadLocal<Boolean> myReentrancyGuard = ThreadLocal.withInitial(() -> Boolean.FALSE);
 
   /**
    * DO NOT CALL DIRECTLY IN CLIENT CODE
@@ -681,7 +673,7 @@ public class FileBasedIndexImpl extends FileBasedIndex {
                                     @Nullable GlobalSearchScope filter,
                                     @Nullable VirtualFile restrictedFile) {
     ProgressManager.checkCanceled();
-    myContentlessIndicesUpdateQueue.ensureUpToDate(); // some contentful indices depends on contentless ones
+    myChangedFilesCollector.ensureUpToDate();
     ApplicationManager.getApplication().assertReadAccessAllowed();
     if (!needsFileContentLoading(indexId)) {
       return; //indexed eagerly in foreground while building unindexed file list
@@ -692,6 +684,8 @@ public class FileBasedIndexImpl extends FileBasedIndex {
     if (ActionUtil.isDumbMode(project)) {
       handleDumbMode(project);
     }
+
+    NoAccessDuringPsiEvents.checkCallContext();
 
     if (myReentrancyGuard.get().booleanValue()) {
       //assert false : "ensureUpToDate() is not reentrant!";
@@ -707,9 +701,6 @@ public class FileBasedIndexImpl extends FileBasedIndex {
           }
           forceUpdate(project, filter, restrictedFile);
           indexUnsavedDocuments(indexId, project, filter, restrictedFile);
-        }
-        catch (StorageException e) {
-          scheduleRebuild(indexId, e);
         }
         catch (RuntimeException e) {
           final Throwable cause = e.getCause();
@@ -748,7 +739,6 @@ public class FileBasedIndexImpl extends FileBasedIndex {
   @Override
   @NotNull
   public <K, V> List<V> getValues(@NotNull final ID<K, V> indexId, @NotNull K dataKey, @NotNull final GlobalSearchScope filter) {
-    final List<V> values = new SmartList<>();
     VirtualFile restrictToFile = null;
 
     if (filter instanceof Iterable) {
@@ -763,6 +753,7 @@ public class FileBasedIndexImpl extends FileBasedIndex {
       }
     }
 
+    final List<V> values = new SmartList<>();
     ValueProcessor<V> processor = (file, value) -> {
       values.add(value);
       return true;
@@ -816,6 +807,7 @@ public class FileBasedIndexImpl extends FileBasedIndex {
     return -1;
   }
 
+  @FunctionalInterface
   public interface IdValueProcessor<V> {
     /**
      * @param fileId the id of the file that the value came from
@@ -841,6 +833,7 @@ public class FileBasedIndexImpl extends FileBasedIndex {
           if (!processor.process(inputIdsIterator.next(), value)) {
             return false;
           }
+          ProgressManager.checkCanceled();
         }
       }
       return true;
@@ -874,7 +867,7 @@ public class FileBasedIndexImpl extends FileBasedIndex {
         index.getReadLock().unlock();
       }
     }
-    catch (StorageException e) {
+    catch (StorageException | AssertionError e) {
       scheduleRebuild(indexId, e);
     }
     catch (RuntimeException e) {
@@ -885,8 +878,6 @@ public class FileBasedIndexImpl extends FileBasedIndex {
       else {
         throw e;
       }
-    } catch(AssertionError ae) {
-      scheduleRebuild(indexId, ae);
     }
     return null;
   }
@@ -904,6 +895,7 @@ public class FileBasedIndexImpl extends FileBasedIndex {
         if (valueIt.getValueAssociationPredicate().contains(restrictedFileId) && !processor.process(restrictToFile, value)) {
           return false;
         }
+        ProgressManager.checkCanceled();
       }
       return true;
     });
@@ -930,9 +922,12 @@ public class FileBasedIndexImpl extends FileBasedIndex {
               return false;
             }
             if (ensureValueProcessedOnce) {
+              ProgressManager.checkCanceled();
               break; // continue with the next value
             }
           }
+
+          ProgressManager.checkCanceled();
         }
       }
       return true;
@@ -943,9 +938,9 @@ public class FileBasedIndexImpl extends FileBasedIndex {
                                               @NotNull K dataKey,
                                               @Nullable VirtualFile restrictToFile,
                                               @NotNull GlobalSearchScope scope,
-                                              @NotNull Processor<ValueContainer.ValueIterator<V>> valueProcessor) {
+                                              @NotNull Processor<InvertedIndexValueIterator<V>> valueProcessor) {
     final Boolean result = processExceptions(indexId, restrictToFile, scope,
-                                             index -> valueProcessor.process(index.getData(dataKey).getValueIterator()));
+                                             index -> valueProcessor.process((InvertedIndexValueIterator<V>)index.getData(dataKey).getValueIterator()));
     return result == null || result.booleanValue();
   }
 
@@ -962,14 +957,32 @@ public class FileBasedIndexImpl extends FileBasedIndex {
 
   private static final Key<SoftReference<ProjectIndexableFilesFilter>> ourProjectFilesSetKey = Key.create("projectFiles");
 
-  public void filesUpdateEnumerationFinished() {
-    myContentlessIndicesUpdateQueue.ensureUpToDate();
-    myContentlessIndicesUpdateQueue.signalUpdateEnd();
+  void filesUpdateEnumerationFinished() {
   }
 
   @TestOnly
   public void cleanupForNextTest() {
+    myChangedFilesCollector.ensureUpToDate();
+
     myTransactionMap = SmartFMap.emptyMap();
+    IndexConfiguration state = getState();
+    for (ID<?, ?> indexId : state.getIndexIDs()) {
+      final MapReduceIndex index = (MapReduceIndex)state.getIndex(indexId);
+      assert index != null;
+      final MemoryIndexStorage memStorage = (MemoryIndexStorage)index.getStorage();
+      index.getWriteLock().lock();
+      try {
+        memStorage.clearCaches();
+      }
+      finally {
+        index.getWriteLock().unlock();
+      }
+    }
+  }
+
+  @TestOnly
+  public IndexedFilesListener getChangedFilesCollector() {
+    return myChangedFilesCollector;
   }
 
   public static final class ProjectIndexableFilesFilter extends IdFilter {
@@ -986,26 +999,20 @@ public class FileBasedIndexImpl extends FileBasedIndex {
       if (!set.isEmpty()) {
         minMax[0] = minMax[1] = set.get(0);
       }
-      set.forEach(new TIntProcedure() {
-        @Override
-        public boolean execute(int value) {
-          if (value < 0) value = -value;
-          minMax[0] = Math.min(minMax[0], value);
-          minMax[1] = Math.max(minMax[1], value);
-          return true;
-        }
+      set.forEach(value -> {
+        if (value < 0) value = -value;
+        minMax[0] = Math.min(minMax[0], value);
+        minMax[1] = Math.max(minMax[1], value);
+        return true;
       });
       myMaxId = minMax[1];
       myMinId = minMax[0];
       myBitMask = new long[((myMaxId - myMinId) >> SHIFT) + 1];
-      set.forEach(new TIntProcedure() {
-        @Override
-        public boolean execute(int value) {
-          if (value < 0) value = -value;
-          value -= myMinId;
-          myBitMask[value >> SHIFT] |= (1L << (value & MASK));
-          return true;
-        }
+      set.forEach(value -> {
+        if (value < 0) value = -value;
+        value -= myMinId;
+        myBitMask[value >> SHIFT] |= (1L << (value & MASK));
+        return true;
       });
     }
 
@@ -1019,8 +1026,7 @@ public class FileBasedIndexImpl extends FileBasedIndex {
   }
 
   void filesUpdateStarted(Project project) {
-    myContentlessIndicesUpdateQueue.signalUpdateStart();
-    myContentlessIndicesUpdateQueue.ensureUpToDate();
+    myChangedFilesCollector.ensureUpToDate();
     myProjectsBeingUpdated.add(project);
     ++myFilesModCount;
   }
@@ -1052,12 +1058,10 @@ public class FileBasedIndexImpl extends FileBasedIndex {
         long start = System.currentTimeMillis();
 
         final TIntArrayList filesSet = new TIntArrayList();
-        iterateIndexableFiles(new ContentIterator() {
-          @Override
-          public boolean processFile(@NotNull VirtualFile fileOrDir) {
-            filesSet.add(((VirtualFileWithId)fileOrDir).getId());
-            return true;
-          }
+        iterateIndexableFiles(fileOrDir -> {
+          ProgressManager.checkCanceled();
+          filesSet.add(((VirtualFileWithId)fileOrDir).getId());
+          return true;
         }, project, SilentProgressIndicator.create());
         ProjectIndexableFilesFilter filter = new ProjectIndexableFilesFilter(filesSet, myFilesModCount);
         project.putUserData(ourProjectFilesSetKey, new SoftReference<>(filter));
@@ -1080,55 +1084,12 @@ public class FileBasedIndexImpl extends FileBasedIndex {
                                                              @NotNull final GlobalSearchScope filter,
                                                              @Nullable final Condition<V> valueChecker,
                                                              @Nullable final ProjectIndexableFilesFilter projectFilesFilter) {
-    final ThrowableConvertor<UpdatableIndex<K, V, FileContent>, TIntHashSet, StorageException> convertor =
-      index -> {
-        TIntHashSet mainIntersection = null;
-
-        for (K dataKey : dataKeys) {
-          ProgressManager.checkCanceled();
-          final TIntHashSet copy = new TIntHashSet();
-          final ValueContainer<V> container = index.getData(dataKey);
-
-          for (final ValueContainer.ValueIterator<V> valueIt = container.getValueIterator(); valueIt.hasNext(); ) {
-            final V value = valueIt.next();
-            if (valueChecker != null && !valueChecker.value(value)) {
-              continue;
-            }
-
-            ValueContainer.IntIterator iterator = valueIt.getInputIdsIterator();
-
-            if (mainIntersection == null || iterator.size() < mainIntersection.size()) {
-              while (iterator.hasNext()) {
-                final int id = iterator.next();
-                if (mainIntersection == null && (projectFilesFilter == null || projectFilesFilter.containsFileId(id)) ||
-                    mainIntersection != null && mainIntersection.contains(id)
-                  ) {
-                  copy.add(id);
-                }
-              }
-            }
-            else {
-              mainIntersection.forEach(new TIntProcedure() {
-                final ValueContainer.IntPredicate predicate = valueIt.getValueAssociationPredicate();
-
-                @Override
-                public boolean execute(int id) {
-                  if (predicate.contains(id)) copy.add(id);
-                  return true;
-                }
-              });
-            }
-          }
-
-          mainIntersection = copy;
-          if (mainIntersection.isEmpty()) {
-            return new TIntHashSet();
-          }
-        }
-
-        return mainIntersection;
-      };
-
+    ThrowableConvertor<UpdatableIndex<K, V, FileContent>, TIntHashSet, StorageException> convertor =
+      index -> InvertedIndexUtil.collectInputIdsContainingAllKeys(index, dataKeys, __ -> {
+                                                                    ProgressManager.checkCanceled();
+                                                                    return true;
+                                                                  }, valueChecker,
+                                                projectFilesFilter == null ? null : projectFilesFilter::containsFileId);
 
     return processExceptions(indexId, null, filter, convertor);
   }
@@ -1137,16 +1098,13 @@ public class FileBasedIndexImpl extends FileBasedIndex {
                                              @NotNull final GlobalSearchScope filter,
                                              @NotNull final Processor<VirtualFile> processor) {
     final PersistentFS fs = (PersistentFS)ManagingFS.getInstance();
-    return ids.forEach(new TIntProcedure() {
-      @Override
-      public boolean execute(int id) {
-        ProgressManager.checkCanceled();
-        VirtualFile file = IndexInfrastructure.findFileByIdIfCached(fs, id);
-        if (file != null && filter.accept(file)) {
-          return processor.process(file);
-        }
-        return true;
+    return ids.forEach(id -> {
+      ProgressManager.checkCanceled();
+      VirtualFile file = IndexInfrastructure.findFileByIdIfCached(fs, id);
+      if (file != null && filter.accept(file)) {
+        return processor.process(file);
       }
+      return true;
     });
   }
 
@@ -1173,13 +1131,13 @@ public class FileBasedIndexImpl extends FileBasedIndex {
 
   @Override
   public <K> void scheduleRebuild(@NotNull final ID<K, ?> indexId, @NotNull final Throwable e) {
-    requestRebuild(indexId, new Throwable(e));
+    requestRebuild(indexId, e);
   }
 
   private static void scheduleIndexRebuild(String reason) {
     LOG.info("scheduleIndexRebuild, reason: " + reason);
     for (Project project : ProjectManager.getInstance().getOpenProjects()) {
-      DumbService.getInstance(project).queueTask(new UnindexedFilesUpdater(project, false));
+      DumbService.getInstance(project).queueTask(new UnindexedFilesUpdater(project));
     }
   }
 
@@ -1206,7 +1164,7 @@ public class FileBasedIndexImpl extends FileBasedIndex {
 
   private void advanceIndexVersion(ID<?, ?> indexId) {
     try {
-      IndexingStamp.rewriteVersion(IndexInfrastructure.getVersionFile(indexId), myState.getIndexVersion(indexId));
+      IndexingStamp.rewriteVersion(indexId, myState.getIndexVersion(indexId));
     }
     catch (IOException e) {
       LOG.error(e);
@@ -1229,7 +1187,7 @@ public class FileBasedIndexImpl extends FileBasedIndex {
   private void indexUnsavedDocuments(@NotNull final ID<?, ?> indexId,
                                      @Nullable Project project,
                                      final GlobalSearchScope filter,
-                                     final VirtualFile restrictedFile) throws StorageException {
+                                     final VirtualFile restrictedFile) {
     if (myUpToDateIndicesForUnsavedOrTransactedDocuments.contains(indexId)) {
       return; // no need to index unsaved docs
     }
@@ -1238,8 +1196,10 @@ public class FileBasedIndexImpl extends FileBasedIndex {
     boolean psiBasedIndex = myPsiDependentIndices.contains(indexId);
     if(psiBasedIndex) {
       Set<Document> transactedDocuments = getTransactedDocuments();
-      if (documents.size() == 0) documents = transactedDocuments;
-      else if (transactedDocuments.size() > 0) {
+      if (documents.isEmpty()) {
+        documents = transactedDocuments;
+      }
+      else if (!transactedDocuments.isEmpty()) {
         documents = new THashSet<>(documents);
         documents.addAll(transactedDocuments);
       }
@@ -1274,6 +1234,7 @@ public class FileBasedIndexImpl extends FileBasedIndex {
   }
 
   private interface DocumentContent {
+    @NotNull
     CharSequence getText();
 
     long getModificationStamp();
@@ -1286,6 +1247,7 @@ public class FileBasedIndexImpl extends FileBasedIndex {
       myDocument = document;
     }
 
+    @NotNull
     @Override
     public CharSequence getText() {
       return myDocument.getImmutableCharSequence();
@@ -1306,6 +1268,7 @@ public class FileBasedIndexImpl extends FileBasedIndex {
       myFile = file;
     }
 
+    @NotNull
     @Override
     public CharSequence getText() {
       if (myFile.getViewProvider().getModificationStamp() != myDocument.getModificationStamp()) {
@@ -1359,11 +1322,12 @@ public class FileBasedIndexImpl extends FileBasedIndex {
           newFc = previousContent;
         }
         else {
-          newFc = new FileContentImpl(vFile, contentText, vFile.getCharset(), currentDocStamp);
+          newFc = new FileContentImpl(vFile, contentText, currentDocStamp);
           document.putUserData(ourFileContentKey, new WeakReference<>(newFc));
         }
 
         initFileContent(newFc, project, dominantContentFile);
+        newFc.ensureThreadSafeLighterAST();
 
         if (content instanceof AuthenticContent) {
           newFc.putUserData(PlatformIdTableBuilding.EDITOR_HIGHLIGHTER,
@@ -1385,8 +1349,6 @@ public class FileBasedIndexImpl extends FileBasedIndex {
 
     return true;
   }
-
-  private final TaskQueue myContentlessIndicesUpdateQueue = new TaskQueue(10000);
 
   private final StorageGuard myStorageLock = new StorageGuard();
   private volatile boolean myPreviousDataBufferingState;
@@ -1414,8 +1376,12 @@ public class FileBasedIndexImpl extends FileBasedIndex {
 
   private void cleanupMemoryStorage() {
     myLastIndexedDocStamps.clear();
-    waitUntilIndicesAreInitialized();
-    IndexConfiguration state = getState();
+    IndexConfiguration state = myState;
+    if (state == null) {
+      // avoid waiting for end of indices initialization (IDEA-173382)
+      // in memory content will appear on indexing (in read action) and here is event dispatch (write context)
+      return;
+    }
     for (ID<?, ?> indexId : state.getIndexIDs()) {
       final MapReduceIndex index = (MapReduceIndex)state.getIndex(indexId);
       assert index != null;
@@ -1432,7 +1398,7 @@ public class FileBasedIndexImpl extends FileBasedIndex {
   }
 
   @Override
-  public void requestRebuild(final ID<?, ?> indexId, final Throwable throwable) {
+  public void requestRebuild(@NotNull final ID<?, ?> indexId, final Throwable throwable) {
     cleanupProcessedFlag();
     if (RebuildStatus.requestRebuild(indexId)) {
       String message = "Rebuild requested for index " + indexId;
@@ -1476,12 +1442,18 @@ public class FileBasedIndexImpl extends FileBasedIndex {
     return getState().getInputFilter(indexId);
   }
 
-  public int getChangedFileCount() {
-    return myChangedFilesCollector.getAllFilesToUpdate().size();
+  int getChangedFileCount() {
+    return myChangedFilesCollector.myVfsEventsMerger.getApproximateChangesCount() + myChangedFilesCollector.myFilesToUpdate.size();
+  }
+
+  String dumpSomeChangedFiles() {
+    Stream<VirtualFile> events = myChangedFilesCollector.myVfsEventsMerger.getChangedFiles();
+    Stream<VirtualFile> files = myChangedFilesCollector.myFilesToUpdate.values().stream();
+    return StreamEx.of(events).append(files).limit(20).map(VirtualFile::getPath).joining(", ");
   }
 
   @NotNull
-  public Collection<VirtualFile> getFilesToUpdate(final Project project) {
+  Collection<VirtualFile> getFilesToUpdate(final Project project) {
     return ContainerUtil.findAll(myChangedFilesCollector.getAllFilesToUpdate(), virtualFile -> {
       if (virtualFile instanceof DeletedVirtualFileStub) {
         return true;
@@ -1500,14 +1472,14 @@ public class FileBasedIndexImpl extends FileBasedIndex {
   }
 
   public boolean isFileUpToDate(VirtualFile file) {
-    return !myChangedFilesCollector.myFilesToUpdate.containsKey(Math.abs(getIdMaskingNonIdBasedFile(file)));
+    return !myChangedFilesCollector.isScheduledForUpdate(file);
   }
 
   // caller is responsible to ensure no concurrent same document processing
   void processRefreshedFile(@Nullable Project project, @NotNull final com.intellij.ide.caches.FileContent fileContent) {
     // ProcessCanceledException will cause re-adding the file to processing list
     final VirtualFile file = fileContent.getVirtualFile();
-    if (myChangedFilesCollector.myFilesToUpdate.containsKey(Math.abs(getIdMaskingNonIdBasedFile(file)))) {
+    if (myChangedFilesCollector.isScheduledForUpdate(file)) {
       indexFileContent(project, fileContent);
     }
   }
@@ -1519,14 +1491,16 @@ public class FileBasedIndexImpl extends FileBasedIndex {
     try {
       // if file was scheduled for update due to vfs events then it is present in myFilesToUpdate
       // in this case we consider that current indexing (out of roots backed CacheUpdater) will cover its content
-      // todo this assumption isn't correct for vfs events happened between content loading and indexing itself
-      // proper fix will when events handling will be out of direct execution by EDT
+      if (file.isValid() && content.getTimeStamp() != file.getTimeStamp()) {
+        content = new com.intellij.ide.caches.FileContent(file);
+      }
       if (!file.isValid() || isTooLarge(file)) {
         removeDataFromIndicesForFile(fileId);
         if (file instanceof DeletedVirtualFileStub && ((DeletedVirtualFileStub)file).isResurrected()) {
           doIndexFileContent(project, new com.intellij.ide.caches.FileContent(((DeletedVirtualFileStub)file).getOriginalFile()));
         }
-      } else {
+      }
+      else {
         doIndexFileContent(project, content);
       }
     }
@@ -1534,15 +1508,14 @@ public class FileBasedIndexImpl extends FileBasedIndex {
       IndexingStamp.flushCache(fileId);
     }
 
-    myChangedFilesCollector.myFilesToUpdate.remove(fileId);
+    myChangedFilesCollector.removeFileIdFromFilesScheduledForUpdate(fileId);
   }
 
   private void doIndexFileContent(@Nullable Project project, @NotNull final com.intellij.ide.caches.FileContent content) {
     final VirtualFile file = content.getVirtualFile();
-
-    final FileType fileType = file.getFileType();
-    final Project finalProject = project == null ? ProjectUtil.guessProjectForFile(file) : project;
     myFileTypeManager.freezeFileTypeTemporarilyIn(file, () -> {
+      final FileType fileType = file.getFileType();
+      final Project finalProject = project == null ? ProjectUtil.guessProjectForFile(file) : project;
       PsiFile psiFile = null;
       FileContentImpl fc = null;
       int inputId = -1;
@@ -1563,19 +1536,15 @@ public class FileBasedIndexImpl extends FileBasedIndex {
             fc = new FileContentImpl(file, currentBytes);
 
             if (IdIndex.ourSnapshotMappingsEnabled) {
-              try {
-                FileType substituteFileType = SubstitutedFileType.substituteFileType(file, fileType, finalProject);
-                byte[] hash = fileType.isBinary() ?
-                              ContentHashesSupport.calcContentHash(currentBytes, substituteFileType) :
-                              ContentHashesSupport.calcContentHashWithFileType(
-                                currentBytes,
-                                fc.getCharset(),
-                                substituteFileType
-                              );
-                fc.setHash(hash);
-              } catch (IOException e) {
-                LOG.error(e);
-              }
+              FileType substituteFileType = SubstitutedFileType.substituteFileType(file, fileType, finalProject);
+              byte[] hash = fileType.isBinary() ?
+                            ContentHashesSupport.calcContentHash(currentBytes, substituteFileType) :
+                            ContentHashesSupport.calcContentHashWithFileType(
+                              currentBytes,
+                              fc.getCharset(),
+                              substituteFileType
+                            );
+              fc.setHash(hash);
             }
 
             psiFile = content.getUserData(IndexingDataKeys.PSI_FILE);
@@ -1590,10 +1559,6 @@ public class FileBasedIndexImpl extends FileBasedIndex {
           catch (ProcessCanceledException e) {
             cleanFileContent(fc, psiFile);
             throw e;
-          }
-          catch (StorageException e) {
-            requestRebuild(indexId);
-            LOG.info(e);
           }
         }
       }
@@ -1611,7 +1576,7 @@ public class FileBasedIndexImpl extends FileBasedIndex {
   @NotNull
   private List<ID<?, ?>> getAffectedIndexCandidates(@NotNull VirtualFile file) {
     if (file.isDirectory()) {
-      return isProjectOrWorkspaceFile(file, null) ?  Collections.<ID<?,?>>emptyList() : myIndicesForDirectories;
+      return isProjectOrWorkspaceFile(file, null) ? Collections.emptyList() : myIndicesForDirectories;
     }
     FileType fileType = file.getFileType();
     if(isProjectOrWorkspaceFile(file, fileType)) return Collections.emptyList();
@@ -1635,8 +1600,7 @@ public class FileBasedIndexImpl extends FileBasedIndex {
 
   static final Key<Boolean> ourPhysicalContentKey = Key.create("physical.content.flag");
 
-  void updateSingleIndex(@NotNull ID<?, ?> indexId, VirtualFile file, final int inputId, @Nullable FileContent currentFC)
-    throws StorageException {
+  private void updateSingleIndex(@NotNull ID<?, ?> indexId, VirtualFile file, final int inputId, @Nullable FileContent currentFC) {
     if (!RebuildStatus.isOk(indexId) && !myIsUnitTestMode) {
       return; // the index is scheduled for rebuild, no need to update
     }
@@ -1658,7 +1622,8 @@ public class FileBasedIndexImpl extends FileBasedIndex {
       updateCalculated = true;
 
       scheduleUpdate(indexId, update, file, inputId, hasContent);
-    } catch (RuntimeException exception) {
+    }
+    catch (RuntimeException exception) {
       Throwable causeToRebuildIndex = getCauseToRebuildIndex(exception);
       if (causeToRebuildIndex != null && (updateCalculated || causeToRebuildIndex instanceof IOException)) {
         requestRebuild(indexId, exception);
@@ -1695,36 +1660,32 @@ public class FileBasedIndexImpl extends FileBasedIndex {
     }
   }
 
-  private void scheduleUpdate(@NotNull final ID<?, ?> indexId, final Computable<Boolean> update, VirtualFile file, final int inputId, final boolean hasContent) {
-    if (myNotRequiringContentIndices.contains(indexId) && !Registry.is("idea.concurrent.scanning.files.to.index")) {
-      myContentlessIndicesUpdateQueue.submit(
-        () -> updateWithBufferingEnabled(update),
-        () -> indexedStampUpdate(indexId, file, inputId, hasContent));
-    }
-    else {
-      if (updateWithBufferingEnabled(update)) {
-        AccessToken accessToken = ReadAction.start();
-        try {
-          indexedStampUpdate(indexId, file, inputId, hasContent);
-        } finally {
-          accessToken.finish();
+  private final Lock myReadLock;
+  private final Lock myWriteLock;
+  {
+    ReadWriteLock lock = new ReentrantReadWriteLock();
+    myReadLock = lock.readLock();
+    myWriteLock = lock.writeLock();
+  }
+  private void scheduleUpdate(@NotNull final ID<?, ?> indexId, @NotNull Computable<Boolean> update, VirtualFile file, final int inputId, final boolean hasContent) {
+    if (updateWithBufferingEnabled(update)) {
+      myReadLock.lock();
+      try {
+        UpdatableIndex<?, ?, FileContent> index = getIndex(indexId);
+        if (hasContent) {
+          index.setIndexedStateForFile(inputId, file);
         }
+        else {
+          index.resetIndexedStateForFile(inputId);
+        }
+      }
+      finally {
+        myReadLock.unlock();
       }
     }
   }
 
-  protected void indexedStampUpdate(@NotNull ID<?, ?> indexId, @Nullable VirtualFile file, int fileId, boolean hasContent) {
-    UpdatableIndex<?, ?, FileContent> index = getIndex(indexId);
-    if (hasContent) {
-      index.setIndexedStateForFile(fileId, file);
-    } else {
-      index.resetIndexedStateForFile(fileId);
-    }
-
-    if (myNotRequiringContentIndices.contains(indexId)) IndexingStamp.flushCache(fileId);
-  }
-
-  protected boolean updateWithBufferingEnabled(@NotNull final Computable<Boolean> update) {
+  private boolean updateWithBufferingEnabled(@NotNull final Computable<Boolean> update) {
     final StorageGuard.StorageModeExitHandler lock = setDataBufferingEnabled(false);
     try {
       return update.compute();
@@ -1738,7 +1699,8 @@ public class FileBasedIndexImpl extends FileBasedIndex {
     return !myNotRequiringContentIndices.contains(indexId);
   }
 
-  private @Nullable IndexableFileSet getIndexableSetForFile(VirtualFile file) {
+  @Nullable
+  private IndexableFileSet getIndexableSetForFile(VirtualFile file) {
     for (IndexableFileSet set : myIndexableSets) {
       if (set.isInSet(file)) {
         return set;
@@ -1747,24 +1709,16 @@ public class FileBasedIndexImpl extends FileBasedIndex {
     return null;
   }
 
-  private void doInvalidateIndicesForFile(@NotNull final VirtualFile file, boolean contentChanged) {
+  private void doInvalidateIndicesForFile(int fileId, @NotNull VirtualFile file, boolean contentChanged) {
     waitUntilIndicesAreInitialized();
     cleanProcessedFlag(file);
 
-    final int fileId = Math.abs(getIdMaskingNonIdBasedFile(file));
-    IndexingStamp.flushCache(fileId);
     List<ID<?, ?>> nontrivialFileIndexedStates = IndexingStamp.getNontrivialFileIndexedStates(fileId);
 
     if (!contentChanged) {
       for (ID<?, ?> indexId : nontrivialFileIndexedStates) {
         if (myNotRequiringContentIndices.contains(indexId)) {
-          try {
-            updateSingleIndex(indexId, null, fileId, null);
-          }
-          catch (StorageException e) {
-            LOG.info(e);
-            requestRebuild(indexId);
-          }
+          updateSingleIndex(indexId, null, fileId, null);
         }
       }
       myChangedFilesCollector.removeScheduledFileFromUpdate(file); // no need to update it anymore
@@ -1787,35 +1741,29 @@ public class FileBasedIndexImpl extends FileBasedIndex {
         clearUpToDateStateForPsiIndicesOfUnsavedDocuments(file);
 
         // the file is for sure not a dir and it was previously indexed by at least one index
-        if (!isTooLarge(file)) myChangedFilesCollector.scheduleForUpdate(file);
+        if (file.isValid() && !isTooLarge(file)) myChangedFilesCollector.scheduleForUpdate(file);
       }
     }
     else if (!fileIndexedStatesToUpdate.isEmpty()) { // file was removed, its data should be (lazily) wiped for every index
       myChangedFilesCollector.scheduleForUpdate(new DeletedVirtualFileStub((VirtualFileWithId)file));
     }
-
-    IndexingStamp.flushCache(fileId);
   }
 
-  private void scheduleFileForIndexing(final VirtualFile file, boolean contentChange) {
+  private void scheduleFileForIndexing(int fileId, @NotNull VirtualFile file, boolean contentChange) {
     // handle 'content-less' indices separately
     boolean fileIsDirectory = file.isDirectory();
+
     if (!contentChange) {
       FileContent fileContent = null;
-      int inputId = -1;
       for (ID<?, ?> indexId : fileIsDirectory ? myIndicesForDirectories : myNotRequiringContentIndices) {
         if (getInputFilter(indexId).acceptInput(file)) {
-          try {
-            if (fileContent == null) {
-              fileContent = new FileContentImpl(file);
-              inputId = Math.abs(getFileId(file));
+          if (fileContent == null) {
+            fileContent = new FileContentImpl(file);
+            if (fileId < 0) {
+              fileId = -fileId;
             }
-            updateSingleIndex(indexId, file, inputId, fileContent);
           }
-          catch (StorageException e) {
-            LOG.info(e);
-            requestRebuild(indexId);
-          }
+          updateSingleIndex(indexId, file, fileId, fileContent);
         }
       }
     }
@@ -1828,9 +1776,10 @@ public class FileBasedIndexImpl extends FileBasedIndex {
         myChangedFilesCollector.removeScheduledFileFromUpdate(file);
       }
       else {
+        int finalFileId = fileId;
         myFileTypeManager.freezeFileTypeTemporarilyIn(file, () -> {
           final List<ID<?, ?>> candidates = getAffectedIndexCandidates(file);
-          int fileId = getIdMaskingNonIdBasedFile(file);
+
           //noinspection ForLoopReplaceableByForEach
           boolean scheduleForUpdate = false;
 
@@ -1838,13 +1787,13 @@ public class FileBasedIndexImpl extends FileBasedIndex {
           for (int i = 0, size = candidates.size(); i < size; ++i) {
             final ID<?, ?> indexId = candidates.get(i);
             if (needsFileContentLoading(indexId) && getInputFilter(indexId).acceptInput(file)) {
-              getIndex(indexId).resetIndexedStateForFile(fileId);
+              getIndex(indexId).resetIndexedStateForFile(finalFileId);
               scheduleForUpdate = true;
             }
           }
 
           if (scheduleForUpdate) {
-            IndexingStamp.flushCache(fileId);
+            IndexingStamp.flushCache(finalFileId);
             myChangedFilesCollector.scheduleForUpdate(file);
           }
 
@@ -1858,8 +1807,16 @@ public class FileBasedIndexImpl extends FileBasedIndex {
 
   private final class ChangedFilesCollector extends IndexedFilesListener {
     private final ConcurrentIntObjectMap<VirtualFile> myFilesToUpdate = ContainerUtil.createConcurrentIntObjectMap();
+    private final VfsEventsMerger myVfsEventsMerger = new VfsEventsMerger();
+    private final Phaser myWorkersFinishedSync = new Phaser() {
+      @Override
+      protected boolean onAdvance(int phase, int registeredParties) {
+        return false;
+      }
+    };
 
-    private final ManagingFS myManagingFS = ManagingFS.getInstance();
+    private final ExecutorService myVfsEventsExecutor = AppExecutorUtil.createBoundedApplicationPoolExecutor("vfs event processor", 1);
+    private final AtomicInteger myScheduledVfsEventsWorkers = new AtomicInteger();
 
     @Override
     protected void buildIndicesForFileRecursively(@NotNull VirtualFile file, boolean contentChange) {
@@ -1870,7 +1827,6 @@ public class FileBasedIndexImpl extends FileBasedIndex {
 
       super.buildIndicesForFileRecursively(file, contentChange);
 
-      IndexingStamp.flushCaches();
       if (!contentChange) {
         if (myUpdatingFiles.decrementAndGet() == 0) {
           ++myFilesModCount;
@@ -1879,7 +1835,7 @@ public class FileBasedIndexImpl extends FileBasedIndex {
     }
 
     @Override
-    protected void iterateIndexableFiles(VirtualFile file, ContentIterator iterator) {
+    protected void iterateIndexableFiles(@NotNull VirtualFile file, @NotNull ContentIterator iterator) {
       for (IndexableFileSet set : myIndexableSets) {
         if (set.isInSet(file)) {
           set.iterateIndexableFilesIn(file, iterator);
@@ -1888,25 +1844,15 @@ public class FileBasedIndexImpl extends FileBasedIndex {
     }
 
     @Override
-    protected void buildIndicesForFile(VirtualFile file, boolean contentChange) {
-      scheduleFileForIndexing(file, contentChange);
+    protected void buildIndicesForFile(@NotNull VirtualFile file, boolean contentChange) {
+      int fileId = getIdMaskingNonIdBasedFile(file);
+      myVfsEventsMerger.recordFileEvent(fileId, file, contentChange);
     }
 
     @Override
-    protected boolean invalidateIndicesForFile(VirtualFile file, boolean contentChange) {
-      if (isUnderConfigOrSystem(file)) {
-        return false;
-      }
-      if (file.isDirectory()) {
-        doInvalidateIndicesForFile(file, contentChange);
-        if (!isMock(file) && !myManagingFS.wereChildrenAccessed(file)) {
-          return false;
-        }
-      }
-      else {
-        doInvalidateIndicesForFile(file, contentChange);
-      }
-      return true;
+    protected void doInvalidateIndicesForFile(@NotNull VirtualFile file, boolean contentChange) {
+      final int fileId = Math.abs(getIdMaskingNonIdBasedFile(file));
+      myVfsEventsMerger.recordBeforeFileEvent(fileId, file, contentChange);
     }
 
     void scheduleForUpdate(VirtualFile file) {
@@ -1938,7 +1884,12 @@ public class FileBasedIndexImpl extends FileBasedIndex {
       }
     }
 
-    public Collection<VirtualFile> getAllFilesToUpdate() {
+    private void removeFileIdFromFilesScheduledForUpdate(int fileId) {
+      myFilesToUpdate.remove(fileId);
+    }
+
+    Collection<VirtualFile> getAllFilesToUpdate() {
+      ensureUpToDate();
       if (myFilesToUpdate.isEmpty()) {
         return Collections.emptyList();
       }
@@ -1947,9 +1898,6 @@ public class FileBasedIndexImpl extends FileBasedIndex {
 
     @Override
     public void before(@NotNull List<? extends VFileEvent> events) {
-      myContentlessIndicesUpdateQueue.signalUpdateStart();
-      myContentlessIndicesUpdateQueue.ensureUpToDate();
-
       for (VFileEvent event : events) {
         if (memoryStorageCleaningNeeded(event)) {
           cleanupMemoryStorage();
@@ -1968,10 +1916,82 @@ public class FileBasedIndexImpl extends FileBasedIndex {
 
     @Override
     public void after(@NotNull List<? extends VFileEvent> events) {
-      myContentlessIndicesUpdateQueue.ensureUpToDate();
-
       super.after(events);
-      myContentlessIndicesUpdateQueue.signalUpdateEnd();
+
+      if (myInitialized) ensureUpToDateAsync();
+    }
+
+    boolean isScheduledForUpdate(VirtualFile file) {
+      return myFilesToUpdate.containsKey(Math.abs(getIdMaskingNonIdBasedFile(file)));
+    }
+
+    public void ensureUpToDate() {
+      //assert ApplicationManager.getApplication().isReadAccessAllowed() || ShutDownTracker.isShutdownHookRunning();
+      waitUntilIndicesAreInitialized();
+      
+      ApplicationManager.getApplication().runReadAction(this::processFilesInReadAction);
+    }
+
+    void ensureUpToDateAsync() {
+      if (myVfsEventsMerger.getApproximateChangesCount() >= 20 &&
+          myScheduledVfsEventsWorkers.get() == 0 &&
+          !PowerSaveMode.isEnabled()) {
+        myScheduledVfsEventsWorkers.incrementAndGet();
+        myVfsEventsExecutor.submit(this::processFilesInReadActionWithYieldingToWriteAction);
+
+        if (!ApplicationManager.getApplication().isHeadlessEnvironment()) {  // avoid synchronous ensureUpToDate to prevent deadlock
+          for(Project project:ProjectManager.getInstance().getOpenProjects()) {
+            DumbServiceImpl dumbService = DumbServiceImpl.getInstance(project);
+            DumbModeTask task = FileBasedIndexProjectHandler.createChangedFilesIndexingTask(project);
+  
+            if (task != null) {
+              dumbService.queueTask(task);
+            }
+          }
+        }
+      }
+    }
+
+    private void processFilesInReadAction() {
+      assert ApplicationManager.getApplication().isReadAccessAllowed();
+      myWorkersFinishedSync.register();
+      int phase = myWorkersFinishedSync.getPhase();
+      try {
+        myVfsEventsMerger.processChanges(info -> {
+          myWriteLock.lock();
+          try {
+            ProgressManager.getInstance().executeNonCancelableSection(() -> {
+              int fileId = info.getFileId();
+              VirtualFile file = info.getFile();
+              if (info.isBeforeContentChanged()) FileBasedIndexImpl.this.doInvalidateIndicesForFile(fileId, file, true);
+              if (info.isContentChanged()) scheduleFileForIndexing(fileId, file, true);
+              if (info.isFileRemoved()) FileBasedIndexImpl.this.doInvalidateIndicesForFile(fileId, file, false);
+              if (info.isFileAdded()) scheduleFileForIndexing(fileId, file, false);
+            });
+          }
+          finally {
+            IndexingStamp.flushCache(info.getFileId());
+            myWriteLock.unlock();
+          }
+          return true;
+        });
+      } finally {
+        myWorkersFinishedSync.arriveAndDeregister();
+      }
+      myWorkersFinishedSync.awaitAdvance(phase);
+    }
+
+    private void processFilesInReadActionWithYieldingToWriteAction() {
+      try {
+        while (myVfsEventsMerger.hasChanges()) {
+          if (!ProgressIndicatorUtils.runInReadActionWithWriteActionPriority(this::processFilesInReadAction)) {
+            ProgressIndicatorUtils.yieldToPendingWriteActions();
+          }
+        }
+      }
+      finally {
+        myScheduledVfsEventsWorkers.decrementAndGet();
+      }
     }
   }
 
@@ -1993,7 +2013,7 @@ public class FileBasedIndexImpl extends FileBasedIndex {
     return false;
   }
 
-  private static int getIdMaskingNonIdBasedFile(VirtualFile file) {
+  static int getIdMaskingNonIdBasedFile(@NotNull VirtualFile file) {
     return file instanceof VirtualFileWithId ?((VirtualFileWithId)file).getId() : IndexingStamp.INVALID_FILE_ID;
   }
 
@@ -2001,6 +2021,7 @@ public class FileBasedIndexImpl extends FileBasedIndex {
     private final List<VirtualFile> myFiles = new ArrayList<>();
     @Nullable
     private final ProgressIndicator myProgressIndicator;
+    private final boolean myDoTraceForFilesToBeIndexed = LOG.isDebugEnabled();
 
     private UnindexedFilesFinder(@Nullable ProgressIndicator indicator) {
       myProgressIndicator = indicator;
@@ -2037,73 +2058,69 @@ public class FileBasedIndexImpl extends FileBasedIndex {
 
     @Override
     public boolean processFile(@NotNull final VirtualFile file) {
-      if (!file.isValid()) {
-        return true;
-      }
-      if (file instanceof VirtualFileSystemEntry && ((VirtualFileSystemEntry)file).isFileIndexed()) {
-        return true;
-      }
+      try (AccessToken ignore = ReadAction.start()) {
+        if (!file.isValid()) {
+          return true;
+        }
+        if (file instanceof VirtualFileSystemEntry && ((VirtualFileSystemEntry)file).isFileIndexed()) {
+          return true;
+        }
 
-      if (!(file instanceof VirtualFileWithId)) {
-        return true;
-      }
-      myFileTypeManager.freezeFileTypeTemporarilyIn(file, () -> {
-        boolean oldStuff = true;
-        if (file.isDirectory() || !isTooLarge(file)) {
-          final List<ID<?, ?>> affectedIndexCandidates = getAffectedIndexCandidates(file);
-          //noinspection ForLoopReplaceableByForEach
-          for (int i = 0, size = affectedIndexCandidates.size(); i < size; ++i) {
-            final ID<?, ?> indexId = affectedIndexCandidates.get(i);
-            try {
-              if (needsFileContentLoading(indexId) && shouldIndexFile(file, indexId)) {
-                synchronized (myFiles) {
-                  myFiles.add(file);
+        if (!(file instanceof VirtualFileWithId)) {
+          return true;
+        }
+        myFileTypeManager.freezeFileTypeTemporarilyIn(file, () -> {
+          boolean oldStuff = true;
+          if (file.isDirectory() || !isTooLarge(file)) {
+            final List<ID<?, ?>> affectedIndexCandidates = getAffectedIndexCandidates(file);
+            //noinspection ForLoopReplaceableByForEach
+            for (int i = 0, size = affectedIndexCandidates.size(); i < size; ++i) {
+              final ID<?, ?> indexId = affectedIndexCandidates.get(i);
+              try {
+                if (needsFileContentLoading(indexId) && shouldIndexFile(file, indexId)) {
+                  if (myDoTraceForFilesToBeIndexed) {
+                    LOG.info("Scheduling indexing of " + file + " by request of index " + indexId);
+                  }
+                  synchronized (myFiles) {
+                    myFiles.add(file);
+                  }
+                  oldStuff = false;
+                  break;
                 }
-                oldStuff = false;
-                break;
               }
-            }
-            catch (RuntimeException e) {
-              final Throwable cause = e.getCause();
-              if (cause instanceof IOException || cause instanceof StorageException) {
-                LOG.info(e);
-                requestRebuild(indexId);
-              }
-              else {
-                throw e;
+              catch (RuntimeException e) {
+                final Throwable cause = e.getCause();
+                if (cause instanceof IOException || cause instanceof StorageException) {
+                  LOG.info(e);
+                  requestRebuild(indexId);
+                }
+                else {
+                  throw e;
+                }
               }
             }
           }
-        }
-        FileContent fileContent = null;
-        int inputId = Math.abs(getIdMaskingNonIdBasedFile(file));
-        for (ID<?, ?> indexId : myNotRequiringContentIndices) {
-          if (shouldIndexFile(file, indexId)) {
-            oldStuff = false;
-            try {
+          FileContent fileContent = null;
+          int inputId = Math.abs(getIdMaskingNonIdBasedFile(file));
+          for (ID<?, ?> indexId : myNotRequiringContentIndices) {
+            if (shouldIndexFile(file, indexId)) {
+              oldStuff = false;
               if (fileContent == null) {
                 fileContent = new FileContentImpl(file);
               }
               updateSingleIndex(indexId, file, inputId, fileContent);
             }
-            catch (StorageException e) {
-              LOG.info(e);
-              requestRebuild(indexId);
-            }
           }
-        }
-        IndexingStamp.flushCache(inputId);
+          IndexingStamp.flushCache(inputId);
 
-        if (oldStuff && file instanceof VirtualFileSystemEntry) {
-          ((VirtualFileSystemEntry)file).setFileIndexed(true);
-        }
-      });
+          if (oldStuff && file instanceof VirtualFileSystemEntry) {
+            ((VirtualFileSystemEntry)file).setFileIndexed(true);
+          }
+        });
 
-      if (myProgressIndicator != null && file.isDirectory()) { // once for dir is cheap enough
-        myProgressIndicator.checkCanceled();
-        myProgressIndicator.setText("Scanning files to index");
+        ProgressManager.checkCanceled();
+        return true;
       }
-      return true;
     }
   }
 
@@ -2112,13 +2129,7 @@ public class FileBasedIndexImpl extends FileBasedIndex {
            (isMock(file) || !getIndex(indexId).isIndexedStateForFile(((NewVirtualFile)file).getId(), file));
   }
 
-  private boolean isUnderConfigOrSystem(@NotNull VirtualFile file) {
-    final String filePath = file.getPath();
-    return myConfigPath != null && FileUtil.startsWith(filePath, myConfigPath) ||
-           myLogPath != null && FileUtil.startsWith(filePath, myLogPath);
-  }
-
-  private static boolean isMock(final VirtualFile file) {
+  static boolean isMock(final VirtualFile file) {
     return !(file instanceof NewVirtualFile);
   }
 
@@ -2137,7 +2148,7 @@ public class FileBasedIndexImpl extends FileBasedIndex {
   }
 
   @NotNull
-  public CollectingContentIterator createContentIterator(@Nullable ProgressIndicator indicator) {
+  CollectingContentIterator createContentIterator(@Nullable ProgressIndicator indicator) {
     return new UnindexedFilesFinder(indicator);
   }
 
@@ -2146,34 +2157,31 @@ public class FileBasedIndexImpl extends FileBasedIndex {
     myIndexableSets.add(set);
     myIndexableSetToProjectMap.put(set, project);
     if (project != null) {
-      ((PsiManagerImpl)PsiManager.getInstance(project)).addTreeChangePreprocessor(new PsiTreeChangePreprocessor() {
-        @Override
-        public void treeChanged(@NotNull PsiTreeChangeEventImpl event) {
-          if (event.isGenericChange() &&
-              event.getCode() == PsiTreeChangeEventImpl.PsiEventType.CHILDREN_CHANGED) {
-            PsiFile file = event.getFile();
+      ((PsiManagerImpl)PsiManager.getInstance(project)).addTreeChangePreprocessor(event -> {
+        if (event.isGenericChange() &&
+            event.getCode() == PsiTreeChangeEventImpl.PsiEventType.CHILDREN_CHANGED) {
+          PsiFile file = event.getFile();
 
-            if (file != null) {
-              waitUntilIndicesAreInitialized();
-              VirtualFile virtualFile = file.getVirtualFile();
+          if (file != null) {
+            waitUntilIndicesAreInitialized();
+            VirtualFile virtualFile = file.getVirtualFile();
 
-              if (!clearUpToDateStateForPsiIndicesOfUnsavedDocuments(virtualFile)) {
-                // change in persistent file
-                if (virtualFile instanceof VirtualFileWithId) {
-                  int fileId = ((VirtualFileWithId)virtualFile).getId();
-                  boolean wasIndexed = false;
-                  List<ID<?, ?>> candidates = getAffectedIndexCandidates(virtualFile);
-                  for (ID<?, ?> psiBackedIndex : myPsiDependentIndices) {
-                    if (!candidates.contains(psiBackedIndex)) continue;
-                    if(getInputFilter(psiBackedIndex).acceptInput(virtualFile)) {
-                      getIndex(psiBackedIndex).resetIndexedStateForFile(fileId);
-                      wasIndexed = true;
-                    }
+            if (!clearUpToDateStateForPsiIndicesOfUnsavedDocuments(virtualFile)) {
+              // change in persistent file
+              if (virtualFile instanceof VirtualFileWithId) {
+                int fileId = ((VirtualFileWithId)virtualFile).getId();
+                boolean wasIndexed = false;
+                List<ID<?, ?>> candidates = getAffectedIndexCandidates(virtualFile);
+                for (ID<?, ?> psiBackedIndex : myPsiDependentIndices) {
+                  if (!candidates.contains(psiBackedIndex)) continue;
+                  if(getInputFilter(psiBackedIndex).acceptInput(virtualFile)) {
+                    getIndex(psiBackedIndex).resetIndexedStateForFile(fileId);
+                    wasIndexed = true;
                   }
-                  if (wasIndexed) {
-                    myChangedFilesCollector.scheduleForUpdate(virtualFile);
-                    IndexingStamp.flushCache(fileId);
-                  }
+                }
+                if (wasIndexed) {
+                  myChangedFilesCollector.scheduleForUpdate(virtualFile);
+                  IndexingStamp.flushCache(fileId);
                 }
               }
             }
@@ -2193,9 +2201,9 @@ public class FileBasedIndexImpl extends FileBasedIndex {
       final int fileId = Math.abs(getIdMaskingNonIdBasedFile(file));
       if (!file.isValid()) {
         removeDataFromIndicesForFile(fileId);
-        myChangedFilesCollector.myFilesToUpdate.remove(fileId);
+        myChangedFilesCollector.removeFileIdFromFilesScheduledForUpdate(fileId);
       } else if (getIndexableSetForFile(file) == null) { // todo remove data from indices for removed
-        myChangedFilesCollector.myFilesToUpdate.remove(fileId);
+        myChangedFilesCollector.removeFileIdFromFilesScheduledForUpdate(fileId);
       }
     }
 
@@ -2248,82 +2256,14 @@ public class FileBasedIndexImpl extends FileBasedIndex {
   private static List<Runnable> collectScanRootRunnables(@NotNull final ContentIterator processor,
                                                          @NotNull final Project project,
                                                          final ProgressIndicator indicator) {
-    if (project.isDisposed()) {
-      return Collections.emptyList();
-    }
-
-    List<Runnable> tasks = new ArrayList<>();
-
-    final ProjectFileIndex projectFileIndex = ProjectRootManager.getInstance(project).getFileIndex();
-    tasks.add(() -> projectFileIndex.iterateContent(processor));
-    /*
-    Module[] modules = ModuleManager.getInstance(project).getModules();
-    for(final Module module: modules) {
-      tasks.add(new Runnable() {
-        @Override
-        public void run() {
-          if (module.isDisposed()) return;
-          ModuleRootManager.getInstance(module).getFileIndex().iterateContent(processor);
-        }
-      });
-    }*/
-
-    final Set<VirtualFile> visitedRoots = ContainerUtil.newConcurrentSet();
-    JBIterable<VirtualFile> contributedRoots = JBIterable.empty();
-    for (IndexableSetContributor contributor : Extensions.getExtensions(IndexableSetContributor.EP_NAME)) {
-      //important not to depend on project here, to support per-project background reindex
-      // each client gives a project to FileBasedIndex
-      if (project.isDisposed()) {
-        return tasks;
-      }
-      contributedRoots = contributedRoots.append(IndexableSetContributor.getRootsToIndex(contributor));
-      contributedRoots = contributedRoots.append(IndexableSetContributor.getProjectRootsToIndex(contributor, project));
-    }
-    for (AdditionalLibraryRootsProvider provider : Extensions.getExtensions(AdditionalLibraryRootsProvider.EP_NAME)) {
-      if (project.isDisposed()) {
-        return tasks;
-      }
-      contributedRoots = contributedRoots.append(provider.getAdditionalProjectLibrarySourceRoots(project));
-    }
-    for (VirtualFile root : contributedRoots) {
-      if (visitedRoots.add(root)) {
-        tasks.add(() -> {
-          if (project.isDisposed() || !root.isValid()) return;
-          iterateRecursively(root, processor, indicator, visitedRoots, null);
-        });
-      }
-    }
-
-    // iterate associated libraries
-    for (final Module module : ModuleManager.getInstance(project).getModules()) {
-      OrderEntry[] orderEntries = ModuleRootManager.getInstance(module).getOrderEntries();
-      for (OrderEntry orderEntry : orderEntries) {
-        if (orderEntry instanceof LibraryOrSdkOrderEntry) {
-          if (orderEntry.isValid()) {
-            final LibraryOrSdkOrderEntry entry = (LibraryOrSdkOrderEntry)orderEntry;
-            final VirtualFile[] libSources = entry.getRootFiles(OrderRootType.SOURCES);
-            final VirtualFile[] libClasses = entry.getRootFiles(OrderRootType.CLASSES);
-            for (VirtualFile[] roots : new VirtualFile[][]{libSources, libClasses}) {
-              for (final VirtualFile root : roots) {
-                if (visitedRoots.add(root)) {
-                  tasks.add(() -> {
-                    if (project.isDisposed() || module.isDisposed() || !root.isValid()) return;
-                    iterateRecursively(root, processor, indicator, visitedRoots, projectFileIndex);
-                  });
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-    return tasks;
+    FileBasedIndexScanRunnableCollector collector = FileBasedIndexScanRunnableCollector.getInstance(project);
+    return collector.collectScanRootRunnables(processor, indicator);
   }
 
   private final class DocumentUpdateTask extends UpdateTask<Document> {
     private final ID<?, ?> myIndexId;
 
-    public DocumentUpdateTask(ID<?, ?> indexId) {
+    DocumentUpdateTask(ID<?, ?> indexId) {
       myIndexId = indexId;
     }
 
@@ -2339,7 +2279,9 @@ public class FileBasedIndexImpl extends FileBasedIndex {
     private boolean currentVersionCorrupted;
     private SerializationManagerEx mySerializationManagerEx;
 
-    public FileIndexDataInitialization(FileBasedIndexExtension[] extensions) {
+    FileIndexDataInitialization(FileBasedIndexExtension[] extensions) {
+      // init contentless indices first
+      Arrays.sort(extensions, Comparator.comparingInt(o -> (o.dependsOnFileContent() ? 1 : 0)));
       for (FileBasedIndexExtension<?, ?> extension : extensions) {
         ID<?, ?> name = extension.getName();
         RebuildStatus.registerIndex(name);
@@ -2360,9 +2302,11 @@ public class FileBasedIndexImpl extends FileBasedIndex {
         addNestedInitializationTask(() -> {
           try {
             versionChanged.compareAndSet(false, registerIndexer(extension, state));
-          } catch (IOException io) {
+          }
+          catch (IOException io) {
             throw io;
-          } catch (Throwable t) {
+          }
+          catch (Throwable t) {
             PluginManager.handleComponentError(t, extension.getClass().getName(), null);
           }
         });
@@ -2421,13 +2365,11 @@ public class FileBasedIndexImpl extends FileBasedIndex {
           }
         }
 
-        myConnection.subscribe(VirtualFileManager.VFS_CHANGES, myChangedFilesCollector);
-
         registerIndexableSet(new AdditionalIndexableFileSet(), null);
         return state;
       }
       finally {
-        ShutDownTracker.getInstance().registerShutdownTask(() -> performShutdown());
+        ShutDownTracker.getInstance().registerShutdownTask(FileBasedIndexImpl.this::performShutdown);
         saveRegisteredIndicesAndDropUnregisteredOnes(state.getIndexIDs());
 
         myFlushingFuture = FlushingDaemon.everyFiveSeconds(new Runnable() {

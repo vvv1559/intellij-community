@@ -52,6 +52,9 @@ import java.util.List;
 import java.util.Set;
 
 /**
+ * Describes step of compilation process which produces JVM *.class files from files in production/test source roots of a Java module. These
+ * targets are built by {@link ModuleLevelBuilder} and they are the only targets which can have circular dependencies on each other.
+ *
  * @author nik
  */
 public final class ModuleBuildTarget extends JVMModuleBuildTarget<JavaSourceRootDescriptor> {
@@ -73,7 +76,7 @@ public final class ModuleBuildTarget extends JVMModuleBuildTarget<JavaSourceRoot
   @NotNull
   @Override
   public Collection<File> getOutputRoots(CompileContext context) {
-    Collection<File> result = new SmartList<File>();
+    Collection<File> result = new SmartList<>();
     final File outputDir = getOutputDir();
     if (outputDir != null) {
       result.add(outputDir);
@@ -106,13 +109,8 @@ public final class ModuleBuildTarget extends JVMModuleBuildTarget<JavaSourceRoot
     if (!isTests()) {
       enumerator.productionOnly();
     }
-    final ArrayList<BuildTarget<?>> dependencies = new ArrayList<BuildTarget<?>>();
-    enumerator.processModules(new Consumer<JpsModule>() {
-      @Override
-      public void consume(JpsModule module) {
-        dependencies.add(new ModuleBuildTarget(module, myTargetType));
-      }
-    });
+    final ArrayList<BuildTarget<?>> dependencies = new ArrayList<>();
+    enumerator.processModules(module -> dependencies.add(new ModuleBuildTarget(module, myTargetType)));
     if (isTests()) {
       dependencies.add(new ModuleBuildTarget(myModule, JavaModuleBuildTargetType.PRODUCTION));
     }
@@ -131,16 +129,14 @@ public final class ModuleBuildTarget extends JVMModuleBuildTarget<JavaSourceRoot
   @NotNull
   @Override
   public List<JavaSourceRootDescriptor> computeRootDescriptors(JpsModel model, ModuleExcludeIndex index, IgnoredFileIndex ignoredFileIndex, BuildDataPaths dataPaths) {
-    List<JavaSourceRootDescriptor> roots = new ArrayList<JavaSourceRootDescriptor>();
+    List<JavaSourceRootDescriptor> roots = new ArrayList<>();
     JavaSourceRootType type = isTests() ? JavaSourceRootType.TEST_SOURCE : JavaSourceRootType.SOURCE;
     Iterable<ExcludedJavaSourceRootProvider> excludedRootProviders = JpsServiceManager.getInstance().getExtensions(ExcludedJavaSourceRootProvider.class);
-    final Set<File> moduleExcludes = new THashSet<File>(FileUtil.FILE_HASHING_STRATEGY);
-    moduleExcludes.addAll(index.getModuleExcludes(myModule));
     final JpsJavaCompilerConfiguration compilerConfig = JpsJavaExtensionService.getInstance().getOrCreateCompilerConfiguration(myModule.getProject());
 
     roots_loop:
     for (JpsTypedModuleSourceRoot<JavaSourceRootProperties> sourceRoot : myModule.getSourceRoots(type)) {
-      if (JpsPathUtil.isUnder(moduleExcludes, sourceRoot.getFile())) {
+      if (index.isExcludedFromModule(sourceRoot.getFile(), myModule)) {
         continue;
       }
       for (ExcludedJavaSourceRootProvider provider : excludedRootProviders) {

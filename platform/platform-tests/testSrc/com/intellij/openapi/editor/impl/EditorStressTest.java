@@ -19,8 +19,10 @@ import com.intellij.openapi.command.WriteCommandAction;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.FoldRegion;
 import com.intellij.openapi.editor.FoldingModel;
+import com.intellij.openapi.editor.Inlay;
 import com.intellij.openapi.editor.ex.DocumentEx;
 import com.intellij.openapi.editor.ex.EditorEx;
+import com.intellij.openapi.util.Disposer;
 
 import javax.swing.*;
 import java.awt.*;
@@ -29,12 +31,14 @@ import java.util.List;
 import java.util.Random;
 
 public class EditorStressTest extends AbstractEditorTest {
-  private static final int ITERATIONS = 10000;
+  private static final int ITERATIONS = 10_000;
   private static final Long SEED_OVERRIDE = null; // set non-null value to run with a specific seed
 
   private static final List<? extends Action> ourActions = Arrays.asList(new AddText("a"),
                                                                          new AddText("\n"),
                                                                          new AddText("\t"),
+                                                                         new AddText(HIGH_SURROGATE),
+                                                                         new AddText(LOW_SURROGATE),
                                                                          new RemoveCharacter(),
                                                                          new MoveCharacter(),
                                                                          new AddFoldRegion(),
@@ -42,22 +46,25 @@ public class EditorStressTest extends AbstractEditorTest {
                                                                          new CollapseFoldRegion(),
                                                                          new ExpandFoldRegion(),
                                                                          new ChangeBulkModeState(),
-                                                                         new ChangeEditorVisibility());
+                                                                         new ChangeEditorVisibility(),
+                                                                         new AddInlay(),
+                                                                         new RemoveInlay(),
+                                                                         new MoveCaret());
 
   private final Random myRandom = new Random() {{
     //noinspection ConstantConditions
-    setSeed(mySeed = (SEED_OVERRIDE == null ? nextLong() : SEED_OVERRIDE));
+    setSeed(mySeed = SEED_OVERRIDE == null ? nextLong() : SEED_OVERRIDE);
   }};
   private long mySeed;
 
   public void testRandomActions() {
-    System.out.println("Seed is " + mySeed);
+    LOG.debug("Seed is " + mySeed);
     int i = 0;
     try {
       initText("");
       configureSoftWraps(10);
       EditorImpl editor = (EditorImpl)myEditor;
-      for (i = 1; i <= ITERATIONS; i++) {
+      for (i = 0; i < ITERATIONS; i++) {
         doRandomAction(editor);
         editor.validateState();
       }
@@ -65,7 +72,7 @@ public class EditorStressTest extends AbstractEditorTest {
     }
     catch (Throwable t) {
       String message = "Failed when run with seed=" + mySeed + " in iteration " + i;
-      System.out.println(message);
+      System.err.println(message);
       throw new RuntimeException(message, t);
     }
   }
@@ -74,6 +81,7 @@ public class EditorStressTest extends AbstractEditorTest {
     ourActions.get(myRandom.nextInt(ourActions.size())).perform(editor, myRandom);
   }
 
+  @FunctionalInterface
   interface Action {
     void perform(EditorEx editor, Random random);
   }
@@ -204,6 +212,30 @@ public class EditorStressTest extends AbstractEditorTest {
       if (document.isInBulkUpdate()) return;
       JViewport viewport = editor.getScrollPane().getViewport();
       viewport.setExtentSize(viewport.getExtentSize().getWidth() == 0 ? new Dimension(1000, 1000) : new Dimension(0, 0));
+    }
+  }
+
+  private static class AddInlay implements Action {
+    @Override
+    public void perform(EditorEx editor, Random random) {
+      addInlay(random.nextInt(editor.getDocument().getTextLength() + 1));
+    }
+  }
+
+  private static class RemoveInlay implements Action {
+    @Override
+    public void perform(EditorEx editor, Random random) {
+      List<Inlay> inlays = myEditor.getInlayModel().getInlineElementsInRange(0, editor.getDocument().getTextLength());
+      if (!inlays.isEmpty()) Disposer.dispose(inlays.get(random.nextInt(inlays.size())));
+    }
+  }
+
+  private static class MoveCaret implements Action {
+    @Override
+    public void perform(EditorEx editor, Random random) {
+      DocumentEx document = editor.getDocument();
+      if (document.isInBulkUpdate()) return;
+      myEditor.getCaretModel().moveToOffset(random.nextInt(document.getTextLength() + 1));
     }
   }
 }

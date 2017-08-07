@@ -75,15 +75,9 @@ public class UnnecessaryBlockStatementInspection extends BaseInspection implemen
 
     @Override
     @NotNull
-    public String getName() {
+    public String getFamilyName() {
       return InspectionGadgetsBundle.message(
         "unnecessary.code.block.unwrap.quickfix");
-    }
-
-    @NotNull
-    @Override
-    public String getFamilyName() {
-      return getName();
     }
 
     @Override
@@ -111,7 +105,7 @@ public class UnnecessaryBlockStatementInspection extends BaseInspection implemen
     public void visitBlockStatement(PsiBlockStatement blockStatement) {
       super.visitBlockStatement(blockStatement);
       if (ignoreSwitchBranches) {
-        final PsiElement prevStatement = PsiTreeUtil.skipSiblingsBackward(blockStatement, PsiWhiteSpace.class);
+        final PsiElement prevStatement = PsiTreeUtil.skipWhitespacesBackward(blockStatement);
         if (prevStatement instanceof PsiSwitchLabelStatement) {
           return;
         }

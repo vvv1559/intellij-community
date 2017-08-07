@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -75,11 +75,30 @@ public abstract class Task implements TaskInfo, Progressive {
 
   /**
    * This callback will be invoked on AWT dispatch thread.
-   *
+   * <p>
    * Callback executed when run() throws an exception (except PCE).
+   *
+   * @deprecated use {@link #onThrowable(Throwable)} instead
    */
+  @Deprecated
+  @SuppressWarnings("DeprecatedIsStillUsed")
   public void onError(@NotNull Exception error) {
     LOG.error(error);
+  }
+
+  /**
+   * This callback will be invoked on AWT dispatch thread.
+   * <p>
+   * Callback executed when run() throws an exception (except PCE).
+   */
+  @SuppressWarnings("deprecation")
+  public void onThrowable(@NotNull Throwable error) {
+    if (error instanceof Exception) {
+      onError((Exception)error);
+    }
+    else {
+      LOG.error(error);
+    }
   }
 
   /**

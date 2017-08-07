@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,6 +25,7 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Pass;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiFile;
 import com.intellij.psi.tree.IElementType;
 import com.intellij.refactoring.IntroduceTargetChooser;
 import com.intellij.util.Function;
@@ -59,7 +60,7 @@ public class ConvertStringToMultilineIntention extends Intention {
   public static final String hint = GroovyIntentionsBundle.message("convert.string.to.multiline.intention.name");
 
   @Override
-  protected void processIntention(@NotNull PsiElement element, final Project project, final Editor editor) throws IncorrectOperationException {
+  protected void processIntention(@NotNull PsiElement element, @NotNull final Project project, final Editor editor) throws IncorrectOperationException {
     final List<GrExpression> expressions;
     if (editor.getSelectionModel().hasSelection()) {
       expressions = Collections.singletonList(((GrExpression)element));
@@ -83,7 +84,7 @@ public class ConvertStringToMultilineIntention extends Intention {
     else {
       final Pass<GrExpression> callback = new Pass<GrExpression>() {
         @Override
-        public void pass(@NotNull final GrExpression selectedValue) {
+        public void pass(final GrExpression selectedValue) {
           invokeImpl(selectedValue, project, editor);
         }
       };
@@ -152,7 +153,7 @@ public class ConvertStringToMultilineIntention extends Intention {
   }
 
   private void invokeImpl(@NotNull final GrExpression element, @NotNull final Project project, @NotNull final Editor editor) {
-    final List<GrLiteral> literals = collectOperands(element, ContainerUtil.<GrLiteral>newArrayList());
+    final List<GrLiteral> literals = collectOperands(element, ContainerUtil.newArrayList());
     if (literals.isEmpty()) return;
 
     final StringBuilder buffer = prepareNewLiteralText(literals);
@@ -244,12 +245,18 @@ public class ConvertStringToMultilineIntention extends Intention {
   protected PsiElementPredicate getElementPredicate() {
     return new PsiElementPredicate() {
       @Override
-      public boolean satisfiedBy(PsiElement element) {
+      public boolean satisfiedBy(@NotNull PsiElement element) {
         return element instanceof GrLiteral && ("\"".equals(GrStringUtil.getStartQuote(element.getText())) ||
                                                 "\'".equals(GrStringUtil.getStartQuote(element.getText())))
                || element instanceof GrBinaryExpression && isAppropriateBinary((GrBinaryExpression)element, null);
       }
     };
+  }
+
+  @Nullable
+  @Override
+  public PsiElement getElementToMakeWritable(@NotNull PsiFile file) {
+    return file;
   }
 
   @Override

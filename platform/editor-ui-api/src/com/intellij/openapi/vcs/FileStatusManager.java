@@ -26,32 +26,21 @@ import java.awt.*;
  * @author mike
  */
 public abstract class FileStatusManager {
-  public static FileStatusManager getInstance(Project project) {
+  public static FileStatusManager getInstance(@NotNull Project project) {
     return project.getComponent(FileStatusManager.class);
   }
 
   public abstract FileStatus getStatus(@NotNull VirtualFile virtualFile);
 
   public abstract void fileStatusesChanged();
+
   public abstract void fileStatusChanged(VirtualFile file);
 
   public abstract void addFileStatusListener(@NotNull FileStatusListener listener);
+
   public abstract void addFileStatusListener(@NotNull FileStatusListener listener, @NotNull Disposable parentDisposable);
+
   public abstract void removeFileStatusListener(@NotNull FileStatusListener listener);
-
-  /**
-   * @deprecated Use getStatus(file).getText()} instead
-   */
-  public String getStatusText(@NotNull VirtualFile file){
-    return getStatus(file).getText();
-  }
-
-  /**
-   * @deprecated Use getStatus(file).getColor()} instead
-   */
-  public Color getStatusColor(@NotNull VirtualFile file){
-    return getStatus(file).getColor();
-  }
 
   public abstract Color getNotChangedDirectoryColor(@NotNull VirtualFile vf);
 }

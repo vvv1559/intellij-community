@@ -42,7 +42,7 @@ import static com.intellij.execution.testframework.sm.runner.GeneralToSMTRunnerE
  */
 public class OutputToGeneralTestEventsConverter implements ProcessOutputConsumer {
   private static final Logger LOG = Logger.getInstance(OutputToGeneralTestEventsConverter.class.getName());
-  private final int CYCLE_BUFFER_SIZE = ConsoleBuffer.getCycleBufferSize();
+  private static final boolean USE_CYCLE_BUFFER = ConsoleBuffer.useCycleBuffer();
 
   private final MyServiceMessageVisitor myServiceMessageVisitor;
   private final String myTestFrameworkName;
@@ -52,9 +52,13 @@ public class OutputToGeneralTestEventsConverter implements ProcessOutputConsumer
   private boolean myPendingLineBreakFlag;
 
   public OutputToGeneralTestEventsConverter(@NotNull String testFrameworkName, @NotNull TestConsoleProperties consoleProperties) {
+    this(testFrameworkName, consoleProperties.isEditable());
+  }
+
+  public OutputToGeneralTestEventsConverter(@NotNull String testFrameworkName, boolean stdinEnabled) {
     myTestFrameworkName = testFrameworkName;
     myServiceMessageVisitor = new MyServiceMessageVisitor();
-    mySplitter = new OutputLineSplitter(consoleProperties.isEditable()) {
+    mySplitter = new OutputLineSplitter(stdinEnabled) {
       @Override
       protected void onLineAvailable(@NotNull String text, @NotNull Key outputType, boolean tcLikeFakeOutput) {
         processConsistentText(text, outputType, tcLikeFakeOutput);
@@ -92,10 +96,11 @@ public class OutputToGeneralTestEventsConverter implements ProcessOutputConsumer
     fireOnUncapturedOutput("\n", ProcessOutputTypes.STDOUT);
   }
 
-  private void processConsistentText(String text, final Key outputType, boolean tcLikeFakeOutput) {
-    if (text.length() > CYCLE_BUFFER_SIZE) {
-      final StringBuilder builder = new StringBuilder(CYCLE_BUFFER_SIZE);
-      builder.append(text, 0, CYCLE_BUFFER_SIZE - 105);
+  protected void processConsistentText(String text, final Key outputType, boolean tcLikeFakeOutput) {
+    final int cycleBufferSize = ConsoleBuffer.getCycleBufferSize();
+    if (USE_CYCLE_BUFFER && text.length() > cycleBufferSize) {
+      final StringBuilder builder = new StringBuilder(cycleBufferSize);
+      builder.append(text, 0, cycleBufferSize - 105);
       builder.append("<...>");
       builder.append(text, text.length() - 100, text.length());
       text = builder.toString();
@@ -228,10 +233,10 @@ public class OutputToGeneralTestEventsConverter implements ProcessOutputConsumer
     }
   }
 
-  private void fireOnSuiteTreeNodeAdded(String testName, String locationHint) {
+  private void fireOnSuiteTreeNodeAdded(String testName, String locationHint, String id, String parentNodeId) {
     final GeneralTestEventsProcessor processor = myProcessor;
     if (processor != null) {
-      processor.onSuiteTreeNodeAdded(testName, locationHint);
+      processor.onSuiteTreeNodeAdded(testName, locationHint, id, parentNodeId);
     }
   }
 
@@ -243,11 +248,11 @@ public class OutputToGeneralTestEventsConverter implements ProcessOutputConsumer
     }
   }
 
-  private void fireOnSuiteTreeStarted(String suiteName, String locationHint) {
+  private void fireOnSuiteTreeStarted(String suiteName, String locationHint, String id, String parentNodeId) {
 
     final GeneralTestEventsProcessor processor = myProcessor;
     if (processor != null) {
-      processor.onSuiteTreeStarted(suiteName, locationHint);
+      processor.onSuiteTreeStarted(suiteName, locationHint, id, parentNodeId);
     }
   }
 
@@ -413,8 +418,8 @@ public class OutputToGeneralTestEventsConverter implements ProcessOutputConsumer
 
       final String durationStr = testFinished.getAttributes().get(ATTR_KEY_TEST_DURATION);
 
-      // Test duration in milliseconds
-      long duration = 0;
+      // Test duration in milliseconds or null if not reported
+      Long duration = null;
 
       if (!StringUtil.isEmptyOrSpaces(durationStr)) {
         duration = convertToLong(durationStr, testFinished);
@@ -510,6 +515,10 @@ public class OutputToGeneralTestEventsConverter implements ProcessOutputConsumer
     public void visitServiceMessage(@NotNull final ServiceMessage msg) {
       final String name = msg.getMessageName();
 
+      if (LOG.isDebugEnabled()) {
+        LOG.debug(msg.asString());
+      }
+
       if (KEY_TESTS_COUNT.equals(name)) {
         processTestCountInSuite(msg);
       }
@@ -532,13 +541,13 @@ public class OutputToGeneralTestEventsConverter implements ProcessOutputConsumer
         fireOnTestFrameworkAttached();
       }
       else if (SUITE_TREE_STARTED.equals(name)) {
-        fireOnSuiteTreeStarted(msg.getAttributes().get("name"), msg.getAttributes().get(ATTR_KEY_LOCATION_URL));
+        fireOnSuiteTreeStarted(msg.getAttributes().get("name"), msg.getAttributes().get(ATTR_KEY_LOCATION_URL), TreeNodeEvent.getNodeId(msg), msg.getAttributes().get("parentNodeId"));
       }
       else if (SUITE_TREE_ENDED.equals(name)) {
         fireOnSuiteTreeEnded(msg.getAttributes().get("name"));
       }
       else if (SUITE_TREE_NODE.equals(name)) {
-        fireOnSuiteTreeNodeAdded(msg.getAttributes().get("name"), msg.getAttributes().get(ATTR_KEY_LOCATION_URL));
+        fireOnSuiteTreeNodeAdded(msg.getAttributes().get("name"), msg.getAttributes().get(ATTR_KEY_LOCATION_URL), TreeNodeEvent.getNodeId(msg), msg.getAttributes().get("parentNodeId"));
       }
       else if (BUILD_TREE_ENDED_NODE.equals(name)) {
         fireOnBuildTreeEnded();

@@ -21,8 +21,6 @@ import com.intellij.lifecycle.PeriodicalTasksCloser;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.progress.*;
-import com.intellij.openapi.project.DumbModePermission;
-import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.io.FileUtil;
@@ -62,22 +60,22 @@ public class RollbackWorker {
                          final boolean deleteLocallyAddedFiles,
                          @Nullable final Runnable afterVcsRefreshInAwt,
                          @Nullable final String localHistoryActionName) {
-    final ChangeListManager changeListManager = ChangeListManager.getInstance(myProject);
-    final Runnable notifier = changeListManager.prepareForChangeDeletion(changes);
-    final Runnable afterRefresh = new Runnable() {
-      public void run() {
-        InvokeAfterUpdateMode updateMode = myInvokedFromModalContext ?
-                                           InvokeAfterUpdateMode.SYNCHRONOUS_CANCELLABLE :
-                                           InvokeAfterUpdateMode.SILENT;
-        changeListManager.invokeAfterUpdate(new Runnable() {
-          public void run() {
-            notifier.run();
-            if (afterVcsRefreshInAwt != null) {
-              afterVcsRefreshInAwt.run();
-            }
-          }
-        }, updateMode, "Refresh changelists after update", ModalityState.current());
-      }
+    ChangeListManagerImpl changeListManager = ChangeListManagerImpl.getInstanceImpl(myProject);
+    Collection<LocalChangeList> affectedChangelists = changeListManager.getInvolvedListsFilterChanges(changes, new ArrayList<>());
+
+    final Runnable afterRefresh = () -> {
+      InvokeAfterUpdateMode updateMode = myInvokedFromModalContext ?
+                                         InvokeAfterUpdateMode.SYNCHRONOUS_CANCELLABLE :
+                                         InvokeAfterUpdateMode.SILENT;
+      changeListManager.invokeAfterUpdate(() -> {
+        for (LocalChangeList list : affectedChangelists) {
+          changeListManager.scheduleAutomaticEmptyChangeListDeletion(list);
+        }
+
+        if (afterVcsRefreshInAwt != null) {
+          afterVcsRefreshInAwt.run();
+        }
+      }, updateMode, "Refresh changelists after update", ModalityState.current());
     };
 
     final Runnable rollbackAction = new MyRollbackRunnable(changes, deleteLocallyAddedFiles, afterRefresh, localHistoryActionName);
@@ -102,14 +100,14 @@ public class RollbackWorker {
       ProgressManager.getInstance().run(new Task.Modal(myProject, myOperationName, true) {
           @Override
           public void run(@NotNull ProgressIndicator indicator) {
-            DumbService.allowStartingDumbModeInside(DumbModePermission.MAY_START_BACKGROUND, rollbackAction);
+            rollbackAction.run();
           }
         });
     }
     else {
       rollbackAction.run();
     }
-    ((ChangeListManagerImpl) changeListManager).showLocalChangesInvalidated();
+    changeListManager.showLocalChangesInvalidated();
   }
 
   private class MyRollbackRunnable implements Runnable {
@@ -184,28 +182,26 @@ public class RollbackWorker {
     private void doRefresh(final Project project, final List<Change> changesToRefresh) {
       final LocalHistoryAction action = LocalHistory.getInstance().startAction(myOperationName);
 
-      final Runnable forAwtThread = new Runnable() {
-        public void run() {
-          action.finish();
-          LocalHistory.getInstance().putSystemLabel(myProject, (myLocalHistoryActionName == null) ?
-                                                                                             myOperationName : myLocalHistoryActionName, -1);
-          final VcsDirtyScopeManager manager = PeriodicalTasksCloser.getInstance().safeGetComponent(project, VcsDirtyScopeManager.class);
-          VcsGuess vcsGuess = new VcsGuess(myProject);
+      final Runnable forAwtThread = () -> {
+        action.finish();
+        LocalHistory.getInstance().putSystemLabel(myProject, (myLocalHistoryActionName == null) ?
+                                                                                           myOperationName : myLocalHistoryActionName, -1);
+        final VcsDirtyScopeManager manager = PeriodicalTasksCloser.getInstance().safeGetComponent(project, VcsDirtyScopeManager.class);
+        VcsGuess vcsGuess = new VcsGuess(myProject);
 
-          for (Change change : changesToRefresh) {
-            final ContentRevision beforeRevision = change.getBeforeRevision();
-            final ContentRevision afterRevision = change.getAfterRevision();
-            if ((!change.isIsReplaced()) && beforeRevision != null && Comparing.equal(beforeRevision, afterRevision)) {
-              manager.fileDirty(beforeRevision.getFile());
-            }
-            else {
-              markDirty(manager, vcsGuess, beforeRevision);
-              markDirty(manager, vcsGuess, afterRevision);
-            }
+        for (Change change : changesToRefresh) {
+          final ContentRevision beforeRevision = change.getBeforeRevision();
+          final ContentRevision afterRevision = change.getAfterRevision();
+          if ((!change.isIsReplaced()) && beforeRevision != null && Comparing.equal(beforeRevision, afterRevision)) {
+            manager.fileDirty(beforeRevision.getFile());
           }
-
-          myAfterRefresh.run();
+          else {
+            markDirty(manager, vcsGuess, beforeRevision);
+            markDirty(manager, vcsGuess, afterRevision);
+          }
         }
+
+        myAfterRefresh.run();
       };
 
       RefreshVFsSynchronously.updateChangesForRollback(changesToRefresh);

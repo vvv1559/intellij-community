@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,7 +15,6 @@
  */
 package com.intellij.openapi.application;
 
-import com.intellij.openapi.util.Computable;
 import com.intellij.openapi.util.ThrowableComputable;
 import com.intellij.util.ThrowableRunnable;
 import org.jetbrains.annotations.NotNull;
@@ -24,13 +23,8 @@ public abstract class ReadAction<T> extends BaseActionRunnable<T> {
   @NotNull
   @Override
   public RunResult<T> execute() {
-    final RunResult<T> result = new RunResult<T>(this);
-    return ApplicationManager.getApplication().runReadAction(new Computable<RunResult<T>>() {
-      @Override
-      public RunResult<T> compute() {
-        return result.run();
-      }
-    });
+    final RunResult<T> result = new RunResult<>(this);
+    return ReadAction.compute(() -> result.run());
   }
 
   public static AccessToken start() {
@@ -41,7 +35,8 @@ public abstract class ReadAction<T> extends BaseActionRunnable<T> {
     AccessToken token = start();
     try {
       action.run();
-    } finally {
+    }
+    finally {
       token.finish();
     }
   }
@@ -50,9 +45,9 @@ public abstract class ReadAction<T> extends BaseActionRunnable<T> {
     AccessToken token = start();
     try {
       return action.compute();
-    } finally {
+    }
+    finally {
       token.finish();
     }
   }
-
 }

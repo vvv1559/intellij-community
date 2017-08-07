@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@
 
 package com.intellij.codeInspection.ex;
 
+import com.intellij.ReviseWhenPortedToJDK;
 import com.intellij.codeInsight.FileModificationService;
 import com.intellij.codeInspection.CommonProblemDescriptor;
 import com.intellij.codeInspection.InspectionManager;
@@ -47,8 +48,8 @@ import com.intellij.psi.PsiDocumentManager;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
 import com.intellij.ui.ClickListener;
-import com.intellij.ui.IdeBorderFactory;
 import com.intellij.util.SequentialModalProgressTask;
+import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.UIUtil;
 import gnu.trove.THashSet;
 import org.jetbrains.annotations.NotNull;
@@ -61,7 +62,7 @@ import java.util.*;
  * @author max
  */
 public class QuickFixAction extends AnAction implements CustomComponentAction {
-  private static final Logger LOG = Logger.getInstance("#" + QuickFixAction.class.getName());
+  private static final Logger LOG = Logger.getInstance(QuickFixAction.class);
 
   public static final QuickFixAction[] EMPTY = new QuickFixAction[0];
   protected final InspectionToolWrapper myToolWrapper;
@@ -115,13 +116,15 @@ public class QuickFixAction extends AnAction implements CustomComponentAction {
   }
 
   @Override
+  @ReviseWhenPortedToJDK("9")
   public void actionPerformed(final AnActionEvent e) {
     final InspectionResultsView view = getInvoker(e);
     final InspectionTree tree = view.getTree();
     try {
       Ref<CommonProblemDescriptor[]> descriptors = Ref.create();
       Set<VirtualFile> readOnlyFiles = new THashSet<>();
-      if (!ProgressManager.getInstance().runProcessWithProgressSynchronously(() -> ReadAction.run(() -> {
+      //TODO revise when jdk9 arrives. Until then this redundant cast is a workaround to compile under jdk9 b169
+      if (!ProgressManager.getInstance().runProcessWithProgressSynchronously((Runnable)() -> ReadAction.run(() -> {
         final ProgressIndicator indicator = ProgressManager.getInstance().getProgressIndicator();
         indicator.setText("Checking problem descriptors...");
         descriptors.set(tree.getSelectedDescriptors(true, readOnlyFiles, false, false));
@@ -158,23 +161,29 @@ public class QuickFixAction extends AnAction implements CustomComponentAction {
 
     try {
       final Set<PsiElement> ignoredElements = new HashSet<>();
-
-      final String templatePresentationText = getTemplatePresentation().getText();
-      assert templatePresentationText != null;
-      CommandProcessor.getInstance().executeCommand(project, () -> {
-        CommandProcessor.getInstance().markCurrentCommandAsGlobal(project);
-        final SequentialModalProgressTask progressTask =
-          new SequentialModalProgressTask(project, templatePresentationText, true);
-        progressTask.setMinIterationTime(200);
-        progressTask.setTask(new PerformFixesTask(project, descriptors, ignoredElements, progressTask, context));
-        ProgressManager.getInstance().run(progressTask);
-      }, templatePresentationText, null);
+      performFixesInBatch(project, descriptors, context, ignoredElements);
 
       refreshViews(project, ignoredElements, myToolWrapper);
     }
     finally { //to make offline view lazy
       if (initial) refManager.inspectionReadActionStarted();
     }
+  }
+
+  protected void performFixesInBatch(@NotNull Project project,
+                                     @NotNull CommonProblemDescriptor[] descriptors,
+                                     @NotNull GlobalInspectionContextImpl context,
+                                     Set<PsiElement> ignoredElements) {
+    final String templatePresentationText = getTemplatePresentation().getText();
+    assert templatePresentationText != null;
+    CommandProcessor.getInstance().executeCommand(project, () -> {
+      CommandProcessor.getInstance().markCurrentCommandAsGlobal(project);
+      final SequentialModalProgressTask progressTask =
+        new SequentialModalProgressTask(project, templatePresentationText, true);
+      progressTask.setMinIterationTime(200);
+      progressTask.setTask(new PerformFixesTask(project, descriptors, ignoredElements, progressTask, context));
+      ProgressManager.getInstance().run(progressTask);
+    }, templatePresentationText, null);
   }
 
   private void doApplyFix(@NotNull final RefEntity[] refElements, @NotNull InspectionResultsView view) {
@@ -223,6 +232,7 @@ public class QuickFixAction extends AnAction implements CustomComponentAction {
     return readOnlyFiles;
   }
 
+  @NotNull
   private static RefEntity[] getSelectedElements(InspectionResultsView view) {
     if (view == null) return new RefElement[0];
     List<RefEntity> selection = new ArrayList<>(Arrays.asList(view.getTree().getSelectedElements()));
@@ -318,7 +328,7 @@ public class QuickFixAction extends AnAction implements CustomComponentAction {
     }.installOn(button);
     JPanel panel = new JPanel();
     panel.setLayout(new BoxLayout(panel, BoxLayout.LINE_AXIS));
-    panel.setBorder(IdeBorderFactory.createEmptyBorder(7, 0, 8, 0));
+    panel.setBorder(JBUI.Borders.empty(7, 0, 8, 0));
     panel.add(button);
     return panel;
   }

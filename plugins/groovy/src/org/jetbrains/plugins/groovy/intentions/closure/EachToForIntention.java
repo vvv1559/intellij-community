@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -64,7 +64,7 @@ public class EachToForIntention extends Intention {
   }
 
   @Override
-  protected void processIntention(@NotNull PsiElement element, Project project, Editor editor) throws IncorrectOperationException {
+  protected void processIntention(@NotNull PsiElement element, @NotNull Project project, Editor editor) throws IncorrectOperationException {
     final GrMethodCallExpression expression = (GrMethodCallExpression)element;
     final GrClosableBlock block = expression.getClosureArguments()[0];
     final GrParameterList parameterList = block.getParameterList();
@@ -133,39 +133,39 @@ public class EachToForIntention extends Intention {
       private int myLoops = 0;
 
       @Override
-      public void visitReturnStatement(GrReturnStatement returnStatement) {
+      public void visitReturnStatement(@NotNull GrReturnStatement returnStatement) {
         if (returnStatement.getReturnValue() != null) return;
 
         if (myLoops > 0) needLabel.set(true);
       }
 
       @Override
-      public void visitLabeledStatement(GrLabeledStatement labeledStatement) {
+      public void visitLabeledStatement(@NotNull GrLabeledStatement labeledStatement) {
         super.visitLabeledStatement(labeledStatement);
         usedLabels.add(labeledStatement.getName());
       }
 
       @Override
-      public void visitForStatement(GrForStatement forStatement) {
+      public void visitForStatement(@NotNull GrForStatement forStatement) {
         myLoops++;
         super.visitForStatement(forStatement);
         myLoops--;
       }
 
       @Override
-      public void visitWhileStatement(GrWhileStatement whileStatement) {
+      public void visitWhileStatement(@NotNull GrWhileStatement whileStatement) {
         myLoops++;
         super.visitWhileStatement(whileStatement);
         myLoops--;
       }
 
       @Override
-      public void visitClosure(GrClosableBlock closure) {
+      public void visitClosure(@NotNull GrClosableBlock closure) {
         //don't go into closures
       }
 
       @Override
-      public void visitAnonymousClassDefinition(GrAnonymousClassDefinition anonymousClassDefinition) {
+      public void visitAnonymousClassDefinition(@NotNull GrAnonymousClassDefinition anonymousClassDefinition) {
         //don't go into anonymous
       }
     });
@@ -202,19 +202,19 @@ public class EachToForIntention extends Intention {
 
     body.accept(new GroovyRecursiveElementVisitor() {
       @Override
-      public void visitReturnStatement(GrReturnStatement returnStatement) {
+      public void visitReturnStatement(@NotNull GrReturnStatement returnStatement) {
         if (returnStatement.getReturnValue() == null) {
           returnStatement.replaceWithStatement(continueStatement);
         }
       }
 
       @Override
-      public void visitClosure(GrClosableBlock closure) {
+      public void visitClosure(@NotNull GrClosableBlock closure) {
         //don't go into closures
       }
 
       @Override
-      public void visitAnonymousClassDefinition(GrAnonymousClassDefinition anonymousClassDefinition) {
+      public void visitAnonymousClassDefinition(@NotNull GrAnonymousClassDefinition anonymousClassDefinition) {
         //don't go into anonymous
       }
     });
@@ -224,7 +224,7 @@ public class EachToForIntention extends Intention {
 
   private static class EachToForPredicate implements PsiElementPredicate {
     @Override
-    public boolean satisfiedBy(PsiElement element) {
+    public boolean satisfiedBy(@NotNull PsiElement element) {
       if (element instanceof GrMethodCallExpression) {
         final GrMethodCallExpression expression = (GrMethodCallExpression)element;
 //        final PsiElement parent = expression.getParent();

@@ -18,6 +18,7 @@ package com.intellij.designer.propertyTable.renderers;
 import com.intellij.ui.JBColor;
 import com.intellij.ui.SimpleColoredComponent;
 import com.intellij.util.ui.EmptyIcon;
+import org.jetbrains.annotations.NotNull;
 
 import java.awt.*;
 
@@ -32,6 +33,19 @@ public final class ColorIcon extends EmptyIcon {
   public ColorIcon(int size, int colorSize) {
     super(size, size);
     myColorSize = colorSize;
+  }
+
+  protected ColorIcon(ColorIcon icon) {
+    super(icon);
+    myColorSize = icon.myColorSize;
+    myColor = icon.myColor;
+    myShowRedLine = icon.myShowRedLine;
+  }
+
+  @Override
+  @NotNull
+  protected ColorIcon copy() {
+    return new ColorIcon(this);
   }
 
   public Color getColor() {
@@ -58,22 +72,22 @@ public final class ColorIcon extends EmptyIcon {
                  iconWidth + coloredComponent.getIpad().left + coloredComponent.getIconTextGap(), component.getHeight());
     }
 
-    int x = left + (iconWidth - myColorSize) / 2;
-    int y = top + (iconHeight - myColorSize) / 2;
+    int x = left + (iconWidth - scaleVal(myColorSize)) / 2;
+    int y = top + (iconHeight - scaleVal(myColorSize)) / 2;
 
     g.setColor(myColor);
-    g.fillRect(x, y, myColorSize, myColorSize);
+    g.fillRect(x, y, scaleVal(myColorSize), scaleVal(myColorSize));
 
     if (myShowRedLine) {
       Graphics2D g2d = (Graphics2D)g;
       Object hint = g2d.getRenderingHint(RenderingHints.KEY_ANTIALIASING);
       g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
       g.setColor(JBColor.red);
-      g.drawLine(x, y + myColorSize, x + myColorSize, y);
+      g.drawLine(x, y + scaleVal(myColorSize), x + scaleVal(myColorSize), y);
       g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, hint);
     }
 
     g.setColor(Color.BLACK);
-    g.drawRect(x, y, myColorSize, myColorSize);
+    g.drawRect(x, y, scaleVal(myColorSize), scaleVal(myColorSize));
   }
 }

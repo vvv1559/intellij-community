@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -36,6 +36,7 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.DefaultJDOMExternalizer;
 import com.intellij.openapi.util.InvalidDataException;
 import com.intellij.openapi.util.WriteExternalException;
+import com.intellij.openapi.util.text.StringUtil;
 import org.jdom.Element;
 import org.jetbrains.annotations.NotNull;
 
@@ -43,12 +44,11 @@ import java.util.Collection;
 
 public class RemoteConfiguration extends ModuleBasedConfiguration<JavaRunConfigurationModule>
                                  implements RunConfigurationWithSuppressedDefaultRunAction, RemoteRunProfile {
-
   @Override
   public void writeExternal(final Element element) throws WriteExternalException {
     super.writeExternal(element);
-    final Module module = getConfigurationModule().getModule();
-    if (module != null) { // default value
+    final String moduleName = getConfigurationModule().getModuleName();
+    if (!StringUtil.isEmpty(moduleName)) { // default value
       writeModule(element);
     }
     DefaultJDOMExternalizer.writeExternal(this, element);
@@ -100,6 +100,4 @@ public class RemoteConfiguration extends ModuleBasedConfiguration<JavaRunConfigu
   public Collection<Module> getValidModules() {
     return getAllModules();
   }
-
-
 }

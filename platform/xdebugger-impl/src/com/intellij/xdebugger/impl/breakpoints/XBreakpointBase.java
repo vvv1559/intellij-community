@@ -15,6 +15,7 @@
  */
 package com.intellij.xdebugger.impl.breakpoints;
 
+import com.intellij.icons.AllIcons;
 import com.intellij.openapi.actionSystem.ActionGroup;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.components.ComponentSerializationUtil;
@@ -29,7 +30,8 @@ import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.pom.Navigatable;
 import com.intellij.ui.ColorUtil;
 import com.intellij.ui.JBColor;
-import com.intellij.util.StringBuilderSpinAllocator;
+import com.intellij.ui.LayeredIcon;
+import com.intellij.util.ui.JBUI;
 import com.intellij.util.xmlb.SkipDefaultValuesSerializationFilters;
 import com.intellij.util.xmlb.XmlSerializer;
 import com.intellij.xdebugger.XDebugSession;
@@ -43,6 +45,7 @@ import com.intellij.xdebugger.breakpoints.XBreakpointType;
 import com.intellij.xdebugger.impl.DebuggerSupport;
 import com.intellij.xdebugger.impl.XDebugSessionImpl;
 import com.intellij.xdebugger.impl.XDebuggerSupport;
+import com.intellij.xdebugger.impl.XDebuggerUtilImpl;
 import com.intellij.xdebugger.impl.actions.EditBreakpointAction;
 import com.intellij.xml.CommonXmlStrings;
 import com.intellij.xml.util.XmlStringUtil;
@@ -71,6 +74,7 @@ public class XBreakpointBase<Self extends XBreakpoint<P>, P extends XBreakpointP
   private XExpression myCondition;
   private boolean myLogExpressionEnabled = true;
   private XExpression myLogExpression;
+  private volatile boolean myDisposed;
 
   public XBreakpointBase(final XBreakpointType<Self, P> type, XBreakpointManagerImpl breakpointManager, final @Nullable P properties, final S state) {
     myState = state;
@@ -290,6 +294,7 @@ public class XBreakpointBase<Self extends XBreakpoint<P>, P extends XBreakpointP
     myState.setDependencyState(state);
   }
 
+  @Nullable
   public String getGroup() {
     return myState.getGroup();
   }
@@ -306,7 +311,16 @@ public class XBreakpointBase<Self extends XBreakpoint<P>, P extends XBreakpointP
     myState.setDescription(StringUtil.nullize(description));
   }
 
-  public void dispose() {
+  public final void dispose() {
+    myDisposed = true;
+    doDispose();
+  }
+
+  protected void doDispose() {
+  }
+
+  public boolean isDisposed() {
+    return myDisposed;
   }
 
   @Override
@@ -325,79 +339,82 @@ public class XBreakpointBase<Self extends XBreakpoint<P>, P extends XBreakpointP
 
   @NotNull
   public String getDescription() {
-    @NonNls StringBuilder builder = StringBuilderSpinAllocator.alloc();
-    try {
-      builder.append(CommonXmlStrings.HTML_START).append(CommonXmlStrings.BODY_START);
-      builder.append(XBreakpointUtil.getDisplayText(this));
+    @NonNls StringBuilder builder = new StringBuilder();
+    builder.append(CommonXmlStrings.HTML_START).append(CommonXmlStrings.BODY_START);
+    builder.append(XBreakpointUtil.getDisplayText(this));
 
-      String errorMessage = getErrorMessage();
-      if (!StringUtil.isEmpty(errorMessage)) {
-        builder.append(BR_NBSP);
-        builder.append("<font color='#").append(ColorUtil.toHex(JBColor.RED)).append("'>");
-        builder.append(errorMessage);
-        builder.append("</font>");
-      }
-
-      if (getSuspendPolicy() == SuspendPolicy.NONE) {
-        builder.append(BR_NBSP).append(XDebuggerBundle.message("xbreakpoint.tooltip.suspend.policy.none"));
-      }
-      else if (getType().isSuspendThreadSupported()) {
-        builder.append(BR_NBSP);
-        //noinspection EnumSwitchStatementWhichMissesCases
-        switch (getSuspendPolicy()) {
-          case ALL:
-            builder.append(XDebuggerBundle.message("xbreakpoint.tooltip.suspend.policy.all"));
-            break;
-          case THREAD:
-            builder.append(XDebuggerBundle.message("xbreakpoint.tooltip.suspend.policy.thread"));
-            break;
-        }
-      }
-
-      String condition = getCondition();
-      if (!StringUtil.isEmpty(condition)) {
-        builder.append(BR_NBSP);
-        builder.append(XDebuggerBundle.message("xbreakpoint.tooltip.condition"));
-        builder.append(CommonXmlStrings.NBSP);
-        builder.append(XmlStringUtil.escapeString(condition));
-      }
-
-      if (isLogMessage()) {
-        builder.append(BR_NBSP).append(XDebuggerBundle.message("xbreakpoint.tooltip.log.message"));
-      }
-
-      String logExpression = getLogExpression();
-      if (!StringUtil.isEmpty(logExpression)) {
-        builder.append(BR_NBSP);
-        builder.append(XDebuggerBundle.message("xbreakpoint.tooltip.log.expression"));
-        builder.append(CommonXmlStrings.NBSP);
-        builder.append(XmlStringUtil.escapeString(logExpression));
-      }
-
-      XBreakpoint<?> masterBreakpoint = getBreakpointManager().getDependentBreakpointManager().getMasterBreakpoint(this);
-      if (masterBreakpoint != null) {
-        builder.append(BR_NBSP);
-        String str = XDebuggerBundle.message("xbreakpoint.tooltip.depends.on");
-        builder.append(str);
-        builder.append(CommonXmlStrings.NBSP);
-        builder.append(XBreakpointUtil.getShortText(masterBreakpoint));
-      }
-
-      builder.append(CommonXmlStrings.BODY_END).append(CommonXmlStrings.HTML_END);
-      return builder.toString();
+    String errorMessage = getErrorMessage();
+    if (!StringUtil.isEmpty(errorMessage)) {
+      builder.append(BR_NBSP);
+      builder.append("<font color='#").append(ColorUtil.toHex(JBColor.RED)).append("'>");
+      builder.append(errorMessage);
+      builder.append("</font>");
     }
-    finally {
-      StringBuilderSpinAllocator.dispose(builder);
+
+    if (getSuspendPolicy() == SuspendPolicy.NONE) {
+      builder.append(BR_NBSP).append(XDebuggerBundle.message("xbreakpoint.tooltip.suspend.policy.none"));
     }
+    else if (getType().isSuspendThreadSupported()) {
+      builder.append(BR_NBSP);
+      //noinspection EnumSwitchStatementWhichMissesCases
+      switch (getSuspendPolicy()) {
+        case ALL:
+          builder.append(XDebuggerBundle.message("xbreakpoint.tooltip.suspend.policy.all"));
+          break;
+        case THREAD:
+          builder.append(XDebuggerBundle.message("xbreakpoint.tooltip.suspend.policy.thread"));
+          break;
+      }
+    }
+
+    String condition = getCondition();
+    if (!StringUtil.isEmpty(condition)) {
+      builder.append(BR_NBSP);
+      builder.append(XDebuggerBundle.message("xbreakpoint.tooltip.condition"));
+      builder.append(CommonXmlStrings.NBSP);
+      builder.append(XmlStringUtil.escapeString(condition));
+    }
+
+    if (isLogMessage()) {
+      builder.append(BR_NBSP).append(XDebuggerBundle.message("xbreakpoint.tooltip.log.message"));
+    }
+
+    String logExpression = getLogExpression();
+    if (!StringUtil.isEmpty(logExpression)) {
+      builder.append(BR_NBSP);
+      builder.append(XDebuggerBundle.message("xbreakpoint.tooltip.log.expression"));
+      builder.append(CommonXmlStrings.NBSP);
+      builder.append(XmlStringUtil.escapeString(logExpression));
+    }
+
+    XBreakpoint<?> masterBreakpoint = getBreakpointManager().getDependentBreakpointManager().getMasterBreakpoint(this);
+    if (masterBreakpoint != null) {
+      builder.append(BR_NBSP);
+      String str = XDebuggerBundle.message("xbreakpoint.tooltip.depends.on");
+      builder.append(str);
+      builder.append(CommonXmlStrings.NBSP);
+      builder.append(XBreakpointUtil.getShortText(masterBreakpoint));
+    }
+
+    builder.append(CommonXmlStrings.BODY_END).append(CommonXmlStrings.HTML_END);
+    return builder.toString();
   }
 
   protected void updateIcon() {
     final Icon icon = calculateSpecialIcon();
-    myIcon = icon != null ? icon : getType().getEnabledIcon();
+    setIcon(icon != null ? icon : getType().getEnabledIcon());
   }
 
   protected void setIcon(Icon icon) {
-    myIcon = icon;
+    if (!XDebuggerUtilImpl.isEmptyExpression(getConditionExpression())) {
+      LayeredIcon newIcon = new LayeredIcon(2);
+      newIcon.setIcon(icon, 0);
+      newIcon.setIcon(AllIcons.Debugger.Question_badge, 1, 10, 6);
+      myIcon = JBUI.scale(newIcon);
+    }
+    else {
+      myIcon = icon;
+    }
   }
 
   @Nullable

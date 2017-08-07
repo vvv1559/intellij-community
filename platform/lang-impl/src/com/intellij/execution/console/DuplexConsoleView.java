@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -34,6 +34,7 @@ import com.intellij.openapi.editor.actions.ToggleUseSoftWrapsToolbarAction;
 import com.intellij.openapi.project.DumbAware;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.text.StringUtil;
+import com.intellij.openapi.wm.IdeFocusManager;
 import com.intellij.util.ArrayUtil;
 import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NonNls;
@@ -116,7 +117,9 @@ public class DuplexConsoleView<S extends ConsoleView, T extends ConsoleView> ext
     CardLayout cl = (CardLayout)(getLayout());
     cl.show(this, primary ? PRIMARY_CONSOLE_PANEL : SECONDARY_CONSOLE_PANEL);
 
-    getSubConsoleView(primary).getComponent().requestFocus();
+    IdeFocusManager.getGlobalInstance().doWhenFocusSettlesDown(() -> {
+      IdeFocusManager.getGlobalInstance().requestFocus(getSubConsoleView(primary).getComponent(), true);
+    });
 
     myPrimary = primary;
   }
@@ -182,23 +185,23 @@ public class DuplexConsoleView<S extends ConsoleView, T extends ConsoleView> ext
   }
 
   @Override
-  public void performWhenNoDeferredOutput(Runnable runnable) {
+  public void performWhenNoDeferredOutput(@NotNull Runnable runnable) {
   }
 
   @Override
-  public void setHelpId(String helpId) {
+  public void setHelpId(@NotNull String helpId) {
     myPrimaryConsoleView.setHelpId(helpId);
     mySecondaryConsoleView.setHelpId(helpId);
   }
 
   @Override
-  public void addMessageFilter(Filter filter) {
+  public void addMessageFilter(@NotNull Filter filter) {
     myPrimaryConsoleView.addMessageFilter(filter);
     mySecondaryConsoleView.addMessageFilter(filter);
   }
 
   @Override
-  public void printHyperlink(String hyperlinkText, HyperlinkInfo info) {
+  public void printHyperlink(@NotNull String hyperlinkText, HyperlinkInfo info) {
     myPrimaryConsoleView.printHyperlink(hyperlinkText, info);
     mySecondaryConsoleView.printHyperlink(hyperlinkText, info);
   }

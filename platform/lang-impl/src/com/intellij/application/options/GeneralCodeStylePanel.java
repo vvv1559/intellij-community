@@ -130,10 +130,9 @@ public class GeneralCodeStylePanel extends CodeStyleAbstractPanel {
       ApplicationBundle.message("settings.code.style.general.formatter.marker.title"), true));
     myMarkerOptionsPanel.setBorder(
       IdeBorderFactory.createTitledBorder(ApplicationBundle.message("settings.code.style.general.formatter.marker.options.title"), true));
-    myPanel.setBorder(JBUI.Borders.empty(10, 10));
+    myPanel.setBorder(JBUI.Borders.empty(0, 10));
     myScrollPane = ScrollPaneFactory.createScrollPane(null, true);
     myScrollPane.setViewport(new GradientViewport(myPanel, JBUI.insetsTop(5), true));
-    myScrollPane.getVerticalScrollBar().setUnitIncrement(JBUI.scale(10));
 
     myAdditionalSettingsPanel.setLayout(new VerticalFlowLayout(true, true));
     myAdditionalSettingsPanel.removeAll();
@@ -179,7 +178,7 @@ public class GeneralCodeStylePanel extends CodeStyleAbstractPanel {
 
   @Override
   protected String getPreviewText() {
-    return "";
+    return null;
   }
 
 
@@ -224,7 +223,6 @@ public class GeneralCodeStylePanel extends CodeStyleAbstractPanel {
   private static String getTagText(JTextField field, String defaultValue) {
     String fieldText = field.getText();
     if (StringUtil.isEmpty(field.getText())) {
-      field.setText(defaultValue);
       return defaultValue;
     }
     return fieldText;

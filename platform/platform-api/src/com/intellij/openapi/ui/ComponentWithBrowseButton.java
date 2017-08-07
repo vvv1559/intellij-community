@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,17 +26,17 @@ import com.intellij.openapi.fileChooser.FileChooserDescriptor;
 import com.intellij.openapi.keymap.KeymapUtil;
 import com.intellij.openapi.project.DumbAwareAction;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.util.Disposer;
+import com.intellij.openapi.util.IconLoader;
 import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.openapi.wm.IdeFocusManager;
 import com.intellij.ui.GuiUtils;
 import com.intellij.ui.UIBundle;
 import com.intellij.util.ui.UIUtil;
 import com.intellij.util.ui.accessibility.ScreenReader;
-import com.intellij.util.ui.update.LazyUiDisposable;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -92,11 +92,16 @@ public class ComponentWithBrowseButton<Comp extends JComponent> extends JPanel i
   }
 
   public void setTextFieldPreferredWidth(final int charCount) {
-    final Comp comp = getChildComponent();
+    JComponent comp = getChildComponent();
     Dimension size = GuiUtils.getSizeByChars(charCount, comp);
     comp.setPreferredSize(size);
-    final Dimension preferredSize = myBrowseButton.getPreferredSize();
-    setPreferredSize(new Dimension(size.width + preferredSize.width + 2, UIUtil.isUnderAquaLookAndFeel() ? preferredSize.height : preferredSize.height + 2));
+    Dimension preferredSize = myBrowseButton.getPreferredSize();
+
+    boolean keepHeight = UIUtil.isUnderAquaLookAndFeel() || UIUtil.isUnderWin10LookAndFeel();
+    preferredSize.setSize(size.width + preferredSize.width + 2,
+                          keepHeight ? preferredSize.height : preferredSize.height + 2);
+
+    setPreferredSize(preferredSize);
   }
 
   @Override
@@ -113,10 +118,11 @@ public class ComponentWithBrowseButton<Comp extends JComponent> extends JPanel i
 
   public void setButtonIcon(Icon icon) {
     myBrowseButton.setIcon(icon);
+    myBrowseButton.setDisabledIcon(IconLoader.getDisabledIcon(icon));
   }
 
   /**
-   * Adds specified <code>listener</code> to the browse button.
+   * Adds specified {@code listener} to the browse button.
    */
   public void addActionListener(ActionListener listener){
     myBrowseButton.addActionListener(listener);
@@ -131,42 +137,46 @@ public class ComponentWithBrowseButton<Comp extends JComponent> extends JPanel i
                                       @Nullable Project project,
                                       FileChooserDescriptor fileChooserDescriptor,
                                       TextComponentAccessor<Comp> accessor) {
-    addBrowseFolderListener(title, description, project, fileChooserDescriptor, accessor, true);
+    addActionListener(new BrowseFolderActionListener<>(title, description, this, project, fileChooserDescriptor, accessor));
   }
 
+  /**
+   * @deprecated use {@link #addBrowseFolderListener(String, String, Project, FileChooserDescriptor, TextComponentAccessor)} instead
+   */
+  @Deprecated
   public void addBrowseFolderListener(@Nullable @Nls(capitalization = Nls.Capitalization.Title) String title,
                                       @Nullable @Nls(capitalization = Nls.Capitalization.Sentence) String description,
                                       @Nullable Project project,
                                       FileChooserDescriptor fileChooserDescriptor,
                                       TextComponentAccessor<Comp> accessor, boolean autoRemoveOnHide) {
-    addBrowseFolderListener(project, new BrowseFolderActionListener<>(title, description, this, project, fileChooserDescriptor, accessor), autoRemoveOnHide);
+    addBrowseFolderListener(title, description, project, fileChooserDescriptor, accessor);
   }
 
+  /**
+   * @deprecated use {@link #addActionListener(ActionListener)} instead
+   */
+  @Deprecated
+  @SuppressWarnings("UnusedParameters")
   public void addBrowseFolderListener(@Nullable Project project, final BrowseFolderActionListener<Comp> actionListener) {
-    addBrowseFolderListener(project, actionListener, true);
+    addActionListener(actionListener);
   }
 
+  /**
+   * @deprecated use {@link #addActionListener(ActionListener)} instead
+   */
+  @Deprecated
+  @SuppressWarnings("UnusedParameters")
   public void addBrowseFolderListener(@Nullable Project project, final BrowseFolderActionListener<Comp> actionListener, boolean autoRemoveOnHide) {
-    if (autoRemoveOnHide) {
-      new LazyUiDisposable<ComponentWithBrowseButton<Comp>>(null, this, this) {
-        @Override
-        protected void initialize(@NotNull Disposable parent, @NotNull ComponentWithBrowseButton<Comp> child, @Nullable Project project) {
-          addActionListener(actionListener);
-          Disposer.register(child, new Disposable() {
-            @Override
-            public void dispose() {
-              removeActionListener(actionListener);
-            }
-          });
-        }
-      };
-    } else {
-      addActionListener(actionListener);
-    }
+    addActionListener(actionListener);
   }
 
   @Override
-  public void dispose() { }
+  public void dispose() {
+    ActionListener[] listeners = myBrowseButton.getActionListeners();
+    for (ActionListener listener : listeners) {
+      myBrowseButton.removeActionListener(listener);
+    }
+  }
 
   public FixedSizeButton getButton() {
     return myBrowseButton;
@@ -298,7 +308,8 @@ public class ComponentWithBrowseButton<Comp extends JComponent> extends JPanel i
 
   @Override
   public final void requestFocus() {
-    myComponent.requestFocus();
+    IdeFocusManager.getGlobalInstance().doWhenFocusSettlesDown(() ->
+      IdeFocusManager.getGlobalInstance().requestFocus(myComponent, true));
   }
 
   @SuppressWarnings("deprecation")

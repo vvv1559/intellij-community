@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,7 +15,6 @@
  */
 package com.intellij.remoteServer.impl.runtime.ui;
 
-import com.intellij.openapi.components.AbstractProjectComponent;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.startup.StartupManager;
 import com.intellij.openapi.wm.ToolWindow;
@@ -23,20 +22,21 @@ import com.intellij.openapi.wm.ToolWindowAnchor;
 import com.intellij.openapi.wm.ToolWindowManager;
 import com.intellij.remoteServer.configuration.RemoteServer;
 import com.intellij.remoteServer.configuration.RemoteServerListener;
-import icons.RemoteServersIcons;
 import org.jetbrains.annotations.NotNull;
 
-public abstract class ServersToolWindowManager extends AbstractProjectComponent {
+import javax.swing.*;
 
+public abstract class ServersToolWindowManager {
+  @NotNull private final Project myProject;
   private final String myWindowId;
+  private final Icon myIcon;
 
-  public ServersToolWindowManager(final Project project, String windowId) {
-    super(project);
+  public ServersToolWindowManager(@NotNull Project project, String windowId, Icon icon) {
+    myProject = project;
     myWindowId = windowId;
-  }
+    myIcon = icon;
 
-  public void projectOpened() {
-    StartupManager.getInstance(myProject).registerPostStartupActivity(() -> setupListeners());
+    StartupManager.getInstance(project).registerPostStartupActivity(() -> setupListeners());
   }
 
   public void setupListeners() {
@@ -82,7 +82,7 @@ public abstract class ServersToolWindowManager extends AbstractProjectComponent 
 
   private ToolWindow createToolWindow(Project project, ToolWindowManager toolWindowManager) {
     ToolWindow toolWindow = toolWindowManager.registerToolWindow(myWindowId, false, ToolWindowAnchor.BOTTOM);
-    toolWindow.setIcon(RemoteServersIcons.ServersToolWindow);
+    toolWindow.setIcon(myIcon);
     getFactory().createToolWindowContent(project, toolWindow);
     return toolWindow;
   }

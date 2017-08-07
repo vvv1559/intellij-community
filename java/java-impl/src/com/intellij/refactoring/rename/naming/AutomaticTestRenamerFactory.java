@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2010 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,12 +20,14 @@ import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleUtilCore;
 import com.intellij.psi.PsiClass;
 import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiTypeParameter;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.psi.search.PsiShortNamesCache;
 import com.intellij.refactoring.JavaRefactoringSettings;
 import com.intellij.refactoring.RefactoringBundle;
 import com.intellij.usageView.UsageInfo;
 import com.intellij.util.containers.HashSet;
+import org.jetbrains.annotations.NotNull;
 
 import java.util.Collection;
 import java.util.regex.Pattern;
@@ -34,14 +36,9 @@ import java.util.regex.Pattern;
  * @author yole
  */
 public class AutomaticTestRenamerFactory implements AutomaticRenamerFactory {
-  public boolean isApplicable(final PsiElement element) {
-    if (element instanceof PsiClass) {
-      final String qualifiedName = ((PsiClass)element).getQualifiedName();
-      if (qualifiedName != null) {
-        return !qualifiedName.endsWith("Test") && !qualifiedName.endsWith("TestCase");
-      }
-    }
-    return false;
+  public boolean isApplicable(@NotNull final PsiElement element) {
+    if (element instanceof PsiTypeParameter) return false;
+    return element instanceof PsiClass && TestFrameworks.detectFramework((PsiClass)element) == null;
   }
 
   public String getOptionName() {
@@ -67,29 +64,26 @@ public class AutomaticTestRenamerFactory implements AutomaticRenamerFactory {
       if (module != null) {
         final GlobalSearchScope moduleScope = GlobalSearchScope.moduleWithDependentsScope(module);
 
-        appendTestClass(aClass, "Test", moduleScope);
-        appendTestClass(aClass, "TestCase", moduleScope);
+        PsiShortNamesCache cache = PsiShortNamesCache.getInstance(aClass.getProject());
 
-        suggestAllNames(aClass.getName(), newClassName);
-      }
-    }
+        String klassName = aClass.getName();
+        Pattern pattern = Pattern.compile(".*" + klassName + ".*");
 
-    private void appendTestClass(PsiClass aClass, String testSuffix, final GlobalSearchScope moduleScope) {
-      PsiShortNamesCache cache = PsiShortNamesCache.getInstance(aClass.getProject());
-
-      String klassName = aClass.getName();
-      Pattern pattern = Pattern.compile(".*" + klassName + ".*" + testSuffix);
-
-      HashSet<String> names = new HashSet<>();
-      cache.getAllClassNames(names);
-      for (String eachName : names) {
-        if (pattern.matcher(eachName).matches()) {
-          for (PsiClass eachClass : cache.getClassesByName(eachName, moduleScope)) {
-            if (TestFrameworks.getInstance().isTestClass(eachClass)) {
-              myElements.add(eachClass);
+        HashSet<String> names = new HashSet<>();
+        cache.getAllClassNames(names);
+        int count = 0;
+        for (String eachName : names) {
+          if (pattern.matcher(eachName).matches()) {
+            if (count ++ > 1000) break;
+            for (PsiClass eachClass : cache.getClassesByName(eachName, moduleScope)) {
+              if (TestFrameworks.detectFramework(eachClass) != null) {
+                myElements.add(eachClass);
+              }
             }
           }
         }
+
+        suggestAllNames(aClass.getName(), newClassName);
       }
     }
 

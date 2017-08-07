@@ -1,5 +1,5 @@
 /*
- * Copyright 2008-2015 Bas Leijdekkers
+ * Copyright 2008-2017 Bas Leijdekkers
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,13 +24,13 @@ import com.intellij.psi.search.searches.ReferencesSearch;
 import com.intellij.psi.search.searches.SuperMethodsSearch;
 import com.intellij.psi.tree.IElementType;
 import com.intellij.psi.util.InheritanceUtil;
-import com.intellij.psi.util.MethodSignatureBackedByPsiMethod;
 import com.intellij.psi.util.PsiTreeUtil;
+import com.intellij.psi.util.PsiTypesUtil;
 import com.intellij.psi.util.PsiUtil;
 import com.intellij.util.ArrayUtil;
-import com.intellij.util.Processor;
 import com.intellij.util.Query;
 import com.siyeh.HardcodedMethodConstants;
+import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -84,6 +84,9 @@ public class WeakestTypeFinder {
         (PsiMethodCallExpression)facade.getElementFactory().createExpressionFromText(methodCallText, resourceVariable.getParent());
       if (!findWeakestType(methodCallExpression, weakestTypeClasses)) {
         return Collections.emptyList();
+      }
+      if (weakestTypeClasses.isEmpty()) {
+        weakestTypeClasses.add(lowerBoundClass);
       }
     }
     else {
@@ -156,17 +159,7 @@ public class WeakestTypeFinder {
         checkClass(javaLangIterableClass, weakestTypeClasses);
       }
       else if (referenceParent instanceof PsiReturnStatement) {
-        final PsiElement owner = PsiTreeUtil.getParentOfType(referenceParent, PsiMethod.class, PsiLambdaExpression.class);
-        final PsiType type;
-        if (owner instanceof PsiMethod) {
-          type = ((PsiMethod)owner).getReturnType();
-        }
-        else if (owner instanceof PsiLambdaExpression) {
-          type = LambdaUtil.getFunctionalInterfaceReturnType((PsiLambdaExpression)owner);
-        }
-        else {
-          return Collections.emptyList();
-        }
+        final PsiType type = PsiTypesUtil.getMethodReturnType(referenceParent);
         if (!checkType(type, weakestTypeClasses)) {
           return Collections.emptyList();
         }
@@ -536,6 +529,7 @@ public class WeakestTypeFinder {
     return false;
   }
 
+  @Contract("null, _ -> false")
   private static boolean checkType(@Nullable PsiType type, @NotNull Collection<PsiClass> weakestTypeClasses) {
     if (!(type instanceof PsiClassType)) {
       return false;

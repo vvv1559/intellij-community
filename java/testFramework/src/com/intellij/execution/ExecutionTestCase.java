@@ -132,7 +132,9 @@ public abstract class ExecutionTestCase extends IdeaTestCase {
   protected void tearDown() throws Exception {
     if (myCompilerTester != null) {
       myCompilerTester.tearDown();
+      myCompilerTester = null;
     }
+    myChecker = null;
     EdtTestUtil.runInEdtAndWait(() -> super.tearDown());
     //myChecker.checkValid(getTestProjectJdk());
     //probably some thread is destroyed right now because of log exception
@@ -168,7 +170,7 @@ public abstract class ExecutionTestCase extends IdeaTestCase {
   }
 
   public void waitProcess(@NotNull final ProcessHandler processHandler) {
-    Alarm alarm = new Alarm(Alarm.ThreadToUse.SHARED_THREAD, getTestRootDisposable());
+    Alarm alarm = new Alarm(Alarm.ThreadToUse.POOLED_THREAD, getTestRootDisposable());
 
     final boolean[] isRunning = {true};
     alarm.addRequest(() -> {
@@ -189,7 +191,7 @@ public abstract class ExecutionTestCase extends IdeaTestCase {
   }
 
   public void waitFor(Runnable r) {
-    Alarm alarm = new Alarm(Alarm.ThreadToUse.SHARED_THREAD, getTestRootDisposable());
+    Alarm alarm = new Alarm(Alarm.ThreadToUse.POOLED_THREAD, getTestRootDisposable());
     final Thread thread = Thread.currentThread();
 
     final boolean[] isRunning = {true};

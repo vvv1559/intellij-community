@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -120,7 +120,6 @@ public class IdeaPluginDescriptorImpl implements IdeaPluginDescriptor {
    * @deprecated 
    * use {@link JDOMUtil#internElement(Element, StringInterner)}
    */
-  @SuppressWarnings("unused")
   @Deprecated
   public static void internJDOMElement(@NotNull Element rootElement) {
   }
@@ -131,7 +130,7 @@ public class IdeaPluginDescriptorImpl implements IdeaPluginDescriptor {
       return null;
     }
 
-    List<Element> result = new SmartList<Element>();
+    List<Element> result = new SmartList<>();
     for (Element extensionsRoot : elements) {
       for (Element element : extensionsRoot.getChildren()) {
         JDOMUtil.internElement(element, interner);
@@ -185,10 +184,7 @@ public class IdeaPluginDescriptorImpl implements IdeaPluginDescriptor {
     catch (FileNotFoundException e) {
       throw e;
     }
-    catch (IOException e) {
-      throw new InvalidDataException(e);
-    }
-    catch (JDOMException e) {
+    catch (IOException | JDOMException e) {
       throw new InvalidDataException(e);
     }
   }
@@ -196,7 +192,6 @@ public class IdeaPluginDescriptorImpl implements IdeaPluginDescriptor {
   // used in upsource
   protected void readExternal(@NotNull Element element) {
     final PluginBean pluginBean = XmlSerializer.deserialize(element, PluginBean.class);
-
     url = pluginBean.url;
     myName = pluginBean.name;
     String idString = pluginBean.id;
@@ -242,10 +237,10 @@ public class IdeaPluginDescriptorImpl implements IdeaPluginDescriptor {
     }
 
     // preserve items order as specified in xml (filterBadPlugins will not fail if module comes first)
-    Set<PluginId> dependentPlugins = new LinkedHashSet<PluginId>();
-    Set<PluginId> optionalDependentPlugins = new LinkedHashSet<PluginId>();
+    Set<PluginId> dependentPlugins = new LinkedHashSet<>();
+    Set<PluginId> optionalDependentPlugins = new LinkedHashSet<>();
     if (pluginBean.dependencies != null) {
-      myOptionalConfigs = new THashMap<PluginId, String>();
+      myOptionalConfigs = new THashMap<>();
       for (PluginDependency dependency : pluginBean.dependencies) {
         String text = dependency.pluginId;
         if (!StringUtil.isEmpty(text)) {
@@ -351,7 +346,6 @@ public class IdeaPluginDescriptorImpl implements IdeaPluginDescriptor {
     return myChangeNotes;
   }
 
-  @NotNull
   @Override
   public String getName() {
     return myName;
@@ -421,7 +415,7 @@ public class IdeaPluginDescriptorImpl implements IdeaPluginDescriptor {
   @NotNull
   public List<File> getClassPath() {
     if (myPath.isDirectory()) {
-      final List<File> result = new ArrayList<File>();
+      final List<File> result = new ArrayList<>();
       final File classesDir = new File(myPath, "classes");
 
       if (classesDir.exists()) {

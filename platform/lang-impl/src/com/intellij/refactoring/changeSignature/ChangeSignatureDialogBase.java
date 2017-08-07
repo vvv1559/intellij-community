@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,7 +22,6 @@ import com.intellij.openapi.actionSystem.CustomShortcutSet;
 import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Document;
-import com.intellij.openapi.editor.event.DocumentAdapter;
 import com.intellij.openapi.editor.event.DocumentEvent;
 import com.intellij.openapi.editor.event.DocumentListener;
 import com.intellij.openapi.fileTypes.LanguageFileType;
@@ -48,6 +47,7 @@ import com.intellij.ui.treeStructure.Tree;
 import com.intellij.util.Alarm;
 import com.intellij.util.Consumer;
 import com.intellij.util.IJSwingUtilities;
+import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.UIUtil;
 import com.intellij.util.ui.table.JBListTable;
 import com.intellij.util.ui.table.JBTableRowEditor;
@@ -139,6 +139,7 @@ public abstract class ChangeSignatureDialogBase<ParamInfo extends ParameterInfo,
 
     setTitle(ChangeSignatureHandler.REFACTORING_NAME);
     init();
+    PsiDocumentManager.getInstance(project).commitAllDocuments();
     doUpdateSignature();
     Disposer.register(myDisposable, new Disposable() {
       @Override
@@ -304,7 +305,7 @@ public abstract class ChangeSignatureDialogBase<ParamInfo extends ParameterInfo,
     if (myMethod.canChangeParameters()) {
       final JPanel parametersPanel = createParametersPanel(!panels.isEmpty());
       if (!panels.isEmpty()) {
-        parametersPanel.setBorder(IdeBorderFactory.createEmptyBorder());
+        parametersPanel.setBorder(JBUI.Borders.empty());
       }
       subPanel.add(parametersPanel, BorderLayout.CENTER);
     }
@@ -337,7 +338,7 @@ public abstract class ChangeSignatureDialogBase<ParamInfo extends ParameterInfo,
     bottom.add(optionsPanel, BorderLayout.NORTH);
     bottom.add(createSignaturePanel(), BorderLayout.SOUTH);
     main.add(bottom, BorderLayout.SOUTH);
-    main.setBorder(IdeBorderFactory.createEmptyBorder(5, 0, 0, 0));
+    main.setBorder(JBUI.Borders.emptyTop(5));
     return main;
   }
 
@@ -425,7 +426,7 @@ public abstract class ChangeSignatureDialogBase<ParamInfo extends ParameterInfo,
 
       @Override
       public Component prepareEditor(final TableCellEditor editor, final int row, final int column) {
-        final DocumentAdapter listener = new DocumentAdapter() {
+        final DocumentListener listener = new DocumentListener() {
           @Override
           public void documentChanged(DocumentEvent e) {
             final TableCellEditor ed = myParametersTable.getCellEditor();
@@ -596,7 +597,8 @@ public abstract class ChangeSignatureDialogBase<ParamInfo extends ParameterInfo,
     final Runnable updateRunnable = () -> {
       if (myDisposed) return;
       myUpdateSignatureAlarm.cancelAllRequests();
-      myUpdateSignatureAlarm.addRequest(() -> updateSignatureAlarmFired(), 100, ModalityState.stateForComponent(mySignatureArea));
+      myUpdateSignatureAlarm.addRequest(() ->
+        PsiDocumentManager.getInstance(myProject).performLaterWhenAllCommitted(() -> updateSignatureAlarmFired()), 100, ModalityState.stateForComponent(mySignatureArea));
     };
     //noinspection SSBasedInspection
     SwingUtilities.invokeLater(updateRunnable);
@@ -608,7 +610,7 @@ public abstract class ChangeSignatureDialogBase<ParamInfo extends ParameterInfo,
   }
 
   private void doUpdateSignature() {
-    PsiDocumentManager.getInstance(myProject).commitAllDocuments();
+    LOG.assertTrue(!PsiDocumentManager.getInstance(myProject).hasUncommitedDocuments());
     mySignatureArea.setSignature(calculateSignature());
   }
 
@@ -672,11 +674,6 @@ public abstract class ChangeSignatureDialogBase<ParamInfo extends ParameterInfo,
     @Override
     public void tableChanged(TableModelEvent e) {
       update();
-    }
-
-    //---ignored
-    @Override
-    public void beforeDocumentChange(DocumentEvent event) {
     }
   }
 

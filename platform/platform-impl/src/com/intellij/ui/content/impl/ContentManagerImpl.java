@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -30,8 +30,6 @@ import com.intellij.openapi.wm.IdeFocusManager;
 import com.intellij.openapi.wm.ex.IdeFocusTraversalPolicy;
 import com.intellij.ui.components.panels.NonOpaquePanel;
 import com.intellij.ui.content.*;
-import com.intellij.ui.switcher.SwitchProvider;
-import com.intellij.ui.switcher.SwitchTarget;
 import com.intellij.util.EventDispatcher;
 import com.intellij.util.SmartList;
 import com.intellij.util.ui.UIUtil;
@@ -43,8 +41,12 @@ import javax.swing.*;
 import java.awt.*;
 import java.beans.PropertyChangeEvent;
 import java.beans.PropertyChangeListener;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
+
+import static com.intellij.openapi.wm.IdeFocusManager.getGlobalInstance;
 
 /**
  * @author Anton Katilin
@@ -94,7 +96,7 @@ public class ContentManagerImpl implements ContentManager, PropertyChangeListene
     if (myComponent == null) {
       myComponent = new MyNonOpaquePanel();
 
-      MyContentComponent contentComponent = new MyContentComponent();
+      NonOpaquePanel contentComponent = new NonOpaquePanel();
       contentComponent.setContent(myUI.getComponent());
       contentComponent.setFocusCycleRoot(true);
 
@@ -137,31 +139,6 @@ public class ContentManagerImpl implements ContentManager, PropertyChangeListene
 
       DataProvider provider = DataManager.getDataProvider(this);
       return provider == null ? null : provider.getData(dataId);
-    }
-  }
-
-  private class MyContentComponent extends NonOpaquePanel implements SwitchProvider {
-    @Override
-    public List<SwitchTarget> getTargets(boolean onlyVisible, boolean originalProvider) {
-      if (myUI instanceof SwitchProvider) {
-        return ((SwitchProvider)myUI).getTargets(onlyVisible, false);
-      }
-      return Collections.emptyList();
-    }
-
-    @Override
-    public SwitchTarget getCurrentTarget() {
-      return myUI instanceof SwitchProvider ? ((SwitchProvider)myUI).getCurrentTarget() : null;
-    }
-
-    @Override
-    public JComponent getComponent() {
-      return myUI instanceof SwitchProvider ? myUI.getComponent() : this;
-    }
-
-    @Override
-    public boolean isCycleRoot() {
-      return myUI instanceof SwitchProvider && ((SwitchProvider)myUI).isCycleRoot();
     }
   }
 
@@ -588,22 +565,22 @@ public class ContentManagerImpl implements ContentManager, PropertyChangeListene
   }
 
 
-  private void fireContentAdded(Content content, int newIndex) {
+  private void fireContentAdded(@NotNull Content content, int newIndex) {
     ContentManagerEvent e = new ContentManagerEvent(this, content, newIndex, ContentManagerEvent.ContentOperation.add);
     myDispatcher.getMulticaster().contentAdded(e);
   }
 
-  private void fireContentRemoved(Content content, int oldIndex) {
+  private void fireContentRemoved(@NotNull Content content, int oldIndex) {
     ContentManagerEvent e = new ContentManagerEvent(this, content, oldIndex, ContentManagerEvent.ContentOperation.remove);
     myDispatcher.getMulticaster().contentRemoved(e);
   }
 
-  private void fireSelectionChanged(Content content, ContentManagerEvent.ContentOperation operation) {
+  private void fireSelectionChanged(@NotNull Content content, ContentManagerEvent.ContentOperation operation) {
     ContentManagerEvent e = new ContentManagerEvent(this, content, getIndexOfContent(content), operation);
     myDispatcher.getMulticaster().selectionChanged(e);
   }
 
-  private boolean fireContentRemoveQuery(Content content, int oldIndex, ContentManagerEvent.ContentOperation operation) {
+  private boolean fireContentRemoveQuery(@NotNull Content content, int oldIndex, ContentManagerEvent.ContentOperation operation) {
     ContentManagerEvent event = new ContentManagerEvent(this, content, oldIndex, operation);
     for (ContentManagerListener listener : myDispatcher.getListeners()) {
       listener.contentRemoveQuery(event);
@@ -639,7 +616,9 @@ public class ContentManagerImpl implements ContentManager, PropertyChangeListene
     JComponent toFocus = computeWillFocusComponent(toSelect);
 
     if (toFocus != null) {
-      toFocus.requestFocus();
+      getGlobalInstance().doWhenFocusSettlesDown(() -> {
+        getGlobalInstance().requestFocus(toFocus, true);
+      });
     }
 
     return ActionCallback.DONE;

@@ -23,7 +23,9 @@ import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.fileEditor.FileEditorManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiFile;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 /**
  * @author Bas Leijdekkers
@@ -47,16 +49,10 @@ public class EqualsAndHashcode extends EqualsAndHashcodeBase {
 
     @NotNull
     @Override
-    public String getName() {
+    public String getFamilyName() {
       return myHasEquals
              ? InspectionsBundle.message("inspection.equals.hashcode.generate.hashcode.quickfix")
              : InspectionsBundle.message("inspection.equals.hashcode.generate.equals.quickfix");
-    }
-
-    @NotNull
-    @Override
-    public String getFamilyName() {
-      return getName();
     }
 
     @Override
@@ -67,6 +63,17 @@ public class EqualsAndHashcode extends EqualsAndHashcodeBase {
       }
       final PsiElement element = descriptor.getPsiElement();
       new GenerateEqualsHandler().invoke(project, editor, element.getContainingFile());
+    }
+
+    @Nullable
+    @Override
+    public PsiElement getElementToMakeWritable(@NotNull PsiFile currentFile) {
+      return currentFile;
+    }
+
+    @Override
+    public boolean startInWriteAction() {
+      return false;
     }
   }
 }

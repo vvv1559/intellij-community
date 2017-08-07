@@ -18,7 +18,6 @@ package com.intellij.openapi.vcs.changes.actions;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.CommonDataKeys;
-import com.intellij.openapi.actionSystem.PlatformDataKeys;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.project.DumbAware;
 import com.intellij.openapi.project.Project;
@@ -45,18 +44,16 @@ public class RefreshAction extends AnAction implements DumbAware {
     FileDocumentManager.getInstance().saveAllDocuments();
     invokeCustomRefreshes(project);
 
-    VirtualFileManager.getInstance().asyncRefresh(new Runnable() {
-      public void run() {
-        // already called in EDT or under write action
-        if (!project.isDisposed()) {
-          VcsDirtyScopeManager.getInstance(project).markEverythingDirty();
-        }
+    VirtualFileManager.getInstance().asyncRefresh(() -> {
+      // already called in EDT or under write action
+      if (!project.isDisposed()) {
+        VcsDirtyScopeManager.getInstance(project).markEverythingDirty();
       }
     });
   }
 
   private static void invokeCustomRefreshes(@NotNull Project project) {
-    ChangesViewRefresher[] extensions = ChangesViewRefresher.EP_NAME.getExtensions();
+    ChangesViewRefresher[] extensions = ChangesViewRefresher.EP_NAME.getExtensions(project);
     for (ChangesViewRefresher refresher : extensions) {
       refresher.refresh(project);
     }

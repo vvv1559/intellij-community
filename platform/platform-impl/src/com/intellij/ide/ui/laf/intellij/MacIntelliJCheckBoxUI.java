@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@
 package com.intellij.ide.ui.laf.intellij;
 
 import com.intellij.util.ui.EmptyIcon;
+import com.intellij.util.ui.JBUI;
 
 import javax.swing.*;
 import javax.swing.plaf.ComponentUI;
@@ -25,7 +26,7 @@ import java.awt.*;
  * @author Konstantin Bulenkov
  */
 public class MacIntelliJCheckBoxUI extends IntelliJCheckBoxUI {
-  public static final Icon DEFAULT_ICON = EmptyIcon.create(20);
+  public static final Icon DEFAULT_ICON = JBUI.scale(EmptyIcon.create(20));
 
   public MacIntelliJCheckBoxUI(JCheckBox c) {
     c.setOpaque(false);
@@ -41,10 +42,6 @@ public class MacIntelliJCheckBoxUI extends IntelliJCheckBoxUI {
     String iconName = isIndeterminate(b) ? "checkBoxIndeterminate" : "checkBox";
     Icon icon = MacIntelliJIconCache.getIcon(iconName, selected || isIndeterminate(b), c.hasFocus(), b.isEnabled());
     icon.paintIcon(c, g, iconRect.x, iconRect.y);
-  }
-
-  private static boolean isIndeterminate(JCheckBox checkBox) {
-    return "indeterminate".equals(checkBox.getClientProperty("JButton.selectedState"));
   }
 
   @Override

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,6 +17,8 @@ package com.intellij.openapi.editor.impl;
 
 import com.intellij.injected.editor.DocumentWindow;
 import com.intellij.openapi.Disposable;
+import com.intellij.openapi.actionSystem.DataContext;
+import com.intellij.openapi.application.Application;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ModalityStateListener;
 import com.intellij.openapi.application.impl.LaterInvocator;
@@ -25,6 +27,11 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.EditorFactory;
+import com.intellij.openapi.editor.EditorKind;
+import com.intellij.openapi.editor.actionSystem.*;
+import com.intellij.openapi.editor.colors.EditorColorsListener;
+import com.intellij.openapi.editor.colors.EditorColorsManager;
+import com.intellij.openapi.editor.colors.EditorColorsScheme;
 import com.intellij.openapi.editor.event.EditorEventMulticaster;
 import com.intellij.openapi.editor.event.EditorFactoryEvent;
 import com.intellij.openapi.editor.event.EditorFactoryListener;
@@ -35,16 +42,19 @@ import com.intellij.openapi.editor.impl.event.EditorEventMulticasterImpl;
 import com.intellij.openapi.fileTypes.FileType;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectManager;
-import com.intellij.openapi.project.ProjectManagerAdapter;
+import com.intellij.openapi.project.impl.ProjectLifecycleListener;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.util.ArrayUtil;
 import com.intellij.util.EventDispatcher;
 import com.intellij.util.SmartList;
 import com.intellij.util.containers.ContainerUtil;
+import com.intellij.util.messages.MessageBus;
+import com.intellij.util.messages.MessageBusConnection;
 import com.intellij.util.text.CharArrayCharSequence;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import java.util.List;
 
@@ -54,10 +64,13 @@ public class EditorFactoryImpl extends EditorFactory implements ApplicationCompo
   private final EventDispatcher<EditorFactoryListener> myEditorFactoryEventDispatcher = EventDispatcher.create(EditorFactoryListener.class);
   private final List<Editor> myEditors = ContainerUtil.createLockFreeCopyOnWriteList();
 
-  public EditorFactoryImpl(ProjectManager projectManager) {
-    projectManager.addProjectManagerListener(new ProjectManagerAdapter() {
+  public EditorFactoryImpl(EditorActionManager editorActionManager) {
+    Application application = ApplicationManager.getApplication();
+    MessageBus bus = application.getMessageBus();
+    MessageBusConnection connect = bus.connect();
+    connect.subscribe(ProjectLifecycleListener.TOPIC, new ProjectLifecycleListener() {
       @Override
-      public void projectOpened(final Project project) {
+      public void beforeProjectLoaded(@NotNull final Project project) {
         // validate all editors are disposed after fireProjectClosed() was called, because it's the place where editor should be released
         Disposer.register(project, () -> {
           final Project[] openProjects = ProjectManager.getInstance().getOpenProjects();
@@ -66,12 +79,16 @@ public class EditorFactoryImpl extends EditorFactory implements ApplicationCompo
         });
       }
     });
-  }
 
-  @Override
-  @NotNull
-  public String getComponentName() {
-    return "EditorFactory";
+    ApplicationManager.getApplication().getMessageBus().connect().subscribe(EditorColorsManager.TOPIC, new EditorColorsListener() {
+      @Override
+      public void globalSchemeChange(EditorColorsScheme scheme) {
+        refreshAllEditors();
+      }
+    });
+    TypedAction typedAction = editorActionManager.getTypedAction();
+    TypedActionHandler originalHandler = typedAction.getRawHandler();
+    typedAction.setupRawHandler(new MyTypedHandler(originalHandler));
   }
 
   @Override
@@ -106,11 +123,6 @@ public class EditorFactoryImpl extends EditorFactory implements ApplicationCompo
       throw new RuntimeException("Editor of " + editor.getClass() +
                                  " and the following text hasn't been released:\n" + editor.getDocument().getText());
     }
-  }
-
-
-  @Override
-  public void disposeComponent() {
   }
 
   @Override
@@ -150,41 +162,62 @@ public class EditorFactoryImpl extends EditorFactory implements ApplicationCompo
 
   @Override
   public Editor createEditor(@NotNull Document document) {
-    return createEditor(document, false, null);
+    return createEditor(document, false, null, EditorKind.UNTYPED);
   }
 
   @Override
   public Editor createViewer(@NotNull Document document) {
-    return createEditor(document, true, null);
+    return createEditor(document, true, null, EditorKind.UNTYPED);
   }
 
   @Override
   public Editor createEditor(@NotNull Document document, Project project) {
-    return createEditor(document, false, project);
+    return createEditor(document, false, project, EditorKind.UNTYPED);
+  }
+
+  @Override
+  public Editor createEditor(@NotNull Document document, @Nullable Project project, @NotNull EditorKind kind) {
+    return createEditor(document, false, project, kind);
   }
 
   @Override
   public Editor createViewer(@NotNull Document document, Project project) {
-    return createEditor(document, true, project);
+    return createEditor(document, true, project, EditorKind.UNTYPED);
+  }
+
+  @Override
+  public Editor createViewer(@NotNull Document document, @Nullable Project project, @NotNull EditorKind kind) {
+    return createEditor(document, true, project, kind);
   }
 
   @Override
   public Editor createEditor(@NotNull final Document document, final Project project, @NotNull final FileType fileType, final boolean isViewer) {
-    Editor editor = createEditor(document, isViewer, project);
+    Editor editor = createEditor(document, isViewer, project, EditorKind.UNTYPED);
     ((EditorEx)editor).setHighlighter(EditorHighlighterFactory.getInstance().createEditorHighlighter(project, fileType));
     return editor;
   }
 
   @Override
   public Editor createEditor(@NotNull Document document, Project project, @NotNull VirtualFile file, boolean isViewer) {
-    Editor editor = createEditor(document, isViewer, project);
+    Editor editor = createEditor(document, isViewer, project, EditorKind.UNTYPED);
     ((EditorEx)editor).setHighlighter(EditorHighlighterFactory.getInstance().createEditorHighlighter(project, file));
     return editor;
   }
 
-  private Editor createEditor(@NotNull Document document, boolean isViewer, Project project) {
+  @Override
+  public Editor createEditor(@NotNull Document document,
+                             Project project,
+                             @NotNull VirtualFile file,
+                             boolean isViewer,
+                             @NotNull EditorKind kind) {
+    Editor editor = createEditor(document, isViewer, project, kind);
+    ((EditorEx)editor).setHighlighter(EditorHighlighterFactory.getInstance().createEditorHighlighter(project, file));
+    return editor;
+  }
+
+  private Editor createEditor(@NotNull Document document, boolean isViewer, Project project, @NotNull EditorKind kind) {
     Document hostDocument = document instanceof DocumentWindow ? ((DocumentWindow)document).getDelegate() : document;
-    EditorImpl editor = new EditorImpl(hostDocument, isViewer, project);
+    EditorImpl editor = new EditorImpl(hostDocument, isViewer, project, kind);
     myEditors.add(editor);
     myEditorEventMulticaster.registerEditor(editor);
     myEditorFactoryEventDispatcher.getMulticaster().editorCreated(new EditorFactoryEvent(this, editor));
@@ -261,5 +294,29 @@ public class EditorFactoryImpl extends EditorFactory implements ApplicationCompo
   @NotNull
   public EditorEventMulticaster getEventMulticaster() {
     return myEditorEventMulticaster;
+  }
+
+  private static class MyTypedHandler implements TypedActionHandlerEx {
+    private final TypedActionHandler myDelegate;
+
+    private MyTypedHandler(TypedActionHandler delegate) {
+      myDelegate = delegate;
+    }
+
+    @Override
+    public void execute(@NotNull Editor editor, char charTyped, @NotNull DataContext dataContext) {
+      editor.putUserData(EditorImpl.DISABLE_CARET_SHIFT_ON_WHITESPACE_INSERTION, Boolean.TRUE);
+      try {
+        myDelegate.execute(editor, charTyped, dataContext);
+      }
+      finally {
+        editor.putUserData(EditorImpl.DISABLE_CARET_SHIFT_ON_WHITESPACE_INSERTION, null);
+      }
+    }
+
+    @Override
+    public void beforeExecute(@NotNull Editor editor, char c, @NotNull DataContext context, @NotNull ActionPlan plan) {
+      if (myDelegate instanceof TypedActionHandlerEx) ((TypedActionHandlerEx)myDelegate).beforeExecute(editor, c, context, plan);
+    }
   }
 }

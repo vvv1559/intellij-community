@@ -25,10 +25,10 @@ import com.intellij.openapi.wm.ex.LayoutFocusTraversalPolicyExt;
 import com.intellij.uiDesigner.FormEditingUtil;
 import com.intellij.uiDesigner.UIDesignerBundle;
 import com.intellij.uiDesigner.componentTree.ComponentSelectionListener;
+import com.intellij.uiDesigner.propertyInspector.InplaceContext;
 import com.intellij.uiDesigner.propertyInspector.Property;
 import com.intellij.uiDesigner.propertyInspector.PropertyEditor;
 import com.intellij.uiDesigner.propertyInspector.PropertyEditorAdapter;
-import com.intellij.uiDesigner.propertyInspector.InplaceContext;
 import com.intellij.uiDesigner.radComponents.RadComponent;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -76,7 +76,7 @@ public final class InplaceEditingLayer extends JComponent{
    */
   private Rectangle myPreferredBounds;
   /**
-   * If <code>true</code> then we do not have to react on own events
+   * If {@code true} then we do not have to react on own events
    */
   private boolean myInsideChange;
 
@@ -122,7 +122,7 @@ public final class InplaceEditingLayer extends JComponent{
 
   /**
    * Starts editing of "inplace" property for the component at the
-   * specified point <code>(x, y)</code>.
+   * specified point {@code (x, y)}.
    *
    * @param x x coordinate in the editor coordinate system
    * @param y y coordinate in the editor coordinate system
@@ -238,7 +238,7 @@ public final class InplaceEditingLayer extends JComponent{
   /**
    * Finishes current inplace editing
    */
-  private void finishInplaceEditing(){
+  public void finishInplaceEditing(){
     if (myInplaceComponent == null || myInsideChange) { // nothing to finish
       return;
     }

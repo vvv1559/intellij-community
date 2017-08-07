@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,13 +21,12 @@ import com.intellij.execution.junit2.PsiMemberParameterizedLocation;
 import com.intellij.execution.junit2.info.MethodLocation;
 import com.intellij.ide.util.PsiClassListCellRenderer;
 import com.intellij.openapi.actionSystem.PlatformDataKeys;
-import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.fileEditor.FileEditor;
 import com.intellij.openapi.fileEditor.TextEditor;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.ui.popup.JBPopupFactory;
-import com.intellij.openapi.util.Computable;
 import com.intellij.openapi.util.Condition;
 import com.intellij.psi.*;
 import com.intellij.psi.search.searches.ClassInheritorsSearch;
@@ -35,7 +34,6 @@ import com.intellij.psi.util.PsiClassUtil;
 import com.intellij.ui.ColoredListCellRenderer;
 import com.intellij.ui.components.JBList;
 import com.intellij.util.ArrayUtil;
-import com.intellij.util.Processor;
 
 import javax.swing.*;
 import java.util.ArrayList;
@@ -43,10 +41,6 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
-/**
- * User: anna
- * Date: 1/17/12
- */
 public class InheritorChooser {
 
   protected void runForClasses(final List<PsiClass> classes, final PsiMethod method, final ConfigurationContext context, final Runnable performRunnable) {
@@ -83,9 +77,9 @@ public class InheritorChooser {
 
       final List<PsiClass> classes = new ArrayList<>();
       if (!ProgressManager.getInstance().runProcessWithProgressSynchronously(() -> {
-        final boolean isJUnit5 = ApplicationManager.getApplication().runReadAction((Computable<Boolean>)() -> JUnitUtil.isJUnit5(containingClass));
+        final boolean isJUnit5 = ReadAction.compute(() -> JUnitUtil.isJUnit5(containingClass));
         ClassInheritorsSearch.search(containingClass).forEach(aClass -> {
-          if (PsiClassUtil.isRunnableClass(aClass, !isJUnit5, true)) {
+          if (isJUnit5 && JUnitUtil.isJUnit5TestClass(aClass, true) || PsiClassUtil.isRunnableClass(aClass, true, true)) {
             classes.add(aClass);
           }
           return true;

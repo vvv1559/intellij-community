@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,10 +21,10 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.psi.JavaCodeFragment;
-import com.intellij.psi.JavaRecursiveElementVisitor;
-import com.intellij.psi.PsiElement;
-import com.intellij.psi.PsiLocalVariable;
+import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.psi.*;
+import com.intellij.psi.search.DelegatingGlobalSearchScope;
+import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.util.StringBuilderSpinAllocator;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.xdebugger.XDebugSession;
@@ -37,6 +37,7 @@ import com.sun.jdi.ObjectReference;
 import com.sun.jdi.Value;
 import org.jetbrains.annotations.NotNull;
 
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -55,11 +56,11 @@ public class CodeFragmentFactoryContextWrapper extends CodeFragmentFactory {
   }
 
   public JavaCodeFragment createCodeFragment(TextWithImports item, PsiElement context, Project project) {
-    return myDelegate.createCodeFragment(item, wrapContext(project, context), project);
+    return prepareResolveScope(myDelegate.createCodeFragment(item, wrapContext(project, context), project));
   }
 
   public JavaCodeFragment createPresentationCodeFragment(TextWithImports item, PsiElement context, Project project) {
-    return myDelegate.createPresentationCodeFragment(item, wrapContext(project, context), project);
+    return prepareResolveScope(myDelegate.createPresentationCodeFragment(item, wrapContext(project, context), project));
   }
 
   public boolean isContextAccepted(PsiElement contextElement) {
@@ -75,6 +76,19 @@ public class CodeFragmentFactoryContextWrapper extends CodeFragmentFactory {
   public EvaluatorBuilder getEvaluatorBuilder() {
     return myDelegate.getEvaluatorBuilder();
   }
+
+  private static JavaCodeFragment prepareResolveScope(JavaCodeFragment codeFragment) {
+    GlobalSearchScope originalResolveScope = codeFragment.getResolveScope();
+    codeFragment.forceResolveScope(new DelegatingGlobalSearchScope(GlobalSearchScope.allScope(codeFragment.getProject())) {
+      final Comparator<VirtualFile> myScopeComparator = Comparator.comparing(originalResolveScope::contains).thenComparing(super::compare);
+      @Override
+      public int compare(@NotNull VirtualFile file1, @NotNull VirtualFile file2) {
+        // prefer files from the original resolve scope
+        return myScopeComparator.compare(file1, file2);
+      }
+    });
+    return codeFragment;
+  }
   
   private PsiElement wrapContext(Project project, final PsiElement originalContext) {
     if (project.isDefault()) return originalContext;
@@ -87,21 +101,19 @@ public class CodeFragmentFactoryContextWrapper extends CodeFragmentFactory {
     if (session != null) {
       XValueMarkers<?, ?> markers = ((XDebugSessionImpl)session).getValueMarkers();
       Map<?, ValueMarkup> markupMap = markers != null ? markers.getAllMarkers() : null;
-      //final Map<ObjectReference, ValueMarkup> markupMap = ValueDescriptorImpl.getMarkupMap(process);
       if (!ContainerUtil.isEmpty(markupMap)) {
-        final Pair<String, Map<String, ObjectReference>> markupVariables = createMarkupVariablesText(markupMap);
-        int offset = markupVariables.getFirst().length() - 1;
-        final TextWithImportsImpl textWithImports = new TextWithImportsImpl(CodeFragmentKind.CODE_BLOCK, markupVariables.getFirst(), "", myDelegate.getFileType());
-        final JavaCodeFragment codeFragment = myDelegate.createCodeFragment(textWithImports, context, project);
-        codeFragment.accept(new JavaRecursiveElementVisitor() {
-          public void visitLocalVariable(PsiLocalVariable variable) {
-            final String name = variable.getName();
-            variable.putUserData(LABEL_VARIABLE_VALUE_KEY, markupVariables.getSecond().get(name));
-          }
-        });
-        final PsiElement newContext = codeFragment.findElementAt(offset);
-        if (newContext != null) {
-          context = newContext;
+        Pair<String, Map<String, ObjectReference>> markupVariables = createMarkupVariablesText(markupMap);
+        String text = markupVariables.getFirst();
+        if (!StringUtil.isEmpty(text)) {
+          PsiCodeBlock codeFragment =
+            JavaPsiFacade.getInstance(project).getElementFactory().createCodeBlockFromText("{" + text + "}", context);
+          codeFragment.accept(new JavaRecursiveElementVisitor() {
+            public void visitLocalVariable(PsiLocalVariable variable) {
+              final String name = variable.getName();
+              variable.putUserData(LABEL_VARIABLE_VALUE_KEY, markupVariables.getSecond().get(name));
+            }
+          });
+          context = codeFragment;
         }
       }
     }
@@ -132,7 +144,6 @@ public class CodeFragmentFactoryContextWrapper extends CodeFragmentFactory {
           //it.remove();
         }
       }
-      buffer.append(" ");
       return Pair.create(buffer.toString(), reverseMap);
     }
     finally {

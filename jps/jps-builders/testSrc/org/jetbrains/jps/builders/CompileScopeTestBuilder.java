@@ -36,9 +36,9 @@ import java.util.*;
  */
 public class CompileScopeTestBuilder {
   private final boolean myForceBuild;
-  private final Set<BuildTargetType<?>> myTargetTypes = new HashSet<BuildTargetType<?>>();
-  private final Set<BuildTarget<?>> myTargets = new HashSet<BuildTarget<?>>();
-  private LinkedHashMap<BuildTarget<?>, Set<File>> myFiles = new LinkedHashMap<BuildTarget<?>, Set<File>>();
+  private final Set<BuildTargetType<?>> myTargetTypes = new HashSet<>();
+  private final Set<BuildTarget<?>> myTargets = new HashSet<>();
+  private LinkedHashMap<BuildTarget<?>, Set<File>> myFiles = new LinkedHashMap<>();
 
   public static CompileScopeTestBuilder rebuild() {
     return new CompileScopeTestBuilder(true);
@@ -85,7 +85,7 @@ public class CompileScopeTestBuilder {
   public CompileScopeTestBuilder file(BuildTarget<?> target, String path) {
     Set<File> files = myFiles.get(target);
     if (files == null) {
-      files = new THashSet<File>(FileUtil.FILE_HASHING_STRATEGY);
+      files = new THashSet<>(FileUtil.FILE_HASHING_STRATEGY);
       myFiles.put(target, files);
     }
     files.add(new File(path));
@@ -95,7 +95,7 @@ public class CompileScopeTestBuilder {
   public CompileScope build() {
     final Collection<BuildTargetType<?>> typesToForceBuild;
     if (myForceBuild) {
-      typesToForceBuild = new SmartHashSet<BuildTargetType<?>>();
+      typesToForceBuild = new SmartHashSet<>();
       typesToForceBuild.addAll(myTargetTypes);
       for (BuildTarget<?> target : myTargets) {
         typesToForceBuild.add(target.getTargetType());
@@ -107,6 +107,11 @@ public class CompileScopeTestBuilder {
     return new CompileScopeImpl(myTargetTypes, typesToForceBuild, myTargets, myFiles);
   }
 
+  /**
+   * Add all targets in the project to the scope. May lead to unpredictable results if some plugins add targets your test doesn't expect.
+   *
+   * @deprecated use {@link #allModules()} instead or directly add required target types via {@link #targetTypes}
+   */
   public CompileScopeTestBuilder all() {
     myTargetTypes.addAll(TargetTypeRegistry.getInstance().getTargetTypes());
     return this;

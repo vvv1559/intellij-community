@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -44,7 +44,6 @@ import com.intellij.ui.content.ContentManager;
 import com.intellij.ui.content.ContentManagerAdapter;
 import com.intellij.ui.content.ContentManagerEvent;
 import com.intellij.util.Alarm;
-import com.intellij.util.PairFunction;
 import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NotNull;
@@ -79,9 +78,8 @@ public class PreviewManagerImpl implements PreviewManager, PersistentStateCompon
   private boolean myInnerSelectionChange;
 
   private static boolean isAvailable() {
-    return UISettings.getInstance().NAVIGATE_TO_PREVIEW;
+    return UISettings.getInstance().getNavigateToPreview();
   }
-
 
   public PreviewManagerImpl(Project project) {
     myProject = project;
@@ -93,12 +91,7 @@ public class PreviewManagerImpl implements PreviewManager, PersistentStateCompon
       Disposer.register(project, provider);
     }
 
-    UISettings.getInstance().addUISettingsListener(new UISettingsListener() {
-      @Override
-      public void uiSettingsChanged(UISettings source) {
-        checkGlobalState();
-      }
-    }, myProject);
+    project.getMessageBus().connect().subscribe(UISettingsListener.TOPIC, uiSettings -> checkGlobalState());
     checkGlobalState();
     checkEmptyState();
   }

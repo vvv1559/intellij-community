@@ -15,12 +15,13 @@
  */
 package git4idea.commands;
 
-import com.intellij.ide.passwordSafe.ui.PasswordSafePromptDialog;
+import com.intellij.credentialStore.CredentialPromptDialog;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.openapi.ui.Messages;
+import com.intellij.util.PathUtil;
 import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.UIUtil;
 import git4idea.config.SSHConnectionSettings;
@@ -34,6 +35,8 @@ import java.awt.*;
 import java.util.Vector;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+
+import static com.intellij.credentialStore.CredentialAttributesKt.CredentialAttributes;
 
 /**
  * Swing GUI handler for the SSH events
@@ -58,21 +61,17 @@ public class GitSSHGUIHandler {
       message = GitBundle.message("ssh.changed.host.key", hostname, port, fingerprint, serverHostKeyAlgorithm);
     }
     final AtomicBoolean rc = new AtomicBoolean();
-    ApplicationManager.getApplication().invokeAndWait(new Runnable() {
-      public void run() {
-        rc.set(Messages.YES == Messages.showYesNoDialog(myProject, message, GitBundle.getString("ssh.confirm.key.titile"), null));
-      }
-    }, ModalityState.any());
+    ApplicationManager.getApplication().invokeAndWait(
+      () -> rc.set(Messages.YES == Messages.showYesNoDialog(myProject, message, GitBundle.getString("ssh.confirm.key.titile"), null)), ModalityState.any());
     return rc.get();
   }
 
   @Nullable
   public String askPassphrase(final String username, final String keyPath, boolean resetPassword, final String lastError) {
     String error = processLastError(resetPassword, lastError);
-    return PasswordSafePromptDialog.askPassphrase(myProject, GitBundle.getString("ssh.ask.passphrase.title"),
-                                                  GitBundle.message("ssh.askPassphrase.message", keyPath, username),
-                                                  GitSSHGUIHandler.class, "PASSPHRASE:" + keyPath, resetPassword, error
-    );
+    return CredentialPromptDialog.askPassword(myProject, GitBundle.getString("ssh.ask.passphrase.title"),
+                                              "Password for the SSH key \"" + PathUtil.getFileName(keyPath) + "\":",
+                                              CredentialAttributes(GitSSHGUIHandler.class, "PASSPHRASE:" + keyPath), resetPassword, error);
   }
 
   /**
@@ -86,11 +85,7 @@ public class GitSSHGUIHandler {
   private String processLastError(boolean resetPassword, final String lastError) {
     String error;
     if (lastError != null && lastError.length() != 0 && !resetPassword) {
-      ApplicationManager.getApplication().invokeAndWait(new Runnable() {
-        public void run() {
-          showError(lastError);
-        }
-      }, ModalityState.any());
+      ApplicationManager.getApplication().invokeAndWait(() -> showError(lastError), ModalityState.any());
       error = null;
     }
     else {
@@ -126,14 +121,12 @@ public class GitSSHGUIHandler {
                                          final Vector<Boolean> echo,
                                          final String lastError) {
     final AtomicReference<Vector<String>> rc = new AtomicReference<>();
-    ApplicationManager.getApplication().invokeAndWait(new Runnable() {
-      public void run() {
-        showError(lastError);
-        GitSSHKeyboardInteractiveDialog dialog =
-          new GitSSHKeyboardInteractiveDialog(name, numPrompts, instruction, prompt, echo, username);
-        if (dialog.showAndGet()) {
-          rc.set(dialog.getResults());
-        }
+    ApplicationManager.getApplication().invokeAndWait(() -> {
+      showError(lastError);
+      GitSSHKeyboardInteractiveDialog dialog =
+        new GitSSHKeyboardInteractiveDialog(name, numPrompts, instruction, prompt, echo, username);
+      if (dialog.showAndGet()) {
+        rc.set(dialog.getResults());
       }
     }, ModalityState.any());
     return rc.get();
@@ -149,9 +142,12 @@ public class GitSSHGUIHandler {
   @Nullable
   public String askPassword(final String username, boolean resetPassword, final String lastError) {
     String error = processLastError(resetPassword, lastError);
-    return PasswordSafePromptDialog.askPassword(myProject, GitBundle.getString("ssh.password.title"),
-                                                GitBundle.message("ssh.password.message", username),
-                                                GitSSHGUIHandler.class, "PASSWORD:" + username, resetPassword, error);
+    return CredentialPromptDialog.askPassword(myProject,
+                                              GitBundle.getString("ssh.password.title"),
+                                              GitBundle.message("ssh.password.message", username),
+                                              CredentialAttributes(GitSSHGUIHandler.class, "PASSWORD:" + username),
+                                              resetPassword,
+                                              error);
   }
 
   /**
@@ -178,11 +174,7 @@ public class GitSSHGUIHandler {
     SSHConnectionSettings s = SSHConnectionSettings.getInstance();
     s.setLastSuccessful(userName, method);
     if (error != null && error.length() != 0) {
-      UIUtil.invokeLaterIfNeeded(new Runnable() {
-        public void run() {
-          showError(error);
-        }
-      });
+      UIUtil.invokeLaterIfNeeded(() -> showError(error));
     }
   }
 

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,6 +26,7 @@ import com.intellij.icons.AllIcons;
 import com.intellij.openapi.actionSystem.DataContext;
 import com.intellij.openapi.compiler.CompileContext;
 import com.intellij.openapi.compiler.CompileScope;
+import com.intellij.openapi.compiler.CompilerManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Key;
 import org.jetbrains.annotations.NotNull;
@@ -90,11 +91,11 @@ public class MakeProjectStepBeforeRun extends BeforeRunTaskProvider<MakeProjectS
 
   @Nullable
   public static RunConfiguration getRunConfiguration(final CompileScope compileScope) {
-    return compileScope.getUserData(CompileStepBeforeRun.RUN_CONFIGURATION);
+    return compileScope.getUserData(CompilerManager.RUN_CONFIGURATION_KEY);
   }
 
 
-  public MakeProjectBeforeRunTask createTask(RunConfiguration runConfiguration) {
+  public MakeProjectBeforeRunTask createTask(@NotNull RunConfiguration runConfiguration) {
     return !(runConfiguration instanceof RemoteConfiguration) && runConfiguration instanceof RunProfileWithCompileBeforeLaunchOption
            ? new MakeProjectBeforeRunTask()
            : null;

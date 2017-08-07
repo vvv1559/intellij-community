@@ -35,13 +35,6 @@ import org.jetbrains.annotations.NotNull;
 import java.util.LinkedHashSet;
 import java.util.Set;
 
-/**
- * Created by IntelliJ IDEA.
- * User: ik
- * Date: 02.12.2003
- * Time: 16:49:25
- * To change this template use Options | File Templates.
- */
 public class AllClassesGetter {
   private static final Logger LOG = Logger.getInstance("#com.intellij.codeInsight.completion.AllClassesGetter");
   public static final InsertHandler<JavaPsiClassReferenceElement> TRY_SHORTENING = new InsertHandler<JavaPsiClassReferenceElement>() {
@@ -126,13 +119,8 @@ public class AllClassesGetter {
   public static final InsertHandler<JavaPsiClassReferenceElement> INSERT_FQN = (context, item) -> {
     final String qName = item.getQualifiedName();
     if (qName != null) {
-      int start = context.getTailOffset() - 1;
-      while (start >= 0) {
-        final char ch = context.getDocument().getCharsSequence().charAt(start);
-        if (!Character.isJavaIdentifierPart(ch) && ch != '.') break;
-        start--;
-      }
-      context.getDocument().replaceString(start + 1, context.getTailOffset(), qName);
+      int start = JavaCompletionUtil.findQualifiedNameStart(context);
+      context.getDocument().replaceString(start, context.getTailOffset(), qName);
       LOG.assertTrue(context.getTailOffset() >= 0);
     }
   };

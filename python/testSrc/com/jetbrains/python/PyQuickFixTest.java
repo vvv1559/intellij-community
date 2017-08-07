@@ -17,14 +17,17 @@ package com.jetbrains.python;
 
 import com.intellij.codeInsight.intention.IntentionAction;
 import com.intellij.codeInspection.ex.InspectionProfileImpl;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.testFramework.TestDataFile;
 import com.intellij.testFramework.TestDataPath;
+import com.intellij.util.containers.ContainerUtil;
 import com.jetbrains.python.codeInsight.PyCodeInsightSettings;
 import com.jetbrains.python.documentation.docstrings.DocStringFormat;
 import com.jetbrains.python.fixtures.PyTestCase;
 import com.jetbrains.python.inspections.*;
 import com.jetbrains.python.inspections.unresolvedReference.PyUnresolvedReferencesInspection;
 import com.jetbrains.python.psi.LanguageLevel;
+import org.intellij.lang.regexp.inspection.RedundantEscapeInspection;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 
@@ -40,6 +43,7 @@ public class PyQuickFixTest extends PyTestCase {
   protected void setUp() throws Exception {
     super.setUp();
     InspectionProfileImpl.INIT_INSPECTIONS = true;
+    myFixture.setCaresAboutInjection(false);
   }
 
   @Override
@@ -113,7 +117,7 @@ public class PyQuickFixTest extends PyTestCase {
     settings.HIGHLIGHT_UNUSED_IMPORTS = false;
     try {
       doInspectionTest(new String[]{"AddToImportFromList.py", "AddToImportFromFoo.py"}, PyUnresolvedReferencesInspection.class,
-                       "Import 'foo(a) from AddToImportFromFoo'", true, true);
+                       "Import 'add_to_import_test_unique_name() from AddToImportFromFoo'", true, true);
     }
     finally {
       settings.HIGHLIGHT_UNUSED_IMPORTS = oldHighlightUnused;
@@ -200,6 +204,23 @@ public class PyQuickFixTest extends PyTestCase {
 
   public void testAddClassFix() {
     doInspectionTest("AddClass.py", PyUnresolvedReferencesInspection.class, "Create class 'Xyzzy'", true, true);
+  }
+
+  // PY-21204
+  public void testAddClassFromTypeComment() {
+    doInspectionTest(PyUnresolvedReferencesInspection.class, "Create class 'MyClass'", true, true);
+  }
+
+  // PY-21204
+  public void testAddClassFromFString() {
+    runWithLanguageLevel(LanguageLevel.PYTHON36, 
+                         () -> doInspectionTest(PyUnresolvedReferencesInspection.class, "Create class 'MyClass'", true, true));
+  }
+
+  // PY-21204
+  public void testAddFunctionFromFString() {
+    runWithLanguageLevel(LanguageLevel.PYTHON36,
+                         () -> doInspectionTest(PyUnresolvedReferencesInspection.class, PyBundle.message("QFIX.NAME.unresolved.reference.create.function", "my_function"), true, true));
   }
 
   // PY-1602
@@ -312,14 +333,14 @@ public class PyQuickFixTest extends PyTestCase {
   // PY-2092
   public void testUnresolvedRefCreateFunction() {
     doInspectionTest(PyUnresolvedReferencesInspection.class,
-                     PyBundle.message("QFIX.unresolved.reference.create.function.$0", "ref"), true, true);
+                     PyBundle.message("QFIX.NAME.unresolved.reference.create.function", "ref"), true, true);
   }
 
   public void testUnresolvedRefNoCreateFunction() {
     myFixture.enableInspections(PyUnresolvedReferencesInspection.class);
     myFixture.configureByFile("UnresolvedRefNoCreateFunction.py");
     myFixture.checkHighlighting(true, false, false);
-    final IntentionAction intentionAction = myFixture.getAvailableIntention(PyBundle.message("QFIX.unresolved.reference.create.function.$0", "ref"));
+    final IntentionAction intentionAction = myFixture.getAvailableIntention(PyBundle.message("QFIX.NAME.unresolved.reference.create.function", "ref"));
     assertNull(intentionAction);
   }
 
@@ -551,7 +572,7 @@ public class PyQuickFixTest extends PyTestCase {
     myFixture.configureByFile(fileName);
     myFixture.enableInspections(PyShadowingBuiltinsInspection.class);
     myFixture.checkHighlighting(true, false, true);
-    final IntentionAction intentionAction = myFixture.getAvailableIntention("Rename element");
+    final IntentionAction intentionAction = myFixture.getAvailableIntention(PyBundle.message("QFIX.NAME.rename.element"));
     assertNotNull(intentionAction);
     myFixture.launchAction(intentionAction);
     myFixture.checkResultByFile(graftBeforeExt(fileName, "_after"));
@@ -563,7 +584,7 @@ public class PyQuickFixTest extends PyTestCase {
     myFixture.configureByFile(fileName);
     myFixture.enableInspections(PyShadowingBuiltinsInspection.class);
     myFixture.checkHighlighting(true, false, true);
-    final IntentionAction intentionAction = myFixture.getAvailableIntention("Rename element");
+    final IntentionAction intentionAction = myFixture.getAvailableIntention(PyBundle.message("QFIX.NAME.rename.element"));
     assertNotNull(intentionAction);
     myFixture.launchAction(intentionAction);
     myFixture.checkResultByFile(graftBeforeExt(fileName, "_after"));
@@ -586,6 +607,79 @@ public class PyQuickFixTest extends PyTestCase {
   public void testImplementAbstractProperty1() {
     doInspectionTest("ImplementAbstractProperty.py", PyAbstractClassInspection.class, PyBundle.message("QFIX.NAME.implement.methods"),
                      true, true);
+  }
+
+  public void testRemovingUnderscoresInNumericLiterals() {
+    myFixture.configureByText(PythonFileType.INSTANCE, "1_0_0");
+
+    final IntentionAction action = myFixture.findSingleIntention(PyBundle.message("QFIX.NAME.remove.underscores.in.numeric"));
+    myFixture.launchAction(action);
+
+    myFixture.checkResult("100");
+  }
+
+  // PY-20452
+  public void testRemoveRedundantEscapeInOnePartRegExp() {
+    myFixture.enableInspections(new RedundantEscapeInspection());
+    myFixture.configureByText(PythonFileType.INSTANCE, "import re\nre.compile(\"(?P<foo>((\\/(?P<bar>.+))?))\")");
+
+    final List<IntentionAction> quickFixes = myFixture.getAllQuickFixes();
+    assertEquals(1, quickFixes.size());
+
+    final IntentionAction removeRedundantEscapeFix = quickFixes.get(0);
+    assertEquals("Remove redundant escape", removeRedundantEscapeFix.getText());
+
+    myFixture.launchAction(removeRedundantEscapeFix);
+    myFixture.checkResult("import re\nre.compile(\"(?P<foo>((/(?P<bar>.+))?))\")");
+  }
+
+  // PY-20452
+  public void testRemoveRedundantEscapeInMultiPartRegExp() {
+    myFixture.enableInspections(new RedundantEscapeInspection());
+    myFixture.configureByText(PythonFileType.INSTANCE, "import re\n" +
+                                                       "re.compile(\"(?P<foo>\"\n" +
+                                                       "           \"((\\/(?P<bar>.+))?))\")");
+
+    final List<IntentionAction> quickFixes = myFixture.getAllQuickFixes();
+    assertEquals(1, quickFixes.size());
+
+    final IntentionAction removeRedundantEscapeFix = quickFixes.get(0);
+    assertEquals("Remove redundant escape", removeRedundantEscapeFix.getText());
+
+    myFixture.launchAction(removeRedundantEscapeFix);
+    myFixture.checkResult("import re\n" +
+                          "re.compile(\"(?P<foo>\"\n" +
+                          "           \"((/(?P<bar>.+))?))\")");
+  }
+
+  // PY-8174
+  public void testChangeSignatureKeywordAndPositionalParameters() {
+    doInspectionTest(PyArgumentListInspection.class, "<html>Change signature of f(x, foo, <b>bar</b>)</html>", true, true);
+  }
+
+  // PY-8174
+  public void testChangeSignatureAddKeywordOnlyParameter() {
+    runWithLanguageLevel(LanguageLevel.PYTHON30, () -> {
+      doInspectionTest(PyArgumentListInspection.class, "<html>Change signature of func(x, *args, foo, <b>bar</b>)</html>", true, true);
+    });
+  }
+
+  // PY-8174
+  public void testChangeSignatureNewParametersNames() {
+    doInspectionTest(PyArgumentListInspection.class, "<html>Change signature of func(i1, <b>i</b>, <b>i3</b>, <b>num</b>)</html>", true, true);
+  }
+
+  // PY-8174
+  public void testChangeSignatureParametersDefaultValues() {
+    doInspectionTest(PyArgumentListInspection.class, "<html>Change signature of func(<b>i</b>, <b>foo</b>)</html>", true, true);
+  }
+
+  public void testAddKwargsToNewMethodIncompatibleWithInit() {
+    doInspectionTest(PyInitNewSignatureInspection.class, "<html>Change signature of __new__(cls, <b>**kwargs</b>)</html>", true, true);
+  }
+
+  public void testAddKwargsToIncompatibleOverridingMethod() {
+    doInspectionTest(PyMethodOverridingInspection.class, "<html>Change signature of m(self, <b>**kwargs</b>)</html>", true, true);
   }
 
   @Override
@@ -631,7 +725,9 @@ public class PyQuickFixTest extends PyTestCase {
     final List<IntentionAction> intentionActions = myFixture.filterAvailableIntentions(quickFixName);
     if (available) {
       if (intentionActions.isEmpty()) {
-        throw new AssertionError("Quickfix \"" + quickFixName + "\" is not available");
+        final List<String> intentionNames = ContainerUtil.map(myFixture.getAvailableIntentions(), IntentionAction::getText);
+        throw new AssertionError("Quickfix starting with \"" + quickFixName + "\" is not available. " +
+                                 "Available intentions:\n" + StringUtil.join(intentionNames, "\n"));
       }
       if (intentionActions.size() > 1) {
         throw new AssertionError("There are more than one quickfix with the name \"" + quickFixName + "\"");

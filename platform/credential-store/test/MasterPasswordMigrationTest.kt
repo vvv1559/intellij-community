@@ -15,11 +15,11 @@
  */
 package com.intellij.credentialStore
 
-import com.intellij.ide.passwordSafe.impl.providers.masterKey.PasswordDatabase
-import com.intellij.openapi.util.JDOMUtil
+import com.intellij.configurationStore.deserializeInto
+import com.intellij.ide.passwordSafe.impl.providers.masterKey.MasterKeyPasswordSafeTest
 import com.intellij.testFramework.ApplicationRule
 import com.intellij.testFramework.runInEdtAndWait
-import com.intellij.util.xmlb.XmlSerializer
+import com.intellij.util.loadElement
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.ClassRule
 import org.junit.Test
@@ -54,13 +54,14 @@ internal class MasterPasswordMigrationTest {
     </State>"""))
     assertThat(passwordSafe).isNotEmpty
 
-    val provider = FileCredentialStore(passwordSafe)
-    assertThat(provider.getPassword("com.intellij.ide.passwordSafe.impl.providers.masterKey.MasterKeyPasswordSafeTest/TEST")).isEqualTo("test")
+    val provider = KeePassCredentialStore(passwordSafe)
+    @Suppress("DEPRECATION")
+    assertThat(provider.getPassword(MasterKeyPasswordSafeTest::class.java, "TEST")).isEqualTo("test")
   }
 
   @Test
   fun nonEmptyPass() {
-    var passwordSafe: Map<String, String>? = null
+    var passwordSafe: Map<CredentialAttributes, Credentials>? = null
     runInEdtAndWait {
       passwordSafe = convertOldDb(getDb("""<State>
         <option name="MASTER_PASSWORD_INFO" value="" />
@@ -83,15 +84,16 @@ internal class MasterPasswordMigrationTest {
       </State>"""))
     }
     assertThat(passwordSafe).isNotEmpty
-    val provider = FileCredentialStore(passwordSafe)
-    assertThat(provider.getPassword("com.intellij.ide.passwordSafe.impl.providers.masterKey.MasterKeyPasswordSafeTest/TEST")).isEqualTo("test")
+    val provider = KeePassCredentialStore(passwordSafe)
+    @Suppress("DEPRECATION")
+    assertThat(provider.getPassword(MasterKeyPasswordSafeTest::class.java, "TEST")).isEqualTo("test")
   }
 
   @Suppress("DEPRECATION")
   private fun getDb(data: String): PasswordDatabase {
     val passwordDatabase = PasswordDatabase()
     val state = PasswordDatabase.State()
-    XmlSerializer.deserializeInto(state, JDOMUtil.load(data.reader()))
+    loadElement(data).deserializeInto(state)
     passwordDatabase.loadState(state)
     return passwordDatabase
   }

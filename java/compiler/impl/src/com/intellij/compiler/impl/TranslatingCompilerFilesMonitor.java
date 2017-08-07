@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,8 +19,6 @@ import com.intellij.compiler.server.BuildManager;
 import com.intellij.openapi.application.Application;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.PathManager;
-import com.intellij.openapi.components.ApplicationComponent;
-import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.fileTypes.FileTypeManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectManager;
@@ -30,7 +28,7 @@ import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.vfs.*;
 import com.intellij.openapi.vfs.newvfs.NewVirtualFile;
-import com.intellij.util.Function;
+import com.intellij.util.Consumer;
 import gnu.trove.THashSet;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -52,9 +50,7 @@ import java.util.Set;
  * 1. corresponding source file has been scheduled for recompilation (see above)
  * 2. corresponding source file has been deleted
  */
-public class TranslatingCompilerFilesMonitor implements ApplicationComponent {
-  private static final Logger LOG = Logger.getInstance("#com.intellij.compiler.impl.TranslatingCompilerFilesMonitor");
-  public static boolean ourDebugMode = false;
+public class TranslatingCompilerFilesMonitor {
 
   public TranslatingCompilerFilesMonitor(VirtualFileManager vfsManager, Application application) {
     vfsManager.addVirtualFileListener(new MyVfsListener(), application);
@@ -62,18 +58,6 @@ public class TranslatingCompilerFilesMonitor implements ApplicationComponent {
 
   public static TranslatingCompilerFilesMonitor getInstance() {
     return ApplicationManager.getApplication().getComponent(TranslatingCompilerFilesMonitor.class);
-  }
-
-  @NotNull
-  public String getComponentName() {
-    return "TranslatingCompilerFilesMonitor";
-  }
-
-  public void initComponent() {
-  }
-
-
-  public void disposeComponent() {
   }
 
   private interface FileProcessor {
@@ -126,7 +110,8 @@ public class TranslatingCompilerFilesMonitor implements ApplicationComponent {
     return false;
   }
   
-  private static class MyVfsListener extends VirtualFileAdapter {
+  private static class MyVfsListener implements VirtualFileListener {
+    @Override
     public void propertyChanged(@NotNull final VirtualFilePropertyEvent event) {
       if (VirtualFile.PROP_NAME.equals(event.getPropertyName())) {
         final VirtualFile eventFile = event.getFile();
@@ -139,7 +124,7 @@ public class TranslatingCompilerFilesMonitor implements ApplicationComponent {
             if (eventFile.isDirectory()) {
               VfsUtilCore.visitChildrenRecursively(eventFile, new VirtualFileVisitor() {
                 private StringBuilder filePath = new StringBuilder(root);
-  
+
                 @Override
                 public boolean visitFile(@NotNull VirtualFile child) {
                   if (child.isDirectory()) {
@@ -156,7 +141,7 @@ public class TranslatingCompilerFilesMonitor implements ApplicationComponent {
                   }
                   return true;
                 }
-  
+
                 @Override
                 public void afterChildrenVisited(@NotNull VirtualFile file) {
                   if (file.isDirectory() && !Comparing.equal(file, eventFile)) {
@@ -170,59 +155,47 @@ public class TranslatingCompilerFilesMonitor implements ApplicationComponent {
             }
             notifyFilesDeleted(toMark);
           }
-          collectPathsAndNotify(eventFile, NOTIFY_CHANGED);
+          collectPathsAndNotify(eventFile, TranslatingCompilerFilesMonitor::notifyFilesChanged);
         }
       }
     }
 
+    @Override
     public void contentsChanged(@NotNull final VirtualFileEvent event) {
-      collectPathsAndNotify(event.getFile(), NOTIFY_CHANGED);
+      collectPathsAndNotify(event.getFile(), TranslatingCompilerFilesMonitor::notifyFilesChanged);
     }
 
+    @Override
     public void fileCreated(@NotNull final VirtualFileEvent event) {
-      collectPathsAndNotify(event.getFile(), NOTIFY_CHANGED);
+      collectPathsAndNotify(event.getFile(), TranslatingCompilerFilesMonitor::notifyFilesChanged);
     }
 
+    @Override
     public void fileCopied(@NotNull final VirtualFileCopyEvent event) {
-      collectPathsAndNotify(event.getFile(), NOTIFY_CHANGED);
+      collectPathsAndNotify(event.getFile(), TranslatingCompilerFilesMonitor::notifyFilesChanged);
     }
 
+    @Override
     public void fileMoved(@NotNull VirtualFileMoveEvent event) {
-      collectPathsAndNotify(event.getFile(), NOTIFY_CHANGED);
+      collectPathsAndNotify(event.getFile(), TranslatingCompilerFilesMonitor::notifyFilesChanged);
     }
 
+    @Override
     public void beforeFileDeletion(@NotNull final VirtualFileEvent event) {
-      collectPathsAndNotify(event.getFile(), NOTIFY_DELETED);
+      collectPathsAndNotify(event.getFile(), TranslatingCompilerFilesMonitor::notifyFilesDeleted);
     }
 
+    @Override
     public void beforeFileMovement(@NotNull final VirtualFileMoveEvent event) {
-      collectPathsAndNotify(event.getFile(), NOTIFY_DELETED);
+      collectPathsAndNotify(event.getFile(), TranslatingCompilerFilesMonitor::notifyFilesDeleted);
     }
   }
 
-  
-  private static final Function<Collection<File>, Void> NOTIFY_CHANGED = files -> {
-    notifyFilesChanged(files);
-    return null;
-  };
-
-  private static final Function<Collection<File>, Void> NOTIFY_DELETED = files -> {
-    notifyFilesDeleted(files);
-    return null;
-  };
-  
-  private static void collectPathsAndNotify(final VirtualFile file, final Function<Collection<File>, Void> notification) {
-    final Set<File> pathsToMark = new THashSet<>(FileUtil.FILE_HASHING_STRATEGY);
+  private static void collectPathsAndNotify(final VirtualFile file, final Consumer<Collection<File>> notification) {
     if (!isIgnoredOrUnderIgnoredDirectory(file)) {
-      final boolean inContent = isInContentOfOpenedProject(file);
-      processRecursively(file, !inContent, new FileProcessor() {
-        public void execute(final VirtualFile file) {
-          pathsToMark.add(new File(file.getPath()));
-        }
-      });
-    }
-    if (!pathsToMark.isEmpty()) {
-      notification.fun(pathsToMark);
+      final Set<File> pathsToMark = new THashSet<>(FileUtil.FILE_HASHING_STRATEGY);
+      processRecursively(file, !isInContentOfOpenedProject(file), f -> pathsToMark.add(new File(f.getPath())));
+      notification.consume(pathsToMark);
     }
   }
 

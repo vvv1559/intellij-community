@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,10 +15,7 @@
  */
 package com.siyeh.ig.junit;
 
-import com.intellij.psi.PsiClass;
-import com.intellij.psi.PsiElement;
-import com.intellij.psi.PsiModifier;
-import com.intellij.psi.PsiTypeParameter;
+import com.intellij.psi.*;
 import com.intellij.psi.util.InheritanceUtil;
 import com.siyeh.InspectionGadgetsBundle;
 import com.siyeh.ig.BaseInspectionVisitor;
@@ -66,6 +63,11 @@ public class JUnitAbstractTestClassNamingConventionInspectionBase extends Conven
     return new NamingConventionsVisitor();
   }
 
+  @Override
+  public boolean shouldInspect(PsiFile file) {
+    return file instanceof PsiClassOwner;
+  }
+
   private class NamingConventionsVisitor extends BaseInspectionVisitor {
 
     @Override
@@ -86,7 +88,7 @@ public class JUnitAbstractTestClassNamingConventionInspectionBase extends Conven
         return;
       }
       if (!InheritanceUtil.isInheritor(aClass,
-                                       "junit.framework.TestCase")) {
+                                       JUnitCommonClassNames.JUNIT_FRAMEWORK_TEST_CASE)) {
         return;
       }
       final String name = aClass.getName();
@@ -96,7 +98,17 @@ public class JUnitAbstractTestClassNamingConventionInspectionBase extends Conven
       if (isValid(name)) {
         return;
       }
-      registerClassError(aClass, name);
+      final PsiIdentifier identifier = aClass.getNameIdentifier();
+      if (identifier == null) {
+        return;
+      }
+      if (!identifier.isPhysical()) {
+        final PsiElement navigationElement = identifier.getNavigationElement();
+        registerError(navigationElement, name);
+      }
+      else {
+        registerClassError(aClass, name);
+      }
     }
   }
 }

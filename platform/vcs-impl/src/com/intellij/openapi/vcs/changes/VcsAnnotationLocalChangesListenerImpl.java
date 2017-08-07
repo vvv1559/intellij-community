@@ -29,18 +29,14 @@ import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.util.Alarm;
+import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.MultiMap;
 import com.intellij.util.messages.MessageBusConnection;
+import org.jetbrains.annotations.NotNull;
 
 import java.io.File;
 import java.util.*;
 
-/**
- * Created with IntelliJ IDEA.
- * User: Irina.Chernushina
- * Date: 11/20/12
- * Time: 11:31 AM
- */
 public class VcsAnnotationLocalChangesListenerImpl implements Disposable, VcsAnnotationLocalChangesListener {
   private final ZipperUpdater myUpdater;
   private final MessageBusConnection myConnection;
@@ -57,7 +53,7 @@ public class VcsAnnotationLocalChangesListenerImpl implements Disposable, VcsAnn
 
   private final MultiMap<VirtualFile, FileAnnotation> myFileAnnotationMap;
 
-  public VcsAnnotationLocalChangesListenerImpl(Project project, final ProjectLevelVcsManager vcsManager) {
+  public VcsAnnotationLocalChangesListenerImpl(@NotNull Project project, final ProjectLevelVcsManager vcsManager) {
     myLock = new Object();
     myUpdateStuff = createUpdateStuff();
     myUpdater = new ZipperUpdater(ApplicationManager.getApplication().isUnitTestMode() ? 10 : 300, Alarm.ThreadToUse.POOLED_THREAD, project);
@@ -75,28 +71,25 @@ public class VcsAnnotationLocalChangesListenerImpl implements Disposable, VcsAnn
   }
 
   private Runnable createUpdateStuff() {
-    return new Runnable() {
-      @Override
-      public void run() {
-        final Set<String> paths = new HashSet<>();
-        final Map<String, VcsRevisionNumber> changes = new HashMap<>();
-        final Set<VirtualFile> files = new HashSet<>();
-        Set<VcsKey> vcsToRefresh;
-        synchronized (myLock) {
-          vcsToRefresh = new HashSet<>(myVcsKeySet);
+    return () -> {
+      final Set<String> paths = new HashSet<>();
+      final Map<String, VcsRevisionNumber> changes = new HashMap<>();
+      final Set<VirtualFile> files = new HashSet<>();
+      Set<VcsKey> vcsToRefresh;
+      synchronized (myLock) {
+        vcsToRefresh = new HashSet<>(myVcsKeySet);
 
-          paths.addAll(myDirtyPaths);
-          changes.putAll(myDirtyChanges);
-          files.addAll(myDirtyFiles);
-          myDirtyPaths.clear();
-          myDirtyChanges.clear();
-          myVcsKeySet.clear();
-          myDirtyFiles.clear();
-        }
-
-        closeForVcs(vcsToRefresh);
-        checkByDirtyScope(paths, changes, files);
+        paths.addAll(myDirtyPaths);
+        changes.putAll(myDirtyChanges);
+        files.addAll(myDirtyFiles);
+        myDirtyPaths.clear();
+        myDirtyChanges.clear();
+        myVcsKeySet.clear();
+        myDirtyFiles.clear();
       }
+
+      closeForVcs(vcsToRefresh);
+      checkByDirtyScope(paths, changes, files);
     };
   }
 
@@ -152,7 +145,7 @@ public class VcsAnnotationLocalChangesListenerImpl implements Disposable, VcsAnn
   private void processFile(VcsRevisionNumber number, VirtualFile vf) {
     final Collection<FileAnnotation> annotations;
     synchronized (myLock) {
-      annotations = myFileAnnotationMap.get(vf);
+      annotations = ContainerUtil.newArrayList(myFileAnnotationMap.get(vf));
     }
     if (! annotations.isEmpty()) {
       if (number == null) {
@@ -234,7 +227,7 @@ public class VcsAnnotationLocalChangesListenerImpl implements Disposable, VcsAnn
       @Override
       public void dirty(BaseRevision currentRevision) {
         synchronized (myLock) {
-          myDirtyChanges.put(currentRevision.getPath().getPath(), currentRevision.getRevision());
+          myDirtyChanges.put(currentRevision.getPath(), currentRevision.getRevision());
         }
         myUpdater.queue(myUpdateStuff);
       }

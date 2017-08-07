@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,7 +13,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.jetbrains.plugins.groovy.lang.psi.impl;
 
 import com.intellij.openapi.util.Comparing;
@@ -69,6 +68,12 @@ public class GrClosureType extends GrLiteralClassType {
   }
 
   @Override
+  public int getParameterCount() {
+    PsiClass resolved = resolve();
+    return resolved != null && resolved.getTypeParameters().length == 1 ? 1 : 0;
+  }
+
+  @Override
   @NotNull
   public PsiType[] getParameters() {
     if (myTypeArgs == null) {
@@ -108,12 +113,6 @@ public class GrClosureType extends GrLiteralClassType {
     }
 
     return new GrClosureType(getLanguageLevel(), getResolveScope(), myFacade, mySignature, false);
-  }
-
-  @Override
-  @NotNull
-  public String getInternalCanonicalText() {
-    return getCanonicalText();
   }
 
   @Override
@@ -194,5 +193,10 @@ public class GrClosureType extends GrLiteralClassType {
   @NotNull
   public GrSignature getSignature() {
     return mySignature;
+  }
+
+  @Override
+  public String toString() {
+    return "PsiType: Closure<*>";
   }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,14 +22,13 @@ import org.jetbrains.idea.maven.indices.MavenIndex;
 import org.jetbrains.idea.maven.indices.MavenIndicesTestFixture;
 import org.jetbrains.idea.maven.indices.MavenProjectIndicesManager;
 
-import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
 
 public class MavenExtensionCompletionAndResolutionTest extends MavenDomWithIndicesTestCase {
   @Override
   protected MavenIndicesTestFixture createIndicesFixture() {
-    return new MavenIndicesTestFixture(myDir, myProject, "plugins");
+    return new MavenIndicesTestFixture(myDir.toPath(), myProject, "plugins");
   }
 
   @Override
@@ -74,7 +73,9 @@ public class MavenExtensionCompletionAndResolutionTest extends MavenDomWithIndic
     List<String> actual = getCompletionVariants(myProjectPom);
 
     try {
-      assertUnorderedElementsAreEqual(actual, "maven-compiler-plugin", "maven-war-plugin", "maven-eclipse-plugin", "maven-surefire-plugin");
+      assertUnorderedElementsAreEqual(actual, "maven-jar-plugin", "maven-clean-plugin", "maven-install-plugin", "maven-compiler-plugin",
+                                      "maven-resources-plugin", "maven-site-plugin", "maven-surefire-plugin", "maven-war-plugin",
+                                      "maven-eclipse-plugin", "maven-deploy-plugin");
     }
     catch (Throwable t) {
       MavenProjectIndicesManager instance = MavenProjectIndicesManager.getInstance(myProject);
@@ -105,11 +106,17 @@ public class MavenExtensionCompletionAndResolutionTest extends MavenDomWithIndic
                      "</build>");
 
     assertCompletionVariants(myProjectPom,
-                             "maven-compiler-plugin",
+                             "maven-site-plugin",
+                             "maven-eclipse-plugin",
                              "maven-war-plugin",
+                             "maven-resources-plugin",
                              "maven-surefire-plugin",
+                             "maven-jar-plugin",
                              "build-helper-maven-plugin",
-                             "maven-eclipse-plugin");
+                             "maven-clean-plugin",
+                             "maven-install-plugin",
+                             "maven-compiler-plugin",
+                             "maven-deploy-plugin");
   }
 
   public void testResolving() throws Exception {

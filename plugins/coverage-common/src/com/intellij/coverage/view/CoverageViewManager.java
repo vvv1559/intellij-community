@@ -25,7 +25,6 @@ import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.components.*;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.wm.ToolWindow;
 import com.intellij.openapi.wm.ToolWindowAnchor;
 import com.intellij.openapi.wm.ToolWindowManager;
@@ -36,16 +35,12 @@ import org.jetbrains.annotations.NotNull;
 import java.util.HashMap;
 import java.util.Map;
 
-/**
- * User: anna
- * Date: 1/2/12
- */
 @State(
     name = "CoverageViewManager",
     storages = {@Storage(StoragePathMacros.WORKSPACE_FILE)}
 )
 public class CoverageViewManager implements PersistentStateComponent<CoverageViewManager.StateBean> {
-  private static final Logger LOG = Logger.getInstance("#" + CoverageViewManager.class.getName());
+  private static final Logger LOG = Logger.getInstance(CoverageViewManager.class);
   public static final String TOOLWINDOW_ID = "Coverage";
   private Project myProject;
   private final CoverageDataManager myDataManager;
@@ -58,9 +53,8 @@ public class CoverageViewManager implements PersistentStateComponent<CoverageVie
     myProject = project;
     myDataManager = dataManager;
 
-    ToolWindow toolWindow = toolWindowManager.registerToolWindow(TOOLWINDOW_ID, true, ToolWindowAnchor.RIGHT, myProject, true);
+    ToolWindow toolWindow = toolWindowManager.registerToolWindow(TOOLWINDOW_ID, true, ToolWindowAnchor.RIGHT, myProject, true, true);
     toolWindow.setIcon(AllIcons.Toolwindows.ToolWindowCoverage);
-    toolWindow.setSplitMode(true, null);
     myContentManager = toolWindow.getContentManager();
     new ContentManagerWatcher(toolWindow, myContentManager);
   }
@@ -91,8 +85,6 @@ public class CoverageViewManager implements PersistentStateComponent<CoverageVie
   }
 
   public void createToolWindow(String displayName, boolean defaultFileProvider) {
-    closeView(displayName);
-
     final CoverageView coverageView = new CoverageView(myProject, myDataManager, myStateBean);
     myViews.put(displayName, coverageView);
     Content content = myContentManager.getFactory().createContent(coverageView, displayName, true);
@@ -105,14 +97,13 @@ public class CoverageViewManager implements PersistentStateComponent<CoverageVie
   }
 
   void closeView(String displayName) {
-    final CoverageView oldView = myViews.get(displayName);
+    final CoverageView oldView = myViews.remove(displayName);
     if (oldView != null) {
       final Content content = myContentManager.getContent(oldView);
       final Runnable runnable = () -> {
         if (content != null) {
-          myContentManager.removeContent(content, true);
+          myContentManager.removeContent(content, false);
         }
-        Disposer.dispose(oldView);
       };
       ApplicationManager.getApplication().invokeLater(runnable);
     }

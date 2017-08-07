@@ -16,9 +16,6 @@
 package com.intellij.ide.ui.laf.intellij;
 
 import com.intellij.ide.ui.laf.darcula.ui.DarculaRadioButtonUI;
-import com.intellij.openapi.ui.GraphicsConfig;
-import com.intellij.ui.Gray;
-import com.intellij.util.ui.GraphicsUtil;
 import com.intellij.util.ui.JBUI;
 
 import javax.swing.*;
@@ -31,34 +28,27 @@ import java.awt.*;
 public class WinIntelliJRadioButtonUI extends DarculaRadioButtonUI {
   @SuppressWarnings({"MethodOverridesStaticMethodOfSuperclass", "UnusedDeclaration"})
   public static ComponentUI createUI(JComponent c) {
+    AbstractButton b = (AbstractButton)c;
+    b.setRolloverEnabled(true);
     return new WinIntelliJRadioButtonUI();
   }
 
   @Override
   protected void paintIcon(JComponent c, Graphics2D g, Rectangle viewRect, Rectangle iconRect) {
-    int rad = JBUI.scale(4);
+    AbstractButton b = (AbstractButton)c;
+    ButtonModel bm = b.getModel();
+    boolean focused = c.hasFocus() || bm.isRollover();
+    Icon icon = MacIntelliJIconCache.getIcon("radio", false, bm.isSelected(), focused, bm.isEnabled(), bm.isPressed());
 
     // Paint the radio button
-    final int x = iconRect.x + (rad - (rad % 2 == 1?1:0))/2;
-    final int y = iconRect.y + (rad - (rad % 2 == 1?1:0))/2;
-    final int w = iconRect.width - rad;
-    final int h = iconRect.height - rad;
-    final boolean enabled = c.isEnabled();
-    Color color = enabled ? Gray.x50 : Gray.xD3;
-    g.translate(x, y);
-    //setup AA for lines
-    final GraphicsConfig config = GraphicsUtil.setupAAPainting(g);
-    g.setRenderingHint(RenderingHints.KEY_STROKE_CONTROL, RenderingHints.VALUE_STROKE_PURE);
-    final boolean selected = ((AbstractButton)c).isSelected();
-    g.setPaint(color);
-    g.drawOval(0, 0, w , h );
+    int x = (iconRect.width - icon.getIconWidth()) / 2 + iconRect.x;
+    int y = (iconRect.height - icon.getIconHeight()) / 2 + iconRect.y;
+    icon.paintIcon(c, g, x, y);
+  }
 
-    if (selected) {
-      g.setColor(color);
-      g.fillOval(JBUI.scale(3), JBUI.scale(3), w - 2*JBUI.scale(3), h - 2*JBUI.scale(3));
-    }
-    config.restore();
-    g.translate(-x, -y);
-
+  @Override
+  protected void drawText(AbstractButton b, Graphics2D g, String text, Rectangle textRect, FontMetrics fm) {
+    textRect.y -= JBUI.scale(1); // Move one pixel up
+    super.drawText(b, g, text, textRect, fm);
   }
 }

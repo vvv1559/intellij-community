@@ -15,7 +15,7 @@
  */
 package com.intellij.openapi.vcs.history;
 
-import com.intellij.diff.DiffContentFactoryImpl;
+import com.intellij.diff.DiffContentFactoryEx;
 import com.intellij.diff.DiffManager;
 import com.intellij.diff.DiffRequestFactoryImpl;
 import com.intellij.diff.contents.DiffContent;
@@ -112,11 +112,7 @@ public class VcsHistoryUtil {
     diffContent1.putUserData(DiffUserDataKeysEx.REVISION_INFO, getRevisionInfo(revision1));
     diffContent2.putUserData(DiffUserDataKeysEx.REVISION_INFO, getRevisionInfo(revision2));
 
-    WaitForProgressToShow.runOrInvokeLaterAboveProgress(new Runnable() {
-      public void run() {
-        DiffManager.getInstance().showDiff(project, request);
-      }
-    }, null, project);
+    WaitForProgressToShow.runOrInvokeLaterAboveProgress(() -> DiffManager.getInstance().showDiff(project, request), null, project);
   }
 
   @Nullable
@@ -163,7 +159,7 @@ public class VcsHistoryUtil {
   @NotNull
   private static DiffContent createContent(@NotNull Project project, @NotNull byte[] content, @NotNull VcsFileRevision revision,
                                            @NotNull FilePath filePath) throws IOException {
-    DiffContentFactoryImpl contentFactory = DiffContentFactoryImpl.getInstanceImpl();
+    DiffContentFactoryEx contentFactory = DiffContentFactoryEx.getInstanceEx();
     if (isCurrent(revision)) {
       VirtualFile file = filePath.getVirtualFile();
       if (file != null) return contentFactory.create(project, file);
@@ -171,14 +167,14 @@ public class VcsHistoryUtil {
     if (isEmpty(revision)) {
       return contentFactory.createEmpty();
     }
-    return contentFactory.createFromBytes(project, filePath, content);
+    return contentFactory.createFromBytes(project, content, filePath);
   }
 
   private static boolean isCurrent(VcsFileRevision revision) {
     return revision instanceof CurrentRevision;
   }
 
-  private static boolean isEmpty(VcsFileRevision revision) {
+  public static boolean isEmpty(VcsFileRevision revision) {
     return revision == null || VcsFileRevision.NULL.equals(revision);
   }
 
@@ -200,12 +196,9 @@ public class VcsHistoryUtil {
         }
         catch (final VcsException e) {
           LOG.info(e);
-          WaitForProgressToShow.runOrInvokeLaterAboveProgress(new Runnable() {
-            public void run() {
-              Messages.showErrorDialog(VcsBundle.message("message.text.cannot.show.differences", e.getLocalizedMessage()),
-                                       VcsBundle.message("message.title.show.differences"));
-            }
-          }, null, project);
+          WaitForProgressToShow.runOrInvokeLaterAboveProgress(
+            () -> Messages.showErrorDialog(VcsBundle.message("message.text.cannot.show.differences", e.getLocalizedMessage()),
+                                         VcsBundle.message("message.title.show.differences")), null, project);
         }
         catch (IOException e) {
           LOG.info(e);

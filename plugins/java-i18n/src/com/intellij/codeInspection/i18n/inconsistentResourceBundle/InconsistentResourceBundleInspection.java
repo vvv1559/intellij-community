@@ -156,13 +156,7 @@ public class InconsistentResourceBundleInspection extends GlobalSimpleInspection
         parents.put(f, parent);
       }
     }
-    final FactoryMap<PropertiesFile, Map<String,String>> propertiesFilesNamesMaps = new FactoryMap<PropertiesFile, Map<String, String>>() {
-      @Nullable
-      @Override
-      protected Map<String, String> create(PropertiesFile key) {
-        return key.getNamesMap();
-      }
-    };
+    final Map<PropertiesFile, Map<String, String>> propertiesFilesNamesMaps = FactoryMap.createMap(key -> key.getNamesMap());
     Map<PropertiesFile, Set<String>> keysUpToParent = new THashMap<>();
     for (PropertiesFile f : files) {
       Set<String> keys = new THashSet<>(propertiesFilesNamesMaps.get(f).keySet());
@@ -185,8 +179,9 @@ public class InconsistentResourceBundleInspection extends GlobalSimpleInspection
     return ContainerUtil.getOrElse(mySettings, providerName, true);
   }
 
+  @SafeVarargs
   @TestOnly
-  public void enableProviders(final Class<? extends InconsistentResourceBundleInspectionProvider>... providerClasses) {
+  public final void enableProviders(final Class<? extends InconsistentResourceBundleInspectionProvider>... providerClasses) {
     Set<Class<? extends InconsistentResourceBundleInspectionProvider>> providersToEnable = ContainerUtil.newHashSet(providerClasses);
     for (InconsistentResourceBundleInspectionProvider inspectionProvider : myInspectionProviders.getValue()) {
       if (providersToEnable.contains(inspectionProvider.getClass())) {

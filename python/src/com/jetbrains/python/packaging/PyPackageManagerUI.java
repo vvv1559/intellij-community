@@ -33,7 +33,6 @@ import com.intellij.openapi.projectRoots.Sdk;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.util.Ref;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.util.Function;
 import com.intellij.webcore.packaging.PackageManagementService;
 import com.intellij.webcore.packaging.PackagesNotificationPanel;
 import com.jetbrains.python.packaging.ui.PyPackageManagementService;
@@ -294,7 +293,7 @@ public class PyPackageManagerUI {
     public InstallManagementTask(@Nullable Project project,
                                  @NotNull Sdk sdk,
                                  @Nullable Listener listener) {
-      super(project, sdk, Collections.<PyRequirement>emptyList(), Collections.<String>emptyList(), listener);
+      super(project, sdk, Collections.emptyList(), Collections.emptyList(), listener);
     }
 
     @NotNull

@@ -22,6 +22,7 @@ import org.jetbrains.annotations.NotNull;
 
 import javax.swing.*;
 import java.awt.*;
+import java.util.Arrays;
 import java.util.Map;
 
 /**
@@ -44,13 +45,7 @@ public class ColorIconCache {
   }
 
   public Icon getIcon(@NotNull final Color color, final int size) {
-    Icon icon = ourCache.get(color).get(size);
-    if (icon == null) {
-      icon = new ColorIcon(size, color);
-      ourCache.get(color).put(size, icon);
-    }
-
-    return icon;
+    return ourCache.get(color).computeIfAbsent(size, s -> new ColorIcon(s, color));
   }
 
   public static class ColorIcon extends EmptyIcon {
@@ -65,6 +60,18 @@ public class ColorIconCache {
     public ColorIcon(final int size, final Color[] colours) {
       super(size);
       myColours = colours;
+    }
+
+    protected ColorIcon(ColorIcon icon) {
+      super(icon);
+      myColor = icon.myColor;
+      if (icon.myColours != null) myColours = Arrays.copyOf(icon.myColours, icon.myColours.length);
+    }
+
+    @NotNull
+    @Override
+    protected ColorIcon copy() {
+      return new ColorIcon(this);
     }
 
     @Override

@@ -20,6 +20,7 @@ import com.intellij.openapi.application.PathManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.io.FileUtil;
+import com.intellij.openapi.util.text.LineTokenizer;
 import com.intellij.openapi.util.text.StringUtil;
 import org.apache.log4j.*;
 import org.apache.log4j.spi.LoggingEvent;
@@ -30,6 +31,8 @@ import org.jetbrains.annotations.Nullable;
 import java.io.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+
+import static com.intellij.openapi.application.PathManager.PROPERTY_LOG_PATH;
 
 @SuppressWarnings({"CallToPrintStackTrace", "UseOfSystemOutOrSystemErr"})
 public class TestLoggerFactory implements Logger.Factory {
@@ -55,13 +58,18 @@ public class TestLoggerFactory implements Logger.Factory {
   }
 
   private void init() {
+    if (!reconfigure()) return;
+    myInitialized = true;
+  }
+
+  public static boolean reconfigure() {
     try {
       File logXmlFile = new File(PathManager.getHomePath(), "test-log.xml");
       if (!logXmlFile.exists()) {
         logXmlFile = new File(PathManager.getBinPath(), "log.xml");
       }
       if (!logXmlFile.exists()) {
-        return;
+        return false;
       }
 
       final String logDir = getTestLogDir();
@@ -91,14 +99,17 @@ public class TestLoggerFactory implements Logger.Factory {
         FileUtil.writeToFile(ideaLog, "");
       }
 
-      myInitialized = true;
+      return true;
     }
-    catch (Exception e) {
+    catch (Throwable e) {
       e.printStackTrace();
+      return false;
     }
   }
 
   public static String getTestLogDir() {
+    if (System.getProperty(PROPERTY_LOG_PATH) != null) return System.getProperty(PROPERTY_LOG_PATH);
+
     return PathManager.getSystemPath() + "/" + LOG_DIR;
   }
 
@@ -145,15 +156,17 @@ public class TestLoggerFactory implements Logger.Factory {
 
   private static final StringWriter STRING_WRITER = new StringWriter();
   private static final StringBuffer BUFFER = STRING_WRITER.getBuffer();
+  static final char FAILED_TEST_DEBUG_OUTPUT_MARKER = '\u2003';
+  // inserted unicode whitespace to be able to tell these failed tests log lines from the others and fold them
   private static final WriterAppender APPENDER = new WriterAppender(new PatternLayout("%d{HH:mm:ss,SSS} %p %.30c - %m%n"), STRING_WRITER);
-  private static final int MAX_BUFFER_LENGTH = 100000;
+  private static final int MAX_BUFFER_LENGTH = 10_000_000;
   private static final String CFQN = Category.class.getName();
   static void log(@NotNull org.apache.log4j.Logger logger, @NotNull Level level, @Nullable String message, @Nullable Throwable t) {
     if (!UsefulTestCase.IS_UNDER_TEAMCITY) {
       //return;
     }
     LoggingEvent event = new LoggingEvent(CFQN, logger, level, message, t);
-    APPENDER.append(event);
+    APPENDER.doAppend(event);
 
     if (BUFFER.length() > MAX_BUFFER_LENGTH) {
       synchronized (BUFFER) {
@@ -165,8 +178,25 @@ public class TestLoggerFactory implements Logger.Factory {
   }
 
   public static void onTestFinished(boolean success) {
-    if (!success) {
-      System.err.println(BUFFER);
+    if (!success && BUFFER.length() != 0) {
+      if (UsefulTestCase.IS_UNDER_TEAMCITY) {
+        // print in several small statements to avoid service messages tearing causing this fold to expand
+        // using .out instead of .err by the advice from Nikita Skvortsov
+        System.out.flush();
+        System.out.println("##teamcity[blockOpened name='DEBUG log']\n");
+        System.out.flush();
+        System.out.println(BUFFER);
+        System.out.flush();
+        System.out.println("\n##teamcity[blockClosed name='DEBUG log']\n");
+        System.out.flush();
+      }
+      else {
+        // mark each line in IDEA console with this hidden mark to be able to fold it automatically
+        String[] lines = LineTokenizer.tokenize(BUFFER, false, false);
+        String text = StringUtil.join(lines, FAILED_TEST_DEBUG_OUTPUT_MARKER + "\n");
+        if (!text.startsWith("\n")) text = "\n" + text;
+        System.err.println(text);
+      }
     }
     BUFFER.setLength(0);
   }

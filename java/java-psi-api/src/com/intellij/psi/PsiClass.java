@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,10 +15,13 @@
  */
 package com.intellij.psi;
 
+import com.intellij.lang.jvm.JvmClass;
+import com.intellij.lang.jvm.JvmClassKind;
+import com.intellij.lang.jvm.types.JvmReferenceType;
 import com.intellij.openapi.util.Pair;
+import com.intellij.pom.PomRenameableTarget;
 import com.intellij.util.ArrayFactory;
 import com.intellij.util.IncorrectOperationException;
-import com.intellij.pom.PomRenameableTarget;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -26,32 +29,29 @@ import org.jetbrains.annotations.Nullable;
 import java.util.Collection;
 import java.util.List;
 
+import static com.intellij.psi.PsiJvmConversionHelper.*;
+
 /**
  * Represents a Java class or interface.
  *
  * @see PsiJavaFile#getClasses()
  */
 public interface PsiClass
-  extends PsiNameIdentifierOwner, PsiModifierListOwner, PsiDocCommentOwner, PsiTypeParameterListOwner, PsiTarget, PomRenameableTarget<PsiElement> {
+  extends PsiNameIdentifierOwner, PsiModifierListOwner, PsiDocCommentOwner, PsiTypeParameterListOwner,
+          PsiQualifiedNamedElement, PsiTarget, PomRenameableTarget<PsiElement>, JvmClass {
   /**
    * The empty array of PSI classes which can be reused to avoid unnecessary allocations.
    */
   @NotNull PsiClass[] EMPTY_ARRAY = new PsiClass[0];
 
-  ArrayFactory<PsiClass> ARRAY_FACTORY = new ArrayFactory<PsiClass>() {
-    @NotNull
-    @Override
-    public PsiClass[] create(final int count) {
-      return count == 0 ? EMPTY_ARRAY : new PsiClass[count];
-    }
-  };
+  ArrayFactory<PsiClass> ARRAY_FACTORY = count -> count == 0 ? EMPTY_ARRAY : new PsiClass[count];
 
   /**
    * Returns the fully qualified name of the class.
    *
    * @return the qualified name of the class, or null for anonymous and local classes, and for type parameters
    */
-  @Nullable @NonNls
+  @Nullable
   String getQualifiedName();
 
   /**
@@ -122,6 +122,7 @@ public interface PsiClass
    *
    * @return the list of interfaces.
    */
+  @NotNull
   PsiClass[] getInterfaces();
 
   /**
@@ -130,7 +131,8 @@ public interface PsiClass
    * @return the list of classes or interfaces. May return zero elements when jdk is
    *         not configured, so no java.lang.Object is found
    */
-  @NotNull PsiClass[] getSupers();
+  @NotNull
+  PsiClass[] getSupers();
 
   /**
    * Returns the list of class types for the classes and interfaces extended or
@@ -195,7 +197,7 @@ public interface PsiClass
   @NotNull PsiMethod[] getAllMethods();
 
   /**
-   * Returns the list of inner classes for the class and all its superclasses..
+   * Returns the list of inner classes for the class and all its superclasses.
    *
    * @return the list of inner classes.
    */
@@ -356,4 +358,22 @@ public interface PsiClass
 
   @Override
   PsiElement setName(@NonNls @NotNull String name) throws IncorrectOperationException;
+
+  @NotNull
+  @Override
+  default JvmClassKind getClassKind() {
+    return getJvmClassKind(this);
+  }
+
+  @Nullable
+  @Override
+  default JvmReferenceType getSuperClassType() {
+    return getClassSuperType(this);
+  }
+
+  @NotNull
+  @Override
+  default JvmReferenceType[] getInterfaceTypes() {
+    return getClassInterfaces(this);
+  }
 }

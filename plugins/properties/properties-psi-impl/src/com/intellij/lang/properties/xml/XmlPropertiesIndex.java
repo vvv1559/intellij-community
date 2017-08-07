@@ -34,7 +34,6 @@ import com.intellij.util.text.CharArrayUtil;
 import com.intellij.util.xml.NanoXmlUtil;
 import net.n3.nanoxml.StdXMLReader;
 import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
 
 import java.io.*;
 import java.util.Collections;
@@ -128,21 +127,17 @@ public class XmlPropertiesIndex extends FileBasedIndexExtension<XmlPropertiesInd
       return CharArrayUtil.indexOf(contents, HTTP_JAVA_SUN_COM_DTD_PROPERTIES_DTD, 0) != -1 &&
           isAccepted(contents);
     }
-    return !FileBasedIndex.getInstance().processValues(NAME, MARKER_KEY, file.getVirtualFile(),
-                                                       new FileBasedIndex.ValueProcessor<String>() {
-                                                         @Override
-                                                         public boolean process(VirtualFile file, String value) {
-                                                           return false;
-                                                         }
-                                                       }, GlobalSearchScope.allScope(project));
+    return !FileBasedIndex.getInstance().processValues(NAME, MARKER_KEY,
+                                                       file.getVirtualFile(),
+                                                       (file1, value) -> false,
+                                                       GlobalSearchScope.allScope(project));
   }
 
   private static boolean isAccepted(CharSequence bytes) {
-    MyIXMLBuilderAdapter builder = parse(bytes, true);
-    return builder != null && builder.accepted;
+    return parse(bytes, true).accepted;
   }
 
-  @Nullable
+  @NotNull
   private static MyIXMLBuilderAdapter parse(CharSequence text, boolean stopIfAccepted) {
     StdXMLReader reader = new StdXMLReader(CharArrayUtil.readerFromCharSequence(text)) {
       @Override

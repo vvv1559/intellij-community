@@ -18,7 +18,6 @@ package com.intellij.ide.impl;
 
 import com.intellij.ide.CommonActionsManager;
 import com.intellij.ide.DataManager;
-import com.intellij.ide.IdeBundle;
 import com.intellij.ide.projectView.impl.ProjectRootsUtil;
 import com.intellij.ide.structureView.*;
 import com.intellij.ide.structureView.impl.StructureViewComposite;
@@ -48,8 +47,8 @@ import com.intellij.openapi.wm.ToolWindow;
 import com.intellij.openapi.wm.ToolWindowId;
 import com.intellij.openapi.wm.ToolWindowManager;
 import com.intellij.openapi.wm.ex.ToolWindowEx;
-import com.intellij.psi.PsiDocumentManager;
 import com.intellij.psi.PsiElement;
+import com.intellij.ui.components.JBPanelWithEmptyText;
 import com.intellij.ui.content.*;
 import com.intellij.util.BitUtil;
 import com.intellij.util.ui.UIUtil;
@@ -80,7 +79,7 @@ public class StructureViewWrapperImpl implements StructureViewWrapper, Disposabl
 
   private JPanel[] myPanels = new JPanel[0];
   private final MergingUpdateQueue myUpdateQueue;
-  private final String myKey = new String("DATA_SELECTOR");
+  private final String myKey = "DATA_SELECTOR";
 
   // -------------------------------------------------------------------------
   // Constructor
@@ -255,7 +254,7 @@ public class StructureViewWrapperImpl implements StructureViewWrapper, Disposabl
 
   public void rebuild() {
     if (myProject.isDisposed()) return;
-    PsiDocumentManager.getInstance(myProject).commitAllDocuments();
+
     Dimension referenceSize = null;
 
     if (myStructureView != null) {
@@ -344,7 +343,12 @@ public class StructureViewWrapperImpl implements StructureViewWrapper, Disposabl
     }
 
     if (myModuleStructureComponent == null && myStructureView == null) {
-      createSinglePanel(new JLabel(IdeBundle.message("message.nothing.to.show.in.structure.view"), SwingConstants.CENTER));
+      createSinglePanel(new JBPanelWithEmptyText() {
+        @Override
+        public Color getBackground() {
+          return UIUtil.getTreeBackground();
+        }
+      });
     }
 
     for (int i = 0; i < myPanels.length; i++) {

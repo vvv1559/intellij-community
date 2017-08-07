@@ -15,12 +15,10 @@
  */
 package com.intellij.codeInsight.daemon.impl.quickfix;
 
-import com.intellij.codeInsight.JavaProjectCodeInsightSettings;
 import com.intellij.codeInsight.daemon.QuickFixBundle;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.project.Project;
 import com.intellij.psi.*;
-import com.intellij.psi.impl.source.resolve.DefaultParameterTypeInferencePolicy;
 import com.intellij.psi.infos.MethodCandidateInfo;
 import com.intellij.psi.search.PsiShortNamesCache;
 import com.intellij.psi.util.PsiFormatUtil;
@@ -34,7 +32,7 @@ import java.util.Collections;
 import java.util.List;
 
 public class StaticImportMethodFix extends StaticImportMemberFix<PsiMethod> {
-  private final SmartPsiElementPointer<PsiMethodCallExpression> myMethodCall;
+  protected final SmartPsiElementPointer<PsiMethodCallExpression> myMethodCall;
 
   public StaticImportMethodFix(@NotNull PsiMethodCallExpression methodCallExpression) {
     myMethodCall = SmartPointerManager.getInstance(methodCallExpression.getProject()).createSmartPsiElementPointer(methodCallExpression);
@@ -56,21 +54,21 @@ public class StaticImportMethodFix extends StaticImportMemberFix<PsiMethod> {
 
   @NotNull
   @Override
-  protected List<PsiMethod> getMembersToImport(boolean applicableOnly) {
+  protected List<PsiMethod> getMembersToImport(boolean applicableOnly, @NotNull StaticMembersProcessor.SearchMode searchMode) {
     final Project project = myMethodCall.getProject();
     PsiShortNamesCache cache = PsiShortNamesCache.getInstance(project);
     final PsiMethodCallExpression element = myMethodCall.getElement();
     PsiReferenceExpression reference = element == null ? null : element.getMethodExpression();
     String name = reference == null ? null : reference.getReferenceName();
     if (name == null) return Collections.emptyList();
-    final StaticMembersProcessor<PsiMethod> processor = new MyStaticMethodProcessor(element);
+    final StaticMembersProcessor<PsiMethod> processor = new MyStaticMethodProcessor(element, showMembersFromDefaultPackage(), searchMode);
     cache.processMethodsWithName(name, element.getResolveScope(), processor);
     return processor.getMembersToImport(applicableOnly);
   }
 
-  public static boolean isExcluded(PsiMember method) {
-    String name = PsiUtil.getMemberQualifiedName(method);
-    return name != null && JavaProjectCodeInsightSettings.getSettings(method.getProject()).isExcluded(name);
+  @Override
+  protected boolean showMembersFromDefaultPackage() {
+    return false;
   }
 
   @NotNull
@@ -100,8 +98,8 @@ public class StaticImportMethodFix extends StaticImportMemberFix<PsiMethod> {
 
   private static class MyStaticMethodProcessor extends StaticMembersProcessor<PsiMethod> {
 
-    private MyStaticMethodProcessor(PsiMethodCallExpression place) {
-      super(place);
+    private MyStaticMethodProcessor(@NotNull PsiMethodCallExpression place, boolean showMembersFromDefaultPackage, @NotNull SearchMode mode) {
+      super(place, showMembersFromDefaultPackage, mode);
     }
 
     @Override

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,14 +14,6 @@
  * limitations under the License.
  */
 
-/*
- * Created by IntelliJ IDEA.
- * User: dsl
- * Date: 06.05.2002
- * Time: 13:36:30
- * To change template for new class use
- * Code Style | Class Templates options (Tools | IDE Options).
- */
 package com.intellij.refactoring.introduceParameter;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -32,6 +24,8 @@ import com.intellij.codeInsight.navigation.NavigationUtil;
 import com.intellij.ide.util.PsiClassListCellRenderer;
 import com.intellij.openapi.actionSystem.DataContext;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.ModalityState;
+import com.intellij.openapi.application.TransactionGuard;
 import com.intellij.openapi.command.WriteCommandAction;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Editor;
@@ -333,7 +327,7 @@ public class IntroduceParameterHandler extends IntroduceHandlerBase {
     /* do nothing */
   }
 
-  public static List<PsiMethod> getEnclosingMethods(PsiMethod nearest) {
+  public static List<PsiMethod> getEnclosingMethods(@NotNull PsiMethod nearest) {
     List<PsiMethod> enclosingMethods = new ArrayList<>();
     enclosingMethods.add(nearest);
     PsiMethod method = nearest;
@@ -477,9 +471,23 @@ public class IntroduceParameterHandler extends IntroduceHandlerBase {
           Util.analyzeExpression(myExpr, new ArrayList<>(), classMemberRefs, new ArrayList<>());
         }
 
+        showDialog(method, methodToSearchFor, occurences, replaceAllOccurrences, delegate, initializerType, mustBeFinal,
+                   classMemberRefs, createNameSuggestionGenerator(myExpr, propName, myProject, enteredName));
+      }
+    }
+
+    private void showDialog(PsiMethod method,
+                            PsiMethod methodToSearchFor,
+                            PsiExpression[] occurences,
+                            boolean replaceAllOccurrences,
+                            boolean delegate,
+                            PsiType initializerType,
+                            boolean mustBeFinal,
+                            List<UsageInfo> classMemberRefs, NameSuggestionsGenerator nameSuggestionGenerator) {
+      TransactionGuard.getInstance().submitTransactionAndWait(() -> {
         final IntroduceParameterDialog dialog =
           new IntroduceParameterDialog(myProject, classMemberRefs, occurences, myLocalVar, myExpr,
-                                       createNameSuggestionGenerator(myExpr, propName, myProject, enteredName),
+                                       nameSuggestionGenerator,
                                        createTypeSelectorManager(occurences, initializerType), methodToSearchFor, method, getParamsToRemove(method, occurences), mustBeFinal);
         dialog.setReplaceAllOccurrences(replaceAllOccurrences);
         dialog.setGenerateDelegate(delegate);
@@ -489,9 +497,9 @@ public class IntroduceParameterHandler extends IntroduceHandlerBase {
               myEditor.getSelectionModel().removeSelection();
             }
           };
-          SwingUtilities.invokeLater(cleanSelectionRunnable);
+          ApplicationManager.getApplication().invokeLater(cleanSelectionRunnable, ModalityState.any());
         }
-      }
+      });
     }
 
     private TypeSelectorManagerImpl createTypeSelectorManager(PsiExpression[] occurences, PsiType initializerType) {
@@ -531,26 +539,19 @@ public class IntroduceParameterHandler extends IntroduceHandlerBase {
       if (inplaceIntroducer instanceof InplaceIntroduceParameterPopup) {
         return false;
       }
-      final List<PsiMethod> enclosingMethods = getEnclosingMethods(Util.getContainingMethod(elements[0]));
+      final PsiMethod containingMethod = Util.getContainingMethod(elements[0]);
+      if (containingMethod == null) {
+        return false;
+      }
+      final List<PsiMethod> enclosingMethods = getEnclosingMethods(containingMethod);
       if (enclosingMethods.isEmpty()) {
         return false;
       }
 
-      final PsiElement[] elementsCopy;
-      if (!elements[0].isPhysical()) {
-        elementsCopy = elements;
-      }
-      else {
-        final PsiFile copy = PsiFileFactory.getInstance(project)
-          .createFileFromText(file.getName(), file.getFileType(), file.getText(), file.getModificationStamp(), false);
-        final TextRange range = new TextRange(elements[0].getTextRange().getStartOffset(),
-                                              elements[elements.length - 1].getTextRange().getEndOffset());
-        final PsiExpression exprInRange = CodeInsightUtil.findExpressionInRange(copy, range.getStartOffset(), range.getEndOffset());
-        elementsCopy = exprInRange != null
-                       ? new PsiElement[]{exprInRange}
-                       : CodeInsightUtil.findStatementsInRange(copy, range.getStartOffset(), range.getEndOffset());
-      }
-      final List<PsiMethod> enclosingMethodsInCopy = getEnclosingMethods(Util.getContainingMethod(elementsCopy[0]));
+      final PsiElement[] elementsCopy = getElementsInCopy(project, file, elements);
+      final PsiMethod containingMethodCopy = Util.getContainingMethod(elementsCopy[0]);
+      LOG.assertTrue(containingMethodCopy != null);
+      final List<PsiMethod> enclosingMethodsInCopy = getEnclosingMethods(containingMethodCopy);
       final MyExtractMethodProcessor processor = new MyExtractMethodProcessor(project, editor, elementsCopy, 
                                                                               enclosingMethodsInCopy.get(enclosingMethodsInCopy.size() - 1));
       try {
@@ -558,8 +559,7 @@ public class IntroduceParameterHandler extends IntroduceHandlerBase {
         processor.showDialog();
 
         //provide context for generated method to check exceptions compatibility
-        final PsiMethod emptyMethod = JavaPsiFacade.getElementFactory(project)
-          .createMethodFromText(processor.generateEmptyMethod("name").getText(), elements[0]);
+        final PsiMethod emptyMethod = processor.generateEmptyMethod("name", elements[0]);
         final Collection<? extends PsiType> types = FunctionalInterfaceSuggester.suggestFunctionalInterfaces(emptyMethod);
         if (types.isEmpty()) {
           return false;
@@ -580,7 +580,7 @@ public class IntroduceParameterHandler extends IntroduceHandlerBase {
           final PsiType returnType = emptyMethod.getReturnType();
           LOG.assertTrue(returnType != null);
           final String title = "Choose Applicable Functional Interface: " + methodSignature + " -> " + returnType.getPresentableText();
-          NavigationUtil.getPsiElementPopup(psiClasses, PsiClassListCellRenderer.INSTANCE, title,
+          NavigationUtil.getPsiElementPopup(psiClasses, new PsiClassListCellRenderer(), title,
                                             new PsiElementProcessor<PsiClass>() {
                                               @Override
                                               public boolean execute(@NotNull PsiClass psiClass) {
@@ -594,10 +594,31 @@ public class IntroduceParameterHandler extends IntroduceHandlerBase {
 
         return true;
       }
-      catch (IncorrectOperationException ignore) {}
-      catch (PrepareFailedException ignore) {}
+      catch (IncorrectOperationException | PrepareFailedException ignore) {}
     }
     return false;
+  }
+
+  public static PsiElement[] getElementsInCopy(Project project, PsiFile file, PsiElement[] elements) {
+    final PsiElement[] elementsCopy;
+    if (!elements[0].isPhysical()) {
+      elementsCopy = elements;
+    }
+    else {
+      final PsiFile copy = PsiFileFactory.getInstance(project)
+        .createFileFromText(file.getName(), file.getFileType(), file.getText(), file.getModificationStamp(), false);
+      final TextRange range = new TextRange(elements[0].getTextRange().getStartOffset(),
+                                            elements[elements.length - 1].getTextRange().getEndOffset());
+      final PsiExpression exprInRange = CodeInsightUtil.findExpressionInRange(copy, range.getStartOffset(), range.getEndOffset());
+      elementsCopy = exprInRange != null
+                     ? new PsiElement[]{exprInRange}
+                     : CodeInsightUtil.findStatementsInRange(copy, range.getStartOffset(), range.getEndOffset());
+    }
+    if (elementsCopy.length == 1 && elementsCopy[0].getUserData(ElementToWorkOn.PARENT) == null) {
+        elementsCopy[0].putUserData(ElementToWorkOn.REPLACE_NON_PHYSICAL, true);
+      }
+
+    return elementsCopy;
   }
 
   private void functionalInterfaceSelected(final PsiType selectedType,
@@ -615,8 +636,11 @@ public class IntroduceParameterHandler extends IntroduceHandlerBase {
                                                   PsiMethod methodToSearchFor, Editor editor,
                                                   final Project project,
                                                   final PsiType selectedType,
-                                                  final MyExtractMethodProcessor processor, 
+                                                  final ExtractMethodProcessor processor, 
                                                   final PsiElement[] elements) {
+    if (!elements[0].isValid()) {
+      return;
+    }
     final PsiElement commonParent = findCommonParent(elements);
     if (commonParent == null) {
       LOG.error("Should have common parent:" + Arrays.toString(elements));
@@ -644,11 +668,6 @@ public class IntroduceParameterHandler extends IntroduceHandlerBase {
       LOG.assertTrue(method != null);
       final String interfaceMethodName = method.getName();
       processor.setMethodName(interfaceMethodName);
-
-      if (copyElements.length == 1 && copyElements[0].getUserData(ElementToWorkOn.PARENT) == null) {
-        copyElements[0].putUserData(ElementToWorkOn.REPLACE_NON_PHYSICAL, true);
-      }
-
       processor.doExtract();
 
       final PsiMethod extractedMethod = processor.getExtractedMethod();
@@ -679,6 +698,7 @@ public class IntroduceParameterHandler extends IntroduceHandlerBase {
     expression.putUserData(ElementToWorkOn.PREFIX, prefixText.get());
     expression.putUserData(ElementToWorkOn.SUFFIX, suffixText.get());
     expression.putUserData(ElementToWorkOn.TEXT_RANGE, marker);
+    expression.putUserData(ElementToWorkOn.EXPR_RANGE, elements.length == 1 ? elements[0].getTextRange() : null);
 
     new Introducer(project, expression, null, editor)
       .introduceParameter(methodToIntroduceParameter, methodToSearchFor);
@@ -701,7 +721,7 @@ public class IntroduceParameterHandler extends IntroduceHandlerBase {
   private static class MyExtractMethodProcessor extends ExtractMethodProcessor {
     private final PsiMethod myTopEnclosingMethod;
 
-    public MyExtractMethodProcessor(Project project, Editor editor, PsiElement[] elements, PsiMethod topEnclosing) {
+    public MyExtractMethodProcessor(Project project, Editor editor, PsiElement[] elements, @NotNull PsiMethod topEnclosing) {
       super(project, editor, elements, null, REFACTORING_NAME, null, null);
       myTopEnclosingMethod = topEnclosing;
     }
@@ -714,10 +734,6 @@ public class IntroduceParameterHandler extends IntroduceHandlerBase {
     @Override
     protected boolean isNeedToChangeCallContext() {
       return false;
-    }
-
-    public void setMethodName(String methodName) {
-      myMethodName = methodName;
     }
 
     @Override

@@ -15,6 +15,7 @@
  */
 package com.intellij.remoteServer.impl.runtime.ui;
 
+import com.intellij.openapi.project.DumbAware;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Condition;
 import com.intellij.openapi.util.Disposer;
@@ -24,7 +25,7 @@ import com.intellij.ui.content.Content;
 import com.intellij.ui.content.ContentFactory;
 import org.jetbrains.annotations.NotNull;
 
-public class ServersToolWindowFactory implements ToolWindowFactory, Condition<Project> {
+public class ServersToolWindowFactory implements ToolWindowFactory, Condition<Project>, DumbAware {
 
   private final RemoteServersViewContribution myContribution;
 
@@ -35,10 +36,15 @@ public class ServersToolWindowFactory implements ToolWindowFactory, Condition<Pr
   @Override
   public void createToolWindowContent(@NotNull Project project, @NotNull ToolWindow toolWindow) {
     final ContentFactory contentFactory = ContentFactory.SERVICE.getInstance();
-    final ServersToolWindowContent serversContent = new ServersToolWindowContent(project, myContribution);
+    final ServersToolWindowContent serversContent = doCreateToolWindowContent(project);
     Content content = contentFactory.createContent(serversContent.getMainPanel(), null, false);
     Disposer.register(content, serversContent);
     toolWindow.getContentManager().addContent(content);
+  }
+
+  @NotNull
+  protected ServersToolWindowContent doCreateToolWindowContent(@NotNull Project project) {
+    return new ServersToolWindowContent(project, myContribution, ServersToolWindowContent.ActionGroups.SHARED_ACTION_GROUPS);
   }
 
   @Override

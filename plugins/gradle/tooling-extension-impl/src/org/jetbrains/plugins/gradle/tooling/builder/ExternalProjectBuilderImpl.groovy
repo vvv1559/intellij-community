@@ -31,6 +31,8 @@ import org.gradle.api.tasks.bundling.Jar
 import org.gradle.api.tasks.compile.JavaCompile
 import org.gradle.api.tasks.util.PatternFilterable
 import org.gradle.plugins.ide.idea.IdeaPlugin
+import org.gradle.util.GUtil
+import org.gradle.util.GradleVersion
 import org.jetbrains.annotations.NotNull
 import org.jetbrains.annotations.Nullable
 import org.jetbrains.plugins.gradle.model.*
@@ -39,45 +41,68 @@ import org.jetbrains.plugins.gradle.tooling.ModelBuilderService
 import org.jetbrains.plugins.gradle.tooling.util.DependencyResolverImpl
 import org.jetbrains.plugins.gradle.tooling.util.SourceSetCachedFinder
 
-import java.util.concurrent.ConcurrentHashMap
-
 /**
  * @author Vladislav.Soroka
  * @since 12/20/13
  */
 class ExternalProjectBuilderImpl implements ModelBuilderService {
 
-  private final cache = new ConcurrentHashMap<String, ExternalProject>()
-  private final myTasksFactory = new TasksFactory()
-  private SourceSetCachedFinder mySourceSetFinder
+  private static is4OrBetter = GradleVersion.current().baseVersion >= GradleVersion.version("4.0")
 
   @Override
-  public boolean canBuild(String modelName) {
+  boolean canBuild(String modelName) {
     return ExternalProject.name == modelName || ExternalProjectPreview.name == modelName
   }
 
   @Nullable
   @Override
-  public Object buildAll(final String modelName, final Project project) {
-    ExternalProject externalProject = cache[project.path]
-    if (externalProject != null) return externalProject
+  Object buildAll(final String modelName, final Project project) {
+    def cache = getOrSetExt(project, 'projects cache: ' + ExternalProject.name, { new HashMap<Project, ExternalProject>()}) as Map<Project, ExternalProject>
+    def tasksFactory = getOrSetExt(project , 'tasks cache: ' + ExternalProject.name,  { new TasksFactory()}) as TasksFactory
+    def sourceSetFinder = getOrSetExt(project , 'sourceSets finder: ' + ExternalProject.name,  { new SourceSetCachedFinder(project)}) as SourceSetCachedFinder
+    return doBuild(modelName, project, cache, tasksFactory, sourceSetFinder)
+  }
 
-    if(!mySourceSetFinder) mySourceSetFinder = new SourceSetCachedFinder(project)
+  private static getOrSetExt(final Project project, String name, Closure<Object> valueProvider) {
+    def rootProject = project.getRootProject()
+    def extraProperties = rootProject.extensions.extraProperties
+    if(!extraProperties.has(name)) {
+      extraProperties.set(name, valueProvider())
+    }
+    return extraProperties.get(name)
+  }
+
+  @Nullable
+  private static Object doBuild(final String modelName,
+                                final Project project,
+                                Map<Project, ExternalProject> cache,
+                                TasksFactory tasksFactory,
+                                SourceSetCachedFinder sourceSetFinder) {
+    ExternalProject externalProject = cache[project]
+    if (externalProject != null) return externalProject
 
     def resolveSourceSetDependencies = System.properties.'idea.resolveSourceSetDependencies' as boolean
     def isPreview = ExternalProjectPreview.name == modelName
     DefaultExternalProject defaultExternalProject = new DefaultExternalProject()
     defaultExternalProject.externalSystemId = "GRADLE"
     defaultExternalProject.name = project.name
-    defaultExternalProject.QName = ":" == project.path ? project.name : project.path
+    def qName = ":" == project.path ? project.name : project.path
+    defaultExternalProject.QName = qName
+    final IdeaPlugin ideaPlugin = project.getPlugins().findPlugin(IdeaPlugin.class)
+    def ideaPluginModule = ideaPlugin?.model?.module
+    def parentBuildRootProject = project.gradle.parent?.rootProject
+    def compositePrefix = parentBuildRootProject && !project.rootProject.is(parentBuildRootProject) && ":" != project.path ?
+                          (ideaPlugin?.model?.project?.name ?: project.rootProject.name) : "";
+    def ideaModuleName = ideaPluginModule?.name ?: project.name
+    defaultExternalProject.id = compositePrefix + (":" == project.path ? ideaModuleName : qName)
     defaultExternalProject.version = wrap(project.version)
     defaultExternalProject.description = project.description
     defaultExternalProject.buildDir = project.buildDir
     defaultExternalProject.buildFile = project.buildFile
     defaultExternalProject.group = wrap(project.group)
     defaultExternalProject.projectDir = project.projectDir
-    defaultExternalProject.sourceSets = getSourceSets(project, isPreview, resolveSourceSetDependencies)
-    defaultExternalProject.tasks = getTasks(project)
+    defaultExternalProject.sourceSets = getSourceSets(project, isPreview, resolveSourceSetDependencies, sourceSetFinder)
+    defaultExternalProject.tasks = getTasks(project, tasksFactory)
 
     defaultExternalProject.plugins = getPlugins(project)
     //defaultExternalProject.setProperties(project.getProperties())
@@ -86,34 +111,34 @@ class ExternalProjectBuilderImpl implements ModelBuilderService {
 
     final Map<String, ExternalProject> childProjects = new HashMap<String, ExternalProject>(project.getChildProjects().size())
     for (Map.Entry<String, Project> projectEntry : project.getChildProjects().entrySet()) {
-      final Object externalProjectChild = buildAll(modelName, projectEntry.getValue())
+      final Object externalProjectChild = doBuild(modelName, projectEntry.getValue(), cache, tasksFactory, sourceSetFinder)
       if (externalProjectChild instanceof ExternalProject) {
         childProjects.put(projectEntry.getKey(), (ExternalProject)externalProjectChild)
       }
     }
     defaultExternalProject.setChildProjects(childProjects)
-    cache.put(project.getPath(), defaultExternalProject)
+    cache.put(project, defaultExternalProject)
 
     defaultExternalProject
   }
 
   static void addArtifactsData(final Project project, DefaultExternalProject externalProject) {
-    final List<File> artifacts = new ArrayList<File>();
+    final List<File> artifacts = new ArrayList<File>()
     for (Task task : project.getTasks()) {
       if (task instanceof Jar) {
-        Jar jar = (Jar)task;
-        artifacts.add(jar.getArchivePath());
+        Jar jar = (Jar)task
+        artifacts.add(jar.getArchivePath())
       }
     }
-    externalProject.setArtifacts(artifacts);
+    externalProject.setArtifacts(artifacts)
 
-    def configurationsByName = project.getConfigurations().getAsMap();
-    Map<String, Set<File>> artifactsByConfiguration = new HashMap<String, Set<File>>();
+    def configurationsByName = project.getConfigurations().getAsMap()
+    Map<String, Set<File>> artifactsByConfiguration = new HashMap<String, Set<File>>()
     for (Map.Entry<String, Configuration> configurationEntry : configurationsByName.entrySet()) {
-      Set<File> files = configurationEntry.getValue().getAllArtifacts().getFiles().getFiles();
-      artifactsByConfiguration.put(configurationEntry.getKey(), files);
+      Set<File> files = configurationEntry.getValue().getAllArtifacts().getFiles().getFiles()
+      artifactsByConfiguration.put(configurationEntry.getKey(), files)
     }
-    externalProject.setArtifactsByConfiguration(artifactsByConfiguration);
+    externalProject.setArtifactsByConfiguration(artifactsByConfiguration)
   }
 
   static Map<String, ExternalPlugin> getPlugins(Project project) {
@@ -127,10 +152,10 @@ class ExternalProjectBuilderImpl implements ModelBuilderService {
     result
   }
 
-  Map<String, ExternalTask> getTasks(Project project) {
+  static Map<String, ExternalTask> getTasks(Project project, TasksFactory tasksFactory) {
     def result = [:] as Map<String, DefaultExternalTask>
 
-    myTasksFactory.getTasks(project).each { Task task ->
+    tasksFactory.getTasks(project).each { Task task ->
       DefaultExternalTask externalTask = result.get(task.name)
       if (externalTask == null) {
         externalTask = new DefaultExternalTask()
@@ -138,10 +163,7 @@ class ExternalProjectBuilderImpl implements ModelBuilderService {
         externalTask.QName = task.name
         externalTask.description = task.description
         externalTask.group = task.group ?: "other"
-
-        def clazzName = task.class.canonicalName
-        def prefixIndex = clazzName.lastIndexOf('_Decorated')
-        externalTask.type = prefixIndex == -1 ? clazzName : clazzName.substring(0, prefixIndex)
+        externalTask.type = ProjectExtensionsDataBuilderImpl.getType(task)
         result.put(externalTask.name, externalTask)
       }
 
@@ -153,12 +175,12 @@ class ExternalProjectBuilderImpl implements ModelBuilderService {
     result
   }
 
-  private Map<String, ExternalSourceSet> getSourceSets(Project project, boolean isPreview, boolean resolveSourceSetDependencies) {
-    final IdeaPlugin ideaPlugin = project.getPlugins().findPlugin(IdeaPlugin.class);
+  private static Map<String, ExternalSourceSet> getSourceSets(Project project, boolean isPreview, boolean resolveSourceSetDependencies, SourceSetCachedFinder sourceSetFinder) {
+    final IdeaPlugin ideaPlugin = project.getPlugins().findPlugin(IdeaPlugin.class)
     def ideaPluginModule = ideaPlugin?.model?.module
     boolean inheritOutputDirs = ideaPluginModule?.inheritOutputDirs ?: false
-    def ideaOutDir = ideaPluginModule?.outputDir
-    def ideaTestOutDir = ideaPluginModule?.testOutputDir
+    def ideaPluginOutDir = ideaPluginModule?.outputDir
+    def ideaPluginTestOutDir = ideaPluginModule?.testOutputDir
     def generatedSourceDirs
     def ideaSourceDirs
     def ideaTestSourceDirs
@@ -182,12 +204,12 @@ class ExternalProjectBuilderImpl implements ModelBuilderService {
     //noinspection GrUnresolvedAccess
     if(project.hasProperty('sourceCompatibility') && project.sourceCompatibility instanceof JavaVersion) {
       //noinspection GrUnresolvedAccess
-      projectSourceCompatibility = project.sourceCompatibility.name;
+      projectSourceCompatibility = project.sourceCompatibility.name
     }
     //noinspection GrUnresolvedAccess
     if(project.hasProperty('targetCompatibility') && project.targetCompatibility instanceof JavaVersion) {
       //noinspection GrUnresolvedAccess
-      projectTargetCompatibility = project.targetCompatibility.name;
+      projectTargetCompatibility = project.targetCompatibility.name
     }
 
     def result = [:] as Map<String, ExternalSourceSet>
@@ -236,13 +258,45 @@ class ExternalProjectBuilderImpl implements ModelBuilderService {
       ExternalSourceDirectorySet resourcesDirectorySet = new DefaultExternalSourceDirectorySet()
       resourcesDirectorySet.name = sourceSet.resources.name
       resourcesDirectorySet.srcDirs = sourceSet.resources.srcDirs
-      resourcesDirectorySet.gradleOutputDir = chooseNotNull(sourceSet.output.resourcesDir, sourceSet.output.classesDir, project.buildDir)
+
+      if (is4OrBetter) {
+        if (sourceSet.output.resourcesDir) {
+          resourcesDirectorySet.addGradleOutputDir(sourceSet.output.resourcesDir)
+        }
+        else {
+          for (File outDir : sourceSet.output.classesDirs.files) {
+            resourcesDirectorySet.addGradleOutputDir(outDir)
+          }
+          if (resourcesDirectorySet.gradleOutputDirs.isEmpty()) {
+            resourcesDirectorySet.addGradleOutputDir(project.buildDir)
+          }
+        }
+      }
+      else {
+        resourcesDirectorySet.addGradleOutputDir(chooseNotNull(
+          sourceSet.output.resourcesDir, sourceSet.output.classesDir, project.buildDir))
+      }
+
+      def ideaOutDir = new File(project.projectDir, "out/" + (SourceSet.MAIN_SOURCE_SET_NAME == sourceSet.name ? "production" : GUtil.toLowerCamelCase(sourceSet.name)))
+      resourcesDirectorySet.outputDir = new File(ideaOutDir, "resources")
       resourcesDirectorySet.inheritedCompilerOutput = inheritOutputDirs
 
       ExternalSourceDirectorySet javaDirectorySet = new DefaultExternalSourceDirectorySet()
       javaDirectorySet.name = sourceSet.allJava.name
       javaDirectorySet.srcDirs = sourceSet.allJava.srcDirs
-      javaDirectorySet.gradleOutputDir = chooseNotNull(sourceSet.output.classesDir, project.buildDir);
+      if (is4OrBetter) {
+        for (File outDir : sourceSet.output.classesDirs.files) {
+          javaDirectorySet.addGradleOutputDir(outDir)
+        }
+        if (javaDirectorySet.gradleOutputDirs.isEmpty()) {
+          javaDirectorySet.addGradleOutputDir(project.buildDir)
+        }
+      }
+      else {
+        javaDirectorySet.addGradleOutputDir(chooseNotNull(sourceSet.output.classesDir, project.buildDir))
+      }
+
+      javaDirectorySet.outputDir = new File(ideaOutDir, "classes")
       javaDirectorySet.inheritedCompilerOutput = inheritOutputDirs
 //      javaDirectorySet.excludes = javaExcludes + sourceSet.java.excludes;
 //      javaDirectorySet.includes = javaIncludes + sourceSet.java.includes;
@@ -260,19 +314,20 @@ class ExternalProjectBuilderImpl implements ModelBuilderService {
           generatedDirectorySet = new DefaultExternalSourceDirectorySet()
           generatedDirectorySet.name = "generated " + javaDirectorySet.name
           generatedDirectorySet.srcDirs = files
-          generatedDirectorySet.gradleOutputDir = javaDirectorySet.outputDir
+          generatedDirectorySet.addGradleOutputDir(javaDirectorySet.outputDir)
+          generatedDirectorySet.outputDir = javaDirectorySet.outputDir
           generatedDirectorySet.inheritedCompilerOutput = javaDirectorySet.isCompilerOutputPathInherited()
         }
         additionalIdeaGenDirs.removeAll(files)
       }
 
       if (SourceSet.TEST_SOURCE_SET_NAME == sourceSet.name) {
-        if (!inheritOutputDirs && ideaTestOutDir != null) {
-          javaDirectorySet.outputDir = ideaTestOutDir
-          resourcesDirectorySet.outputDir = ideaTestOutDir
+        if (!inheritOutputDirs && ideaPluginTestOutDir != null) {
+          javaDirectorySet.outputDir = ideaPluginTestOutDir
+          resourcesDirectorySet.outputDir = ideaPluginTestOutDir
         }
-        resourcesDirectorySet.excludes = testResourcesExcludes + sourceSet.resources.excludes;
-        resourcesDirectorySet.includes = testResourcesIncludes + sourceSet.resources.includes;
+        resourcesDirectorySet.excludes = testResourcesExcludes + sourceSet.resources.excludes
+        resourcesDirectorySet.includes = testResourcesIncludes + sourceSet.resources.includes
         resourcesDirectorySet.filters = testFilterReaders
         sources.put(ExternalSystemSourceType.TEST, javaDirectorySet)
         sources.put(ExternalSystemSourceType.TEST_RESOURCE, resourcesDirectorySet)
@@ -281,12 +336,12 @@ class ExternalProjectBuilderImpl implements ModelBuilderService {
         }
       }
       else {
-        if (!inheritOutputDirs && SourceSet.MAIN_SOURCE_SET_NAME == sourceSet.name && ideaOutDir != null) {
-          javaDirectorySet.outputDir = ideaOutDir
-          resourcesDirectorySet.outputDir = ideaOutDir
+        if (!inheritOutputDirs && SourceSet.MAIN_SOURCE_SET_NAME == sourceSet.name && ideaPluginOutDir != null) {
+          javaDirectorySet.outputDir = ideaPluginOutDir
+          resourcesDirectorySet.outputDir = ideaPluginOutDir
         }
-        resourcesDirectorySet.excludes = resourcesExcludes + sourceSet.resources.excludes;
-        resourcesDirectorySet.includes = resourcesIncludes + sourceSet.resources.includes;
+        resourcesDirectorySet.excludes = resourcesExcludes + sourceSet.resources.excludes
+        resourcesDirectorySet.includes = resourcesIncludes + sourceSet.resources.includes
         resourcesDirectorySet.filters = filterReaders
         sources.put(ExternalSystemSourceType.SOURCE, javaDirectorySet)
         sources.put(ExternalSystemSourceType.RESOURCE, resourcesDirectorySet)
@@ -299,7 +354,8 @@ class ExternalProjectBuilderImpl implements ModelBuilderService {
             def testDirectorySet = new DefaultExternalSourceDirectorySet()
             testDirectorySet.name = javaDirectorySet.name
             testDirectorySet.srcDirs = testDirs
-            testDirectorySet.gradleOutputDir = javaDirectorySet.outputDir
+            testDirectorySet.addGradleOutputDir(javaDirectorySet.outputDir)
+            testDirectorySet.outputDir = javaDirectorySet.outputDir
             testDirectorySet.inheritedCompilerOutput = javaDirectorySet.isCompilerOutputPathInherited()
             sources.put(ExternalSystemSourceType.TEST, testDirectorySet)
           }
@@ -311,7 +367,8 @@ class ExternalProjectBuilderImpl implements ModelBuilderService {
             def testResourcesDirectorySet = new DefaultExternalSourceDirectorySet()
             testResourcesDirectorySet.name = resourcesDirectorySet.name
             testResourcesDirectorySet.srcDirs = testResourcesDirs
-            testResourcesDirectorySet.gradleOutputDir = resourcesDirectorySet.outputDir
+            testResourcesDirectorySet.addGradleOutputDir(resourcesDirectorySet.outputDir)
+            testResourcesDirectorySet.outputDir = resourcesDirectorySet.outputDir
             testResourcesDirectorySet.inheritedCompilerOutput = resourcesDirectorySet.isCompilerOutputPathInherited()
             sources.put(ExternalSystemSourceType.TEST_RESOURCE, testResourcesDirectorySet)
           }
@@ -327,7 +384,8 @@ class ExternalProjectBuilderImpl implements ModelBuilderService {
               def testGeneratedDirectorySet = new DefaultExternalSourceDirectorySet()
               testGeneratedDirectorySet.name = generatedDirectorySet.name
               testGeneratedDirectorySet.srcDirs = testGeneratedDirs
-              testGeneratedDirectorySet.gradleOutputDir = generatedDirectorySet.outputDir
+              testGeneratedDirectorySet.addGradleOutputDir(generatedDirectorySet.outputDir)
+              testGeneratedDirectorySet.outputDir = generatedDirectorySet.outputDir
               testGeneratedDirectorySet.inheritedCompilerOutput = generatedDirectorySet.isCompilerOutputPathInherited()
 
               sources.put(ExternalSystemSourceType.TEST_GENERATED, testGeneratedDirectorySet)
@@ -344,7 +402,7 @@ class ExternalProjectBuilderImpl implements ModelBuilderService {
       }
 
       if(resolveSourceSetDependencies) {
-        def dependencies = new DependencyResolverImpl(project, isPreview, downloadJavadoc, downloadSources, mySourceSetFinder).resolveDependencies(sourceSet)
+        def dependencies = new DependencyResolverImpl(project, isPreview, downloadJavadoc, downloadSources, sourceSetFinder).resolveDependencies(sourceSet)
         externalSourceSet.dependencies.addAll(dependencies)
       }
 
@@ -371,7 +429,8 @@ class ExternalProjectBuilderImpl implements ModelBuilderService {
             def generatedDirectorySet = new DefaultExternalSourceDirectorySet()
             generatedDirectorySet.name = "generated " + mainSourceSet.name
             generatedDirectorySet.srcDirs.addAll(mainAdditionalGenDirs)
-            generatedDirectorySet.gradleOutputDir = mainSourceDirectorySet.outputDir
+            generatedDirectorySet.addGradleOutputDir(mainSourceDirectorySet.outputDir)
+            generatedDirectorySet.outputDir = mainSourceDirectorySet.outputDir
             generatedDirectorySet.inheritedCompilerOutput = mainSourceDirectorySet.isCompilerOutputPathInherited()
             mainSourceSet.sources.put(ExternalSystemSourceType.SOURCE_GENERATED, generatedDirectorySet)
           }
@@ -398,7 +457,8 @@ class ExternalProjectBuilderImpl implements ModelBuilderService {
             def generatedDirectorySet = new DefaultExternalSourceDirectorySet()
             generatedDirectorySet.name = "generated " + testSourceSet.name
             generatedDirectorySet.srcDirs.addAll(testAdditionalGenDirs)
-            generatedDirectorySet.gradleOutputDir = testSourceDirectorySet.outputDir
+            generatedDirectorySet.addGradleOutputDir(testSourceDirectorySet.outputDir)
+            generatedDirectorySet.outputDir = testSourceDirectorySet.outputDir
             generatedDirectorySet.inheritedCompilerOutput = testSourceDirectorySet.isCompilerOutputPathInherited()
             testSourceSet.sources.put(ExternalSystemSourceType.TEST_GENERATED, generatedDirectorySet)
           }
@@ -473,10 +533,10 @@ class ExternalProjectBuilderImpl implements ModelBuilderService {
                 def props = action?.val$properties
                 if (props) {
                   if ('org.apache.tools.ant.filters.ExpandProperties' == filterType && props['project']) {
-                    if (props['project']) filter.propertiesAsJsonMap = new GsonBuilder().create().toJson(props['project'].properties);
+                    if (props['project']) filter.propertiesAsJsonMap = new GsonBuilder().create().toJson(props['project'].properties)
                   }
                   else {
-                    filter.propertiesAsJsonMap = new GsonBuilder().create().toJson(props);
+                    filter.propertiesAsJsonMap = new GsonBuilder().create().toJson(props)
                   }
                 }
               }
@@ -491,7 +551,7 @@ class ExternalProjectBuilderImpl implements ModelBuilderService {
                 String replacement = action?.transformer?.replacement
                 def filter = [filterType: 'RenamingCopyFilter'] as DefaultExternalFilter
                 if(pattern && replacement){
-                  filter.propertiesAsJsonMap = new GsonBuilder().create().toJson([pattern: pattern, replacement: replacement]);
+                  filter.propertiesAsJsonMap = new GsonBuilder().create().toJson([pattern: pattern, replacement: replacement])
                   filterReaders << filter
                 }
               }
@@ -521,7 +581,7 @@ class ExternalProjectBuilderImpl implements ModelBuilderService {
 
   @NotNull
   @Override
-  public ErrorMessageBuilder getErrorMessageBuilder(@NotNull Project project, @NotNull Exception e) {
+  ErrorMessageBuilder getErrorMessageBuilder(@NotNull Project project, @NotNull Exception e) {
     return ErrorMessageBuilder.create(
       project, e, "Project resolve errors"
     ).withDescription("Unable to resolve additional project configuration.")

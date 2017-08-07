@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,11 +17,10 @@ package git4idea.branch;
 
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ApplicationNamesInfo;
-import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.DialogWrapper;
-import com.intellij.ui.IdeBorderFactory;
 import com.intellij.ui.components.JBLabel;
+import com.intellij.util.ui.JBUI;
 import git4idea.DialogManager;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -57,7 +56,7 @@ public class GitSmartOperationDialog extends DialogWrapper {
       GitSmartOperationDialog dialog = new GitSmartOperationDialog(project, fileBrowser, operationTitle, forceButtonTitle);
       DialogManager.show(dialog);
       exitCode.set(dialog.getExitCode());
-    }, ModalityState.defaultModalityState());
+    });
     return exitCode.get();
   }
 
@@ -91,7 +90,7 @@ public class GitSmartOperationDialog extends DialogWrapper {
     JBLabel description = new JBLabel("<html>Your local changes to the following files would be overwritten by " + myOperationTitle +
                                       ".<br/>" + ApplicationNamesInfo.getInstance().getFullProductName() + " can stash the changes, "
                                       + myOperationTitle + " and unstash them after that.</html>");
-    description.setBorder(IdeBorderFactory.createEmptyBorder(0, 0, 10, 0));
+    description.setBorder(JBUI.Borders.emptyBottom(10));
     return description;
   }
 

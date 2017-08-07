@@ -58,31 +58,32 @@ public class IdentifierHighlighterPass extends TextEditorHighlightingPass {
   private final Collection<TextRange> myReadAccessRanges = Collections.synchronizedList(new ArrayList<TextRange>());
   private final Collection<TextRange> myWriteAccessRanges = Collections.synchronizedList(new ArrayList<TextRange>());
   private final int myCaretOffset;
+  private final HighlightUsagesHandlerBase<PsiElement> myHighlightUsagesHandler;
 
-  protected IdentifierHighlighterPass(@NotNull Project project, @NotNull PsiFile file, @NotNull Editor editor) {
+  IdentifierHighlighterPass(@NotNull Project project, @NotNull PsiFile file, @NotNull Editor editor) {
     super(project, editor.getDocument(), false);
     myFile = file;
     myEditor = editor;
     myCaretOffset = myEditor.getCaretModel().getOffset();
+    myHighlightUsagesHandler = HighlightUsagesHandler.createCustomHandler(myEditor, myFile);
   }
 
   @Override
   public void doCollectInformation(@NotNull final ProgressIndicator progress) {
-    @SuppressWarnings("unchecked") HighlightUsagesHandlerBase<PsiElement> handler = HighlightUsagesHandler.createCustomHandler(myEditor, myFile);
-    if (handler != null) {
-      List<PsiElement> targets = handler.getTargets();
-      handler.computeUsages(targets);
-      final List<TextRange> readUsages = handler.getReadUsages();
+    if (myHighlightUsagesHandler != null) {
+      List<PsiElement> targets = myHighlightUsagesHandler.getTargets();
+      myHighlightUsagesHandler.computeUsages(targets);
+      final List<TextRange> readUsages = myHighlightUsagesHandler.getReadUsages();
       for (TextRange readUsage : readUsages) {
-        LOG.assertTrue(readUsage != null, "null text range from " + handler);
+        LOG.assertTrue(readUsage != null, "null text range from " + myHighlightUsagesHandler);
       }
       myReadAccessRanges.addAll(readUsages);
-      final List<TextRange> writeUsages = handler.getWriteUsages();
+      final List<TextRange> writeUsages = myHighlightUsagesHandler.getWriteUsages();
       for (TextRange writeUsage : writeUsages) {
-        LOG.assertTrue(writeUsage != null, "null text range from " + handler);
+        LOG.assertTrue(writeUsage != null, "null text range from " + myHighlightUsagesHandler);
       }
       myWriteAccessRanges.addAll(writeUsages);
-      if (!handler.highlightReferences()) return;
+      if (!myHighlightUsagesHandler.highlightReferences()) return;
     }
 
     int flags = TargetElementUtil.ELEMENT_NAME_ACCEPTED | TargetElementUtil.REFERENCED_ELEMENT_ACCEPTED;
@@ -188,7 +189,7 @@ public class IdentifierHighlighterPass extends TextEditorHighlightingPass {
       }
     }
 
-    return Couple.<Collection<TextRange>>of(readRanges, writeRanges);
+    return Couple.of(readRanges, writeRanges);
   }
 
   private void highlightTargetUsages(@NotNull PsiElement target) {
@@ -200,7 +201,7 @@ public class IdentifierHighlighterPass extends TextEditorHighlightingPass {
   @Override
   public void doApplyInformationToEditor() {
     final boolean virtSpace = TargetElementUtil.inVirtualSpace(myEditor, myEditor.getCaretModel().getOffset());
-    final List<HighlightInfo> infos = virtSpace ? Collections.<HighlightInfo>emptyList() : getHighlights();
+    final List<HighlightInfo> infos = virtSpace ? Collections.emptyList() : getHighlights();
     UpdateHighlightersUtil.setHighlightersToEditor(myProject, myDocument, 0, myFile.getTextLength(), infos, getColorsScheme(), getId());
   }
 

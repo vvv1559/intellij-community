@@ -32,13 +32,6 @@ import java.awt.*;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 
-/**
- * Created by IntelliJ IDEA.
- * User: zajac
- * Date: 18.06.11
- * Time: 9:45
- * To change this template use File | Settings | File Templates.
- */
 public class XBreakpointActionsPanel extends XBreakpointPropertiesSubPanel {
   public static final String LOG_EXPRESSION_HISTORY_ID = "breakpointLogExpression";
 
@@ -63,7 +56,11 @@ public class XBreakpointActionsPanel extends XBreakpointPropertiesSubPanel {
       JComponent logExpressionComponent = myLogExpressionComboBox.getComponent();
       myLogExpressionPanel.add(logExpressionComponent, BorderLayout.CENTER);
       myLogExpressionComboBox.setEnabled(false);
-      myTemporaryCheckBox.setVisible(breakpoint instanceof XLineBreakpoint);
+      boolean isLineBreakpoint = breakpoint instanceof XLineBreakpoint;
+      myTemporaryCheckBox.setVisible(isLineBreakpoint);
+      if (isLineBreakpoint) {
+        myTemporaryCheckBox.addActionListener(e -> ((XLineBreakpoint)myBreakpoint).setTemporary(myTemporaryCheckBox.isSelected()));
+      }
       myLogExpressionCheckBox.addActionListener(listener);
       DebuggerUIUtil.focusEditorOnCheck(myLogExpressionCheckBox, myLogExpressionComboBox.getEditorComponent());
     }

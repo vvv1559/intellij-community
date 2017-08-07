@@ -14,14 +14,6 @@
  * limitations under the License.
  */
 
-/*
- * Created by IntelliJ IDEA.
- * User: max
- * Date: Jan 11, 2002
- * Time: 3:05:34 PM
- * To change template for new class use
- * Code Style | Class Templates options (Tools | IDE Options).
- */
 package com.intellij.codeInspection.dataFlow;
 
 import com.intellij.codeInspection.dataFlow.instructions.FlushVariableInstruction;
@@ -87,6 +79,11 @@ public class ControlFlow {
       public int getInstructionOffset() {
         return myElementToStartOffsetMap.get(element);
       }
+
+      @Override
+      public String toString() {
+        return String.valueOf(myElementToStartOffsetMap.get(element));
+      }
     };
   }
 
@@ -95,6 +92,11 @@ public class ControlFlow {
       @Override
       public int getInstructionOffset() {
         return myElementToEndOffsetMap.get(element);
+      }
+
+      @Override
+      public String toString() {
+        return String.valueOf(myElementToEndOffsetMap.get(element));
       }
     };
   }

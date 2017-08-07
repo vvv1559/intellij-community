@@ -26,7 +26,6 @@ import com.intellij.openapi.util.ActionCallback;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.ui.components.panels.Wrapper;
 import com.intellij.ui.content.Content;
-import com.intellij.ui.switcher.SwitchTarget;
 import com.intellij.ui.tabs.JBTabsPresentation;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.Nullable;
@@ -136,6 +135,12 @@ public class GridImpl extends Wrapper implements Grid, Disposable, DataProvider 
   public void setToolbarHorizontal(boolean horizontal) {
     for (final GridCellImpl cell : myPlaceInGrid2Cell.values()) {
       cell.setToolbarHorizontal(horizontal);
+    }
+  }
+
+  public void setToolbarBefore(boolean before) {
+    for (final GridCellImpl cell : myPlaceInGrid2Cell.values()) {
+      cell.setToolbarBefore(before);
     }
   }
 
@@ -388,31 +393,5 @@ public class GridImpl extends Wrapper implements Grid, Disposable, DataProvider 
       return contents.toArray(new Content[contents.size()]);
     }
     return null;
-  }
-
-  @Nullable
-  public SwitchTarget getCellFor(Component c) {
-    Component eachParent = c;
-    while (eachParent != null) {
-      for (GridCellImpl eachCell : myContent2Cell.values()) {
-        if (eachCell.contains(eachParent)) {
-          return eachCell.getTargetForSelection();
-        }
-      }
-
-      eachParent = eachParent.getParent();
-    }
-
-    return null;
-  }
-
-
-  public List<SwitchTarget> getTargets(boolean onlyVisible) {
-    Collection<GridCellImpl> cells = myPlaceInGrid2Cell.values();
-    ArrayList<SwitchTarget> result = new ArrayList<>();
-    for (GridCellImpl each : cells) {
-      result.addAll(each.getTargets(onlyVisible));
-    }
-    return result;
   }
 }

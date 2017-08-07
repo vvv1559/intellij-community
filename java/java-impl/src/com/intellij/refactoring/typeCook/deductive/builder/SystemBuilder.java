@@ -39,13 +39,6 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 
-/**
- * Created by IntelliJ IDEA.
- * User: db
- * Date: 27.06.2003
- * Time: 22:48:08
- * To change this template use Options | File Templates.
- */
 public class SystemBuilder {
   private static final Logger LOG = Logger.getInstance("#com.intellij.refactoring.typeCook.deductive.builder.SystemBuilder");
 
@@ -123,9 +116,7 @@ public class SystemBuilder {
       Boolean good = myMethodCache.get(method);
 
       if (good != null && good.booleanValue()) {
-        if (myMethods.get(method) == null) {
-          myMethods.put(method, method);
-        }
+        myMethods.putIfAbsent(method, method);
 
         if (parameter != null && myParameters.get(parameter) == null) {
           myParameters.put(parameter, parameter);

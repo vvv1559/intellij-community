@@ -29,7 +29,6 @@ import com.intellij.ide.util.EditSourceUtil;
 import com.intellij.injected.editor.EditorWindow;
 import com.intellij.lang.LanguageNamesValidation;
 import com.intellij.lang.refactoring.NamesValidator;
-import com.intellij.openapi.actionSystem.ActionManager;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.CommonDataKeys;
 import com.intellij.openapi.actionSystem.Presentation;
@@ -53,7 +52,10 @@ import com.intellij.openapi.ui.popup.JBPopupFactory;
 import com.intellij.openapi.util.Computable;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.pom.Navigatable;
-import com.intellij.psi.*;
+import com.intellij.psi.PsiDocumentManager;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiReference;
 import com.intellij.psi.search.PsiElementProcessor;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.psi.util.PsiUtilCore;
@@ -84,7 +86,6 @@ public class GotoDeclarationAction extends BaseCodeInsightAction implements Code
 
   @Override
   public void invoke(@NotNull final Project project, @NotNull Editor editor, @NotNull PsiFile file) {
-    PsiDocumentManager.getInstance(project).commitAllDocuments();
 
     DumbService.getInstance(project).setAlternativeResolveEnabled(true);
     try {
@@ -134,9 +135,8 @@ public class GotoDeclarationAction extends BaseCodeInsightAction implements Code
 
   private static boolean startFindUsages(@NotNull Editor editor, PsiElement element) {
     if (element != null) {
-      ShowUsagesAction showUsages = (ShowUsagesAction)ActionManager.getInstance().getAction(ShowUsagesAction.ID);
       RelativePoint popupPosition = JBPopupFactory.getInstance().guessBestPopupLocation(editor);
-      showUsages.startFindUsages(element, popupPosition, editor, ShowUsagesAction.USAGES_PAGE_SIZE);
+      new ShowUsagesAction().startFindUsages(element, popupPosition, editor, ShowUsagesAction.getUsagesPageSize());
       return true;
     }
     return false;
@@ -156,13 +156,8 @@ public class GotoDeclarationAction extends BaseCodeInsightAction implements Code
     }, progressTitle, true, project);
   }
 
-  public static PsiNameIdentifierOwner findElementToShowUsagesOf(@NotNull Editor editor, int offset) {
-    PsiElement elementAt = TargetElementUtil.getInstance().findTargetElement(editor, TargetElementUtil.ELEMENT_NAME_ACCEPTED, offset);
-    if (elementAt instanceof PsiNameIdentifierOwner) {
-      LOG.assertTrue(elementAt.isValid(), elementAt);
-      return (PsiNameIdentifierOwner)elementAt;
-    }
-    return null;
+  public static PsiElement findElementToShowUsagesOf(@NotNull Editor editor, int offset) {
+    return TargetElementUtil.getInstance().findTargetElement(editor, TargetElementUtil.ELEMENT_NAME_ACCEPTED, offset);
   }
 
   private static void chooseAmbiguousTarget(final Editor editor, int offset, PsiElement[] elements, PsiFile currentFile) {

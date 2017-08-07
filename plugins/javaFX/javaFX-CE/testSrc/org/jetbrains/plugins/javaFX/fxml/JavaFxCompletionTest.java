@@ -24,10 +24,6 @@ import org.jetbrains.annotations.NotNull;
 
 import java.util.*;
 
-/**
- * User: anna
- * Date: 1/17/13
- */
 public class JavaFxCompletionTest extends LightFixtureCompletionTestCase {
 
   @NotNull
@@ -328,6 +324,21 @@ public class JavaFxCompletionTest extends LightFixtureCompletionTestCase {
     if (selectionElement != null) {
       fail("Read only attribute was suggested");
     }
+  }
+
+  public void testResourceProperty() {
+    myFixture.addFileToProject("messages.properties", "double.key=123.456\n" +
+                                                      "string.key=Some text\n");
+    configureAndComplete();
+    assertSameElements(myFixture.getLookupElementStrings(), "double.key", "string.key");
+  }
+
+
+  public void testResourcePropertyManyFiles() {
+    myFixture.addFileToProject("messages1.properties", "double.key=123.456\n");
+    myFixture.addFileToProject("messages2.properties", "string.key=Some text\n");
+    configureAndComplete();
+    assertSameElements(myFixture.getLookupElementStrings(), "double.key", "string.key");
   }
 
   private void doTest() throws Exception {

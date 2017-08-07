@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -41,14 +41,16 @@ import com.intellij.notification.NotificationType;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.extensions.Extensions;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.projectRoots.Sdk;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.registry.Registry;
 import com.intellij.psi.PsiCompiledElement;
-import com.intellij.psi.PsiDocumentManager;
+import com.intellij.psi.PsiElementFinder;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.unscramble.ThreadState;
@@ -91,6 +93,8 @@ public class DebuggerSession implements AbstractDebuggerSession {
   private final String mySessionName;
   private final DebugProcessImpl myDebugProcess;
   private final GlobalSearchScope mySearchScope;
+  private Sdk myAlternativeJre;
+  private Sdk myRunJre;
 
   private final DebuggerContextImpl SESSION_EMPTY_CONTEXT;
   //Thread, user is currently stepping through
@@ -115,6 +119,19 @@ public class DebuggerSession implements AbstractDebuggerSession {
   @NotNull
   public GlobalSearchScope getSearchScope() {
     return mySearchScope;
+  }
+
+  public Sdk getAlternativeJre() {
+    return myAlternativeJre;
+  }
+
+  public void setAlternativeJre(Sdk sdk) {
+    myAlternativeJre = sdk;
+    Extensions.findExtension(PsiElementFinder.EP_NAME, getProject(), AlternativeJreClassFinder.class).clearCache();
+  }
+
+  public Sdk getRunJre() {
+    return myRunJre;
   }
 
   public boolean isModifiedClassesScanRequired() {
@@ -175,7 +192,7 @@ public class DebuggerSession implements AbstractDebuggerSession {
           }
 
           @Override
-          public void contextAction() throws Exception {
+          public void contextAction(@NotNull SuspendContextImpl suspendContext) throws Exception {
             context.initCaches();
             DebuggerInvocationUtil.swingInvokeLater(getProject(), setStateRunnable);
           }
@@ -207,6 +224,8 @@ public class DebuggerSession implements AbstractDebuggerSession {
     myDebugProcess.addEvaluationListener(new MyEvaluationListener());
     ValueLookupManager.getInstance(getProject()).startListening();
     mySearchScope = environment.getSearchScope();
+    myAlternativeJre = environment.getAlternativeJre();
+    myRunJre = environment.getRunJre();
   }
 
   @NotNull
@@ -384,8 +403,10 @@ public class DebuggerSession implements AbstractDebuggerSession {
   public void dispose() {
     getProcess().dispose();
     Disposer.dispose(myUpdateAlarm);
-    DebuggerInvocationUtil.swingInvokeLater(getProject(),
-                                            () -> getContextManager().setState(SESSION_EMPTY_CONTEXT, State.DISPOSED, Event.DISPOSE, null));
+    DebuggerInvocationUtil.swingInvokeLater(getProject(), () -> {
+      myContextManager.setState(SESSION_EMPTY_CONTEXT, State.DISPOSED, Event.DISPOSE, null);
+      myContextManager.dispose();
+    });
   }
 
   // ManagerCommands
@@ -474,7 +495,7 @@ public class DebuggerSession implements AbstractDebuggerSession {
                     notification.expire();
                     getProcess().getManagerThread().schedule(new SuspendContextCommandImpl(suspendContext) {
                       @Override
-                      public void contextAction() throws Exception {
+                      public void contextAction(@NotNull SuspendContextImpl suspendContext) throws Exception {
                         final DebuggerContextImpl debuggerContext =
                           DebuggerContextUtil.createDebuggerContext(DebuggerSession.this, suspendContext);
 
@@ -566,8 +587,7 @@ public class DebuggerSession implements AbstractDebuggerSession {
         }
       }
 
-      SourcePosition position = PsiDocumentManager.getInstance(getProject()).commitAndRunReadAction(
-        () -> ContextUtil.getSourcePosition(positionContext));
+      SourcePosition position = ContextUtil.getSourcePosition(positionContext);
 
       if (position != null) {
         final List<Pair<Breakpoint, com.sun.jdi.event.Event>> eventDescriptors = DebuggerUtilsEx.getEventDescriptors(suspendContext);

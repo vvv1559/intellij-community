@@ -37,7 +37,6 @@ import com.intellij.openapi.editor.ex.EditorEx;
 import com.intellij.openapi.editor.ex.EditorGutterComponentEx;
 import com.intellij.openapi.editor.impl.EditorImpl;
 import com.intellij.openapi.editor.markup.ActiveGutterRenderer;
-import com.intellij.openapi.editor.markup.LineMarkerRendererEx;
 import com.intellij.openapi.editor.markup.TextAttributes;
 import com.intellij.openapi.options.Configurable;
 import com.intellij.openapi.options.SearchableConfigurable;
@@ -70,7 +69,7 @@ import java.util.TreeMap;
 /**
  * @author ven
  */
-public class CoverageLineMarkerRenderer implements LineMarkerRendererEx, ActiveGutterRenderer {
+public class CoverageLineMarkerRenderer implements ActiveGutterRenderer, LineMarkerRendererWithErrorStripe {
   private static final int THICKNESS = 8;
   private final TextAttributesKey myKey;
   private final String myClassName;
@@ -269,6 +268,7 @@ public class CoverageLineMarkerRenderer implements LineMarkerRendererEx, ActiveG
     return editor.getColorsScheme().getAttributes(myKey).getErrorStripeColor();
   }
 
+  @NotNull
   @Override
   public Position getPosition() {
     return Position.LEFT;

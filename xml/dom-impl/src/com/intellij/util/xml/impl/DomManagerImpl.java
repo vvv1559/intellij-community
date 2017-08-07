@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -116,7 +116,7 @@ public final class DomManagerImpl extends DomManager {
       }
     }, project);
 
-    VirtualFileManager.getInstance().addVirtualFileListener(new VirtualFileAdapter() {
+    VirtualFileManager.getInstance().addVirtualFileListener(new VirtualFileListener() {
       private final List<DomEvent> myDeletionEvents = new SmartList<>();
 
       @Override
@@ -167,13 +167,17 @@ public final class DomManagerImpl extends DomManager {
   }
 
   private List<DomEvent> calcDomChangeEvents(final VirtualFile file) {
-    if (!(file instanceof NewVirtualFile)) return Collections.emptyList();
+    if (!(file instanceof NewVirtualFile) || myProject.isDisposed()) {
+      return Collections.emptyList();
+    }
 
     final List<DomEvent> events = ContainerUtil.newArrayList();
     VfsUtilCore.visitChildrenRecursively(file, new VirtualFileVisitor() {
       @Override
       public boolean visitFile(@NotNull VirtualFile file) {
-        if (!ProjectFileIndex.SERVICE.getInstance(myProject).isInContent(file)) return false;
+        if (myProject.isDisposed() || !ProjectFileIndex.SERVICE.getInstance(myProject).isInContent(file)) {
+          return false;
+        }
 
         if (!file.isDirectory() && StdFileTypes.XML == file.getFileType()) {
           final PsiFile psiFile = getCachedPsiFile(file);

@@ -14,12 +14,6 @@
  * limitations under the License.
  */
 
-/*
- * Created by IntelliJ IDEA.
- * User: yole
- * Date: 25.07.2006
- * Time: 14:26:00
- */
 package com.intellij.ide.actions;
 
 import com.intellij.ide.BrowserUtil;
@@ -53,7 +47,7 @@ public class SendFeedbackAction extends AnAction implements DumbAware {
     BrowserUtil.browse(urlTemplate, project);
   }
 
-  private static String getDescription() {
+  public static String getDescription() {
     StringBuilder sb = new StringBuilder("\n\n");
     sb.append(ApplicationInfoEx.getInstanceEx().getBuild().asString()).append(", ");
     String javaVersion = System.getProperty("java.runtime.version", System.getProperty("java.version", "unknown"));

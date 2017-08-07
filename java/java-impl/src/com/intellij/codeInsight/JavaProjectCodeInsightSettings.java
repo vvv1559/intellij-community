@@ -22,6 +22,8 @@ import com.intellij.openapi.components.State;
 import com.intellij.openapi.components.Storage;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Disposer;
+import com.intellij.util.PatternUtil;
+import com.intellij.util.containers.ConcurrentFactoryMap;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.xmlb.XmlSerializerUtil;
 import com.intellij.util.xmlb.annotations.AbstractCollection;
@@ -32,12 +34,19 @@ import org.jetbrains.annotations.TestOnly;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.ConcurrentMap;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * @author peter
  */
 @State(name = "JavaProjectCodeInsightSettings", storages = @Storage("codeInsightSettings.xml"))
 public class JavaProjectCodeInsightSettings implements PersistentStateComponent<JavaProjectCodeInsightSettings> {
+  @SuppressWarnings("MismatchedQueryAndUpdateOfCollection")
+  private static final ConcurrentMap<String, Pattern> ourPatterns = ConcurrentFactoryMap.createWeakMap(PatternUtil::fromMask);
+
+
   @Tag("excluded-names")
   @AbstractCollection(surroundWithTag = false, elementTag = "name", elementValueAttribute = "")
   public List<String> excludedNames = ContainerUtil.newArrayList();
@@ -62,8 +71,23 @@ public class JavaProjectCodeInsightSettings implements PersistentStateComponent<
   }
 
   private static boolean nameMatches(@NotNull String name, String excluded) {
-    return name.startsWith(excluded) &&
-           (name.length() == excluded.length() || name.charAt(excluded.length()) == '.');
+    int length = getMatchingLength(name, excluded);
+    return length > 0 && (name.length() == length || name.charAt(length) == '.');
+  }
+
+  private static int getMatchingLength(@NotNull String name, String excluded) {
+    if (name.startsWith(excluded)) {
+      return excluded.length();
+    }
+
+    if (excluded.indexOf('*') >= 0) {
+      Matcher matcher = ourPatterns.get(excluded).matcher(name);
+      if (matcher.lookingAt()) {
+        return matcher.end();
+      }
+    }
+
+    return -1;
   }
 
   @Nullable

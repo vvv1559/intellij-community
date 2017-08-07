@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,10 +20,12 @@ import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiPolyVariantReference;
 import com.intellij.psi.PsiReference;
 import com.intellij.psi.util.QualifiedName;
+import com.intellij.util.containers.ContainerUtil;
 import com.jetbrains.python.PyElementTypes;
 import com.jetbrains.python.PyNames;
 import com.jetbrains.python.PyTokenTypes;
 import com.jetbrains.python.PythonDialectsTokenSetProvider;
+import com.jetbrains.python.codeInsight.typing.PyTypingTypeProvider;
 import com.jetbrains.python.psi.*;
 import com.jetbrains.python.psi.impl.references.PyOperatorReference;
 import com.jetbrains.python.psi.resolve.PyResolveContext;
@@ -74,7 +76,7 @@ public class PyPrefixExpressionImpl extends PyElementImpl implements PyPrefixExp
 
   @NotNull
   @Override
-  public PsiPolyVariantReference getReference(PyResolveContext context) {
+  public PsiPolyVariantReference getReference(@NotNull PyResolveContext context) {
     return new PyOperatorReference(this, context);
   }
 
@@ -140,27 +142,14 @@ public class PyPrefixExpressionImpl extends PyElementImpl implements PyPrefixExp
 
   @Nullable
   private static PyType getGeneratorReturnType(@Nullable PyType type, @NotNull TypeEvalContext context) {
-    if (type instanceof PyClassLikeType) {
-      final PyClassLikeType classLikeType = (PyClassLikeType)type;
-      // TODO: Understand typing.Generator as well
-      final String classQName = classLikeType.getClassQName();
-      if (PyNames.FAKE_GENERATOR.equals(classQName)) {
-        if (type instanceof PyCollectionType) {
-          final PyCollectionType collectionType = (PyCollectionType)type;
-          final List<PyType> elementTypes = collectionType.getElementTypes(context);
-          if (elementTypes.size() == 3) {
-            return elementTypes.get(2);
-          }
-        }
+    if (type instanceof PyClassLikeType && type instanceof PyCollectionType) {
+      final String classQName = ((PyClassLikeType)type).getClassQName();
+      final PyCollectionType collectionType = (PyCollectionType)type;
+      if (PyTypingTypeProvider.GENERATOR.equals(classQName) || PyTypingTypeProvider.COROUTINE.equals(classQName)) {
+        return ContainerUtil.getOrElse(collectionType.getElementTypes(context), 2, null);
       }
-      else if (PyNames.FAKE_COROUTINE.equals(classQName)) {
-        if (type instanceof PyCollectionType) {
-          final PyCollectionType collectionType = (PyCollectionType)type;
-          final List<PyType> elementTypes = collectionType.getElementTypes(context);
-          if (elementTypes.size() == 1) {
-            return elementTypes.get(0);
-          }
-        }
+      else if (type instanceof PyClassType && PyNames.AWAITABLE.equals(((PyClassType)type).getPyClass().getName())) {
+        return collectionType.getIteratedItemType();
       }
     }
     else if (type instanceof PyUnionType) {

@@ -15,15 +15,14 @@
  */
 package com.intellij.codeInsight;
 
-import com.intellij.openapi.components.PersistentStateComponent;
 import com.intellij.openapi.components.ServiceManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.util.*;
+import com.intellij.openapi.util.JDOMExternalizableStringList;
+import com.intellij.openapi.util.RecursionManager;
 import com.intellij.psi.*;
 import com.intellij.psi.util.TypeConversionUtil;
 import com.intellij.util.containers.ContainerUtil;
-import org.jdom.Element;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -33,26 +32,26 @@ import java.util.*;
  * @author anna
  * @since 25.01.2011
  */
-public abstract class NullableNotNullManager implements PersistentStateComponent<Element> {
-  private static final Logger LOG = Logger.getInstance("#" + NullableNotNullManager.class.getName());
+public abstract class NullableNotNullManager {
+  protected static final Logger LOG = Logger.getInstance(NullableNotNullManager.class);
+  protected final Project myProject;
 
   public String myDefaultNullable = AnnotationUtil.NULLABLE;
   public String myDefaultNotNull = AnnotationUtil.NOT_NULL;
-  @SuppressWarnings("deprecation") public final JDOMExternalizableStringList myNullables = new JDOMExternalizableStringList();
-  @SuppressWarnings("deprecation") public final JDOMExternalizableStringList myNotNulls = new JDOMExternalizableStringList();
+  public final JDOMExternalizableStringList myNullables = new JDOMExternalizableStringList();
+  public final JDOMExternalizableStringList myNotNulls = new JDOMExternalizableStringList();
 
   private static final String JAVAX_ANNOTATION_NULLABLE = "javax.annotation.Nullable";
-  private static final String JAVAX_ANNOTATION_NONNULL = "javax.annotation.Nonnull";
+  protected static final String JAVAX_ANNOTATION_NONNULL = "javax.annotation.Nonnull";
 
-  public static final String[] DEFAULT_NULLABLES = {AnnotationUtil.NULLABLE, JAVAX_ANNOTATION_NULLABLE,
+  static final String[] DEFAULT_NULLABLES = {AnnotationUtil.NULLABLE, 
+    JAVAX_ANNOTATION_NULLABLE, "javax.annotation.CheckForNull",
+    "org.springframework.lang.Nullable", // remove after https://youtrack.jetbrains.com/issue/IDEA-173544 is fixed
     "edu.umd.cs.findbugs.annotations.Nullable", "android.support.annotation.Nullable"
   };
-  public static final String[] DEFAULT_NOT_NULLS = {AnnotationUtil.NOT_NULL, JAVAX_ANNOTATION_NONNULL,
-    "edu.umd.cs.findbugs.annotations.NonNull", "android.support.annotation.NonNull"
-  };
 
-  public NullableNotNullManager() {
-    Collections.addAll(myNotNulls, DEFAULT_NOT_NULLS);
+  public NullableNotNullManager(Project project) {
+    myProject = project;
     Collections.addAll(myNullables, DEFAULT_NULLABLES);
   }
 
@@ -78,7 +77,12 @@ public abstract class NullableNotNullManager implements PersistentStateComponent
 
   public void setNotNulls(@NotNull String... annotations) {
     myNotNulls.clear();
-    addAllIfNotPresent(myNotNulls, DEFAULT_NOT_NULLS);
+    for (String annotation : getPredefinedNotNulls()) {
+      LOG.assertTrue(annotation != null);
+      if (!myNotNulls.contains(annotation)) {
+        myNotNulls.add(annotation);
+      }
+    }
     addAllIfNotPresent(myNotNulls, annotations);
   }
 
@@ -168,13 +172,11 @@ public abstract class NullableNotNullManager implements PersistentStateComponent
   }
 
   /** @deprecated use {@link #copyNotNullAnnotation(PsiModifierListOwner, PsiModifierListOwner)} (to be removed in IDEA 17) */
-  @SuppressWarnings("unused")
   public PsiAnnotation copyNotNullAnnotation(PsiModifierListOwner owner) {
     return copyAnnotation(owner, getNotNullAnnotation(owner, false));
   }
 
   /** @deprecated use {@link #copyNullableOrNotNullAnnotation(PsiModifierListOwner, PsiModifierListOwner)} (to be removed in IDEA 17) */
-  @SuppressWarnings("unused")
   public PsiAnnotation copyNullableAnnotation(PsiModifierListOwner owner) {
     return copyAnnotation(owner, getNullableAnnotation(owner, false));
   }
@@ -202,7 +204,7 @@ public abstract class NullableNotNullManager implements PersistentStateComponent
       String qName = annotation.getQualifiedName();
       if (qName == null) return null;
 
-      List<String> contradictory = nullable ? getNotNulls() : getNullables();
+      List<String> contradictory = nullable ? getNotNullsWithNickNames() : getNullablesWithNickNames();
       if (contradictory.contains(qName)) return null;
 
       return annotation;
@@ -212,7 +214,7 @@ public abstract class NullableNotNullManager implements PersistentStateComponent
     if (type == null || TypeConversionUtil.isPrimitiveAndNotNull(type)) return null;
 
     // even if javax.annotation.Nullable is not configured, it should still take precedence over ByDefault annotations
-    if (AnnotationUtil.isAnnotated(owner, Arrays.asList(nullable ? DEFAULT_NOT_NULLS : DEFAULT_NULLABLES), checkBases, false)) {
+    if (AnnotationUtil.isAnnotated(owner, nullable ? getPredefinedNotNulls() : Arrays.asList(DEFAULT_NULLABLES), checkBases, false)) {
       return null;
     }
 
@@ -231,24 +233,56 @@ public abstract class NullableNotNullManager implements PersistentStateComponent
   }
 
   private PsiAnnotation takeAnnotationFromSuperParameters(@NotNull PsiParameter owner, final List<PsiParameter> superOwners) {
-    return RecursionManager.doPreventingRecursion(owner, true, new Computable<PsiAnnotation>() {
-      @Override
-      public PsiAnnotation compute() {
-        for (PsiParameter superOwner : superOwners) {
-          PsiAnnotation anno = findNullabilityAnnotationWithDefault(superOwner, false, false);
-          if (anno != null) return anno;
-        }
-        return null;
+    return RecursionManager.doPreventingRecursion(owner, true, () -> {
+      for (PsiParameter superOwner : superOwners) {
+        PsiAnnotation anno = findNullabilityAnnotationWithDefault(superOwner, false, false);
+        if (anno != null) return anno;
       }
+      return null;
     });
   }
 
   private PsiAnnotation findPlainNullabilityAnnotation(@NotNull PsiModifierListOwner owner, boolean checkBases) {
-    Set<String> qNames = ContainerUtil.newHashSet(getNullables());
-    qNames.addAll(getNotNulls());
-    return checkBases && owner instanceof PsiMethod
-           ? AnnotationUtil.findAnnotationInHierarchy(owner, qNames)
-           : AnnotationUtil.findAnnotation(owner, qNames);
+    Set<String> qNames = ContainerUtil.newHashSet(getNullablesWithNickNames());
+    qNames.addAll(getNotNullsWithNickNames());
+    PsiAnnotation memberAnno = checkBases && owner instanceof PsiMethod
+                               ? AnnotationUtil.findAnnotationInHierarchy(owner, qNames)
+                               : AnnotationUtil.findAnnotation(owner, qNames);
+    if (memberAnno != null) {
+      if (owner instanceof PsiMethod) {
+        return preferTypeAnnotation(memberAnno, ((PsiMethod)owner).getReturnType());
+      }
+      if (owner instanceof PsiVariable) {
+        return preferTypeAnnotation(memberAnno, ((PsiVariable)owner).getType());
+      }
+    }
+    return memberAnno;
+  }
+
+  private static PsiAnnotation preferTypeAnnotation(@NotNull PsiAnnotation memberAnno, @Nullable PsiType type) {
+    if (type != null) {
+      for (PsiAnnotation typeAnno : type.getApplicableAnnotations()) {
+        if (areDifferentNullityAnnotations(memberAnno, typeAnno)) {
+          return typeAnno;
+        }
+      }
+    }
+    return memberAnno;
+  }
+
+  private static boolean areDifferentNullityAnnotations(@NotNull PsiAnnotation memberAnno, PsiAnnotation typeAnno) {
+    return isNullableAnnotation(typeAnno) && isNotNullAnnotation(memberAnno) ||
+        isNullableAnnotation(memberAnno) && isNotNullAnnotation(typeAnno);
+  }
+
+  @NotNull
+  protected List<String> getNullablesWithNickNames() {
+    return getNullables();
+  }
+
+  @NotNull
+  protected List<String> getNotNullsWithNickNames() {
+    return getNotNulls();
   }
 
   protected boolean hasHardcodedContracts(PsiElement element) {
@@ -271,7 +305,7 @@ public abstract class NullableNotNullManager implements PersistentStateComponent
   }
 
   @Nullable 
-  private static PsiAnnotation findNullabilityDefaultInHierarchy(PsiModifierListOwner owner, boolean nullable) {
+  static PsiAnnotation findNullabilityDefaultInHierarchy(PsiModifierListOwner owner, boolean nullable) {
     PsiAnnotation.TargetType[] placeTargetTypes = AnnotationTargetUtil.getTargetsForLocation(owner.getModifierList());
 
     PsiElement element = owner.getParent();
@@ -330,8 +364,9 @@ public abstract class NullableNotNullManager implements PersistentStateComponent
     return myNotNulls;
   }
 
-  public boolean hasDefaultValues() {
-    if (DEFAULT_NULLABLES.length != getNullables().size() || DEFAULT_NOT_NULLS.length != getNotNulls().size()) {
+  boolean hasDefaultValues() {
+    List<String> predefinedNotNulls = getPredefinedNotNulls();
+    if (DEFAULT_NULLABLES.length != getNullables().size() || predefinedNotNulls.size() != getNotNulls().size()) {
       return false;
     }
     if (!myDefaultNotNull.equals(AnnotationUtil.NOT_NULL) || !myDefaultNullable.equals(AnnotationUtil.NULLABLE)) {
@@ -342,48 +377,13 @@ public abstract class NullableNotNullManager implements PersistentStateComponent
         return false;
       }
     }
-    for (int i = 0; i < DEFAULT_NOT_NULLS.length; i++) {
-      if (!getNotNulls().get(i).equals(DEFAULT_NOT_NULLS[i])) {
+    for (int i = 0; i < predefinedNotNulls.size(); i++) {
+      if (!getNotNulls().get(i).equals(predefinedNotNulls.get(i))) {
         return false;
       }
     }
 
     return true;
-  }
-
-  @SuppressWarnings("deprecation")
-  @Override
-  public Element getState() {
-    final Element component = new Element("component");
-
-    if (hasDefaultValues()) {
-      return component;
-    }
-
-    try {
-      DefaultJDOMExternalizer.writeExternal(this, component);
-    }
-    catch (WriteExternalException e) {
-      LOG.error(e);
-    }
-    return component;
-  }
-
-  @SuppressWarnings("deprecation")
-  @Override
-  public void loadState(Element state) {
-    try {
-      DefaultJDOMExternalizer.readExternal(this, state);
-      if (myNullables.isEmpty()) {
-        Collections.addAll(myNullables, DEFAULT_NULLABLES);
-      }
-      if (myNotNulls.isEmpty()) {
-        Collections.addAll(myNotNulls, DEFAULT_NOT_NULLS);
-      }
-    }
-    catch (InvalidDataException e) {
-      LOG.error(e);
-    }
   }
 
   public static boolean isNullable(@NotNull PsiModifierListOwner owner) {
@@ -392,5 +392,15 @@ public abstract class NullableNotNullManager implements PersistentStateComponent
 
   public static boolean isNotNull(@NotNull PsiModifierListOwner owner) {
     return getInstance(owner.getProject()).isNotNull(owner, true);
+  }
+
+  public abstract List<String> getPredefinedNotNulls();
+
+  public static boolean isNullableAnnotation(@NotNull PsiAnnotation annotation) {
+    return getInstance(annotation.getProject()).getNullablesWithNickNames().contains(annotation.getQualifiedName());
+  }
+
+  public static boolean isNotNullAnnotation(@NotNull PsiAnnotation annotation) {
+    return getInstance(annotation.getProject()).getNotNullsWithNickNames().contains(annotation.getQualifiedName());
   }
 }

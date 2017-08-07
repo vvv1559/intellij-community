@@ -27,10 +27,9 @@ import com.intellij.openapi.Disposable;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.roots.ProjectRootManager;
 import com.intellij.openapi.util.Key;
-import com.intellij.profile.Profile;
 import com.intellij.profile.ProfileChangeAdapter;
-import com.intellij.profile.codeInspection.InspectionProfileManager;
 import com.intellij.profile.codeInspection.InspectionProjectProfileManager;
+import com.intellij.profile.codeInspection.ProjectInspectionProfileManager;
 import com.intellij.psi.util.CachedValue;
 import com.intellij.psi.util.CachedValueProvider;
 import com.intellij.psi.util.CachedValuesManager;
@@ -43,7 +42,6 @@ import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.xml.DomElement;
 import com.intellij.util.xml.DomFileElement;
 import com.intellij.util.xml.DomUtil;
-import com.intellij.util.xml.impl.DomApplicationComponent;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -107,21 +105,19 @@ public class DomElementAnnotationsManagerImpl extends DomElementAnnotationsManag
   };
   private final Project myProject;
 
-  public DomElementAnnotationsManagerImpl(Project project) {
+  public DomElementAnnotationsManagerImpl(@NotNull Project project) {
     myProject = project;
-    final ProfileChangeAdapter profileChangeAdapter = new ProfileChangeAdapter() {
+    ProjectInspectionProfileManager.getInstance(project).addProfileChangeListener(new ProfileChangeAdapter() {
       @Override
-      public void profileActivated(Profile oldProfile, @Nullable Profile profile) {
+      public void profileActivated(InspectionProfile oldProfile, @Nullable InspectionProfile profile) {
         dropAnnotationsCache();
       }
 
       @Override
-      public void profileChanged(Profile profile) {
+      public void profileChanged(InspectionProfile profile) {
         dropAnnotationsCache();
       }
-    };
-
-    InspectionProfileManager.getInstance().addProfileChangeListener(profileChangeAdapter, project);
+    }, project);
   }
 
   @Override
@@ -197,13 +193,6 @@ public class DomElementAnnotationsManagerImpl extends DomElementAnnotationsManag
   @NotNull
   public DomElementsProblemsHolder getCachedProblemHolder(DomElement element) {
     return getProblemHolder(element);
-  }
-
-  public static void annotate(final DomElement element, final DomElementAnnotationHolder holder, final Class rootClass) {
-    final DomElementsAnnotator annotator = DomApplicationComponent.getInstance().getAnnotator(rootClass);
-    if (annotator != null) {
-      annotator.annotate(element, holder);
-    }
   }
 
   @Override

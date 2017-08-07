@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,13 +26,9 @@ import com.intellij.openapi.command.undo.UnexpectedUndoException;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.ex.DocumentEx;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.project.ProjectManager;
 import com.intellij.openapi.ui.Messages;
-import com.intellij.openapi.util.Ref;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.psi.PsiDocumentManager;
-import com.intellij.util.Function;
 import com.intellij.util.containers.ContainerUtil;
 import gnu.trove.THashSet;
 import org.jetbrains.annotations.NotNull;
@@ -122,8 +118,9 @@ class UndoableGroup {
     final boolean wrapInBulkUpdate = myActions.size() > 50;
     // perform undo action by action, setting bulk update flag if possible
     // if multiple consecutive actions share a document, then set the bulk flag only once
-    final Set<DocumentEx> bulkDocuments = new THashSet<>();
+    final UnexpectedUndoException[] exception = {null};
     ApplicationManager.getApplication().runWriteAction(() -> {
+      final Set<DocumentEx> bulkDocuments = new THashSet<>();
       try {
         for (final UndoableAction action : isUndo ? ContainerUtil.iterateBackward(myActions) : myActions) {
           if (wrapInBulkUpdate) {
@@ -148,7 +145,7 @@ class UndoableGroup {
         }
       }
       catch (UnexpectedUndoException e) {
-        reportUndoProblem(e, isUndo);
+        exception[0] = e;
       }
       finally {
         for (DocumentEx bulkDocument : bulkDocuments) {
@@ -156,7 +153,7 @@ class UndoableGroup {
         }
       }
     });
-    commitAllDocuments();
+    if (exception[0] != null) reportUndoProblem(exception[0], isUndo);
   }
 
   private static DocumentEx getDocumentToSetBulkMode(UndoableAction action) {
@@ -244,12 +241,6 @@ class UndoableGroup {
     return false;
   }
 
-  private static void commitAllDocuments() {
-    for (Project p : ProjectManager.getInstance().getOpenProjects()) {
-      PsiDocumentManager.getInstance(p).commitAllDocuments();
-    }
-  }
-
   private void reportUndoProblem(UnexpectedUndoException e, boolean isUndo) {
     String title;
     String message;
@@ -272,6 +263,10 @@ class UndoableGroup {
     else {
       LOG.error(e);
     }
+  }
+
+  public List<UndoableAction> getActions() {
+    return myActions;
   }
 
   @NotNull

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,12 +17,10 @@ package com.intellij.openapi.updateSettings.impl;
 
 import com.intellij.CommonBundle;
 import com.intellij.ide.IdeBundle;
-import com.intellij.openapi.application.ex.ApplicationEx;
-import com.intellij.openapi.application.ex.ApplicationManagerEx;
 import com.intellij.openapi.options.ShowSettingsUtil;
 import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.ui.ColorUtil;
-import com.intellij.ui.IdeBorderFactory;
+import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -44,12 +42,6 @@ public abstract class AbstractUpdateDialog extends DialogWrapper {
     setTitle(IdeBundle.message("update.notifications.title"));
   }
 
-  protected AbstractUpdateDialog(Component parent, boolean enableLink) {
-    super(parent, true);
-    myEnableLink = enableLink;
-    setTitle(IdeBundle.message("update.notifications.title"));
-  }
-
   @Override
   protected void init() {
     setOKButtonText(getOkButtonText());
@@ -63,12 +55,6 @@ public abstract class AbstractUpdateDialog extends DialogWrapper {
 
   protected String getCancelButtonText() {
     return CommonBundle.getCancelButtonText();
-  }
-
-  protected void restart() {
-    // do not stack several modal dialogs (native & swing)
-    ApplicationEx app = ApplicationManagerEx.getApplicationEx();
-    app.invokeLater(() -> app.restart(true));
   }
 
   protected void configureMessageArea(@NotNull JEditorPane area) {
@@ -87,8 +73,9 @@ public abstract class AbstractUpdateDialog extends DialogWrapper {
       "</head><body>" + messageBody + "</body></html>";
 
     area.setBackground(UIUtil.getPanelBackground());
-    area.setBorder(IdeBorderFactory.createEmptyBorder());
+    area.setBorder(JBUI.Borders.empty());
     area.setText(text);
+    area.setCaretPosition(0);
     area.setEditable(false);
 
     if (listener == null && myEnableLink) {

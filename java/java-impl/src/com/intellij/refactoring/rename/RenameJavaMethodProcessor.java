@@ -28,10 +28,7 @@ import com.intellij.psi.search.SearchScope;
 import com.intellij.psi.search.searches.ClassInheritorsSearch;
 import com.intellij.psi.search.searches.MethodReferencesSearch;
 import com.intellij.psi.search.searches.OverridingMethodsSearch;
-import com.intellij.psi.util.MethodSignature;
-import com.intellij.psi.util.MethodSignatureUtil;
-import com.intellij.psi.util.PsiTreeUtil;
-import com.intellij.psi.util.TypeConversionUtil;
+import com.intellij.psi.util.*;
 import com.intellij.refactoring.HelpID;
 import com.intellij.refactoring.JavaRefactoringSettings;
 import com.intellij.refactoring.RefactoringBundle;
@@ -42,7 +39,6 @@ import com.intellij.refactoring.util.RefactoringUIUtil;
 import com.intellij.refactoring.util.RefactoringUtil;
 import com.intellij.usageView.UsageInfo;
 import com.intellij.util.IncorrectOperationException;
-import com.intellij.util.Processor;
 import com.intellij.util.containers.HashSet;
 import com.intellij.util.containers.MultiMap;
 import org.jetbrains.annotations.NonNls;
@@ -128,8 +124,8 @@ public class RenameJavaMethodProcessor extends RenameJavaMemberProcessor {
     qualifyOuterMemberReferences(outerHides);
     qualifyStaticImportReferences(staticImportHides);
     
-    if (method.findDeepestSuperMethods().length == 0) {
-      PsiAnnotation annotation = AnnotationUtil.findAnnotation(method, CommonClassNames.JAVA_LANG_OVERRIDE);
+    if (!method.isConstructor() && method.isPhysical() && method.findDeepestSuperMethods().length == 0) {
+      PsiAnnotation annotation = AnnotationUtil.findAnnotation(method, true, CommonClassNames.JAVA_LANG_OVERRIDE);
       if (annotation != null && annotation.isPhysical()) {
         annotation.delete();
       }
@@ -158,7 +154,8 @@ public class RenameJavaMethodProcessor extends RenameJavaMemberProcessor {
       if (!methodAndOverriders.contains(actualMethod)) {
         PsiClass outerClass = PsiTreeUtil.getParentOfType(element, PsiClass.class);
         while (outerClass != null) {
-          if (containingClasses.contains(outerClass)) {
+          PsiClass finalOuterClass = outerClass;
+          if (containingClasses.stream().anyMatch(psiClass -> InheritanceUtil.isInheritorOrSelf(finalOuterClass, psiClass, true))) {
             qualifyMember(element, newName, outerClass, isStatic);
             break;
           }
@@ -277,25 +274,36 @@ public class RenameJavaMethodProcessor extends RenameJavaMemberProcessor {
   @Override
   public void prepareRenaming(PsiElement element, final String newName, final Map<PsiElement, String> allRenames, SearchScope scope) {
     final PsiMethod method = (PsiMethod) element;
-    OverridingMethodsSearch.search(method, scope, true).forEach(overrider -> {
-      if (overrider instanceof PsiMirrorElement) {
-        final PsiElement prototype = ((PsiMirrorElement)overrider).getPrototype();
-        if (prototype instanceof PsiMethod) {
-          overrider = (PsiMethod)prototype;
+    PsiMethod[] siblings = method.getUserData(SuperMethodWarningUtil.SIBLINGS);
+    if (siblings == null) {
+      siblings = new PsiMethod[] {method};
+    }
+    for (PsiMethod sibling : siblings) {
+      //append all super methods
+      if (sibling != method) {
+        allRenames.put(sibling, newName);
+      }
+
+      OverridingMethodsSearch.search(sibling, scope, true).forEach(overrider -> {
+        if (overrider instanceof PsiMirrorElement) {
+          final PsiElement prototype = ((PsiMirrorElement)overrider).getPrototype();
+          if (prototype instanceof PsiMethod) {
+            overrider = (PsiMethod)prototype;
+          }
         }
-      }
 
-      if (overrider instanceof SyntheticElement) return true;
+        if (overrider instanceof SyntheticElement) return true;
 
-      final String overriderName = overrider.getName();
-      final String baseName = method.getName();
-      final String newOverriderName = RefactoringUtil.suggestNewOverriderName(overriderName, baseName, newName);
-      if (newOverriderName != null) {
-        RenameProcessor.assertNonCompileElement(overrider);
-        allRenames.put(overrider, newOverriderName);
-      }
-      return true;
-    });
+        final String overriderName = overrider.getName();
+        final String baseName = sibling.getName();
+        final String newOverriderName = RefactoringUtil.suggestNewOverriderName(overriderName, baseName, newName);
+        if (newOverriderName != null) {
+          RenameProcessor.assertNonCompileElement(overrider);
+          allRenames.put(overrider, newOverriderName);
+        }
+        return true;
+      });
+    }
   }
 
   @NonNls
@@ -383,5 +391,24 @@ public class RenameJavaMethodProcessor extends RenameJavaMemberProcessor {
 
   public void setToSearchForTextOccurrences(final PsiElement element, final boolean enabled) {
     JavaRefactoringSettings.getInstance().RENAME_SEARCH_FOR_TEXT_FOR_METHOD = enabled;
+  }
+
+  @Override
+  public UsageInfo createUsageInfo(@NotNull PsiElement element, PsiReference ref, PsiElement referenceElement) {
+    return new MoveRenameUsageInfo(referenceElement, ref,
+                                   ref.getRangeInElement().getStartOffset(),
+                                   ref.getRangeInElement().getEndOffset(),
+                                   element,
+                                   ref.resolve() == null && !(ref instanceof PsiPolyVariantReference && ((PsiPolyVariantReference)ref).multiResolve(true).length > 0)) {
+      @Override
+      public boolean equals(Object o) {
+        return super.equals(o) && o instanceof MoveRenameUsageInfo && element.equals(((MoveRenameUsageInfo)o).getReferencedElement());
+      }
+
+      @Override
+      public int hashCode() {
+        return 29 * super.hashCode() + element.hashCode();
+      }
+    };
   }
 }

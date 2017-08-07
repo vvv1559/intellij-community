@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,7 +15,6 @@
  */
 package com.intellij.structuralsearch.inspection.highlightTemplate;
 
-import com.intellij.codeInsight.FileModificationService;
 import com.intellij.codeInspection.*;
 import com.intellij.dupLocator.iterators.CountingNodeIterator;
 import com.intellij.notification.Notification;
@@ -31,7 +30,6 @@ import com.intellij.structuralsearch.Matcher;
 import com.intellij.structuralsearch.SSRBundle;
 import com.intellij.structuralsearch.StructuralSearchException;
 import com.intellij.structuralsearch.impl.matcher.MatchContext;
-import com.intellij.structuralsearch.impl.matcher.MatcherImpl;
 import com.intellij.structuralsearch.impl.matcher.filters.LexicalNodesFilter;
 import com.intellij.structuralsearch.impl.matcher.iterators.SsrFilteringNodeIterator;
 import com.intellij.structuralsearch.plugin.replace.ReplacementInfo;
@@ -61,7 +59,7 @@ public class SSBasedInspection extends LocalInspectionTool {
 
   @Override
   public void writeSettings(@NotNull Element node) throws WriteExternalException {
-    ConfigurationManager.writeConfigurations(node, myConfigurations, Collections.<Configuration>emptyList());
+    ConfigurationManager.writeConfigurations(node, myConfigurations, Collections.emptyList());
   }
 
   @Override
@@ -119,7 +117,7 @@ public class SSBasedInspection extends LocalInspectionTool {
             Configuration configuration = entry.getKey();
             MatchContext context = entry.getValue();
 
-            if (MatcherImpl.checkIfShouldAttemptToMatch(context, matchedNodes)) {
+            if (Matcher.checkIfShouldAttemptToMatch(context, matchedNodes)) {
               final int nodeCount = context.getPattern().getNodeCount();
               try {
                 matcher.processMatchesInElement(context, configuration, new CountingNodeIterator(nodeCount, matchedNodes), processor);
@@ -143,7 +141,7 @@ public class SSBasedInspection extends LocalInspectionTool {
   private static LocalQuickFix createQuickFix(final Project project, final MatchResult matchResult, final Configuration configuration) {
     if (!(configuration instanceof ReplaceConfiguration)) return null;
     ReplaceConfiguration replaceConfiguration = (ReplaceConfiguration)configuration;
-    final Replacer replacer = new Replacer(project, replaceConfiguration.getOptions());
+    final Replacer replacer = new Replacer(project, replaceConfiguration.getReplaceOptions());
     final ReplacementInfo replacementInfo = replacer.buildReplacement(matchResult);
 
     return new LocalQuickFix() {
@@ -156,7 +154,7 @@ public class SSBasedInspection extends LocalInspectionTool {
       @Override
       public void applyFix(@NotNull Project project, @NotNull ProblemDescriptor descriptor) {
         PsiElement element = descriptor.getPsiElement();
-        if (element != null && FileModificationService.getInstance().preparePsiElementsForWrite(element)) {
+        if (element != null) {
           replacer.replace(replacementInfo);
         }
       }

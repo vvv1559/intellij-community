@@ -32,8 +32,8 @@ import com.intellij.ui.components.JBLabel;
 import com.intellij.util.TextFieldCompletionProvider;
 import com.intellij.util.execution.ParametersListUtil;
 import org.jetbrains.annotations.NotNull;
-import org.jetbrains.idea.maven.model.MavenConstants;
 import org.jetbrains.idea.maven.project.MavenProjectsManager;
+import org.jetbrains.idea.maven.utils.MavenUtil;
 
 import javax.swing.*;
 import java.util.LinkedHashMap;
@@ -54,15 +54,10 @@ public class MavenRunnerParametersPanel implements PanelWithAnchor {
   private JComponent anchor;
 
   public MavenRunnerParametersPanel(@NotNull final Project project) {
+
     workingDirComponent.getComponent().addBrowseFolderListener(
       RunnerBundle.message("maven.select.maven.project.file"), "", project,
-      new FileChooserDescriptor(false, true, false, false, false, false) {
-        @Override
-        public boolean isFileSelectable(VirtualFile file) {
-          if (!super.isFileSelectable(file)) return false;
-          return file.findChild(MavenConstants.POM_XML) != null;
-        }
-      });
+      new MavenPomFileChooserDescriptor(project));
 
     if (!project.isDefault()) {
       TextFieldCompletionProvider profilesCompletionProvider = new TextFieldCompletionProvider(true) {

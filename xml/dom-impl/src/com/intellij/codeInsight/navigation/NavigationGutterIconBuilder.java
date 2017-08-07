@@ -96,15 +96,18 @@ public class NavigationGutterIconBuilder<T> {
     myGotoRelatedItemProvider = gotoRelatedItemProvider;
   }
 
+  @NotNull
   public static NavigationGutterIconBuilder<PsiElement> create(@NotNull final Icon icon) {
     return create(icon, DEFAULT_PSI_CONVERTOR, PSI_GOTO_RELATED_ITEM_PROVIDER);
   }
 
+  @NotNull
   public static <T> NavigationGutterIconBuilder<T> create(@NotNull final Icon icon,
                                                           @NotNull NotNullFunction<T, Collection<? extends PsiElement>> converter) {
     return create(icon, converter, null);
   }
 
+  @NotNull
   public static <T> NavigationGutterIconBuilder<T> create(@NotNull final Icon icon,
                                                           @NotNull NotNullFunction<T, Collection<? extends PsiElement>> converter,
                                                           final @Nullable NotNullFunction<T, Collection<? extends GotoRelatedItem>> gotoRelatedItemProvider) {
@@ -186,6 +189,7 @@ public class NavigationGutterIconBuilder<T> {
     return annotation;
   }
 
+  @NotNull
   public RelatedItemLineMarkerInfo<PsiElement> createLineMarkerInfo(@NotNull PsiElement element) {
     final MyNavigationGutterIconRenderer renderer = createGutterIconRenderer(element.getProject());
     final String tooltip = renderer.getTooltipText();
@@ -197,11 +201,12 @@ public class NavigationGutterIconBuilder<T> {
                                                      gotoTargets);
   }
 
+  @NotNull
   private static <T> NotNullLazyValue<Collection<? extends GotoRelatedItem>> createGotoTargetsThunk(boolean lazy,
                                                                                                     final NotNullFunction<T, Collection<? extends GotoRelatedItem>> gotoRelatedItemProvider,
                                                                                                     final Factory<Collection<T>> factory) {
     if (gotoRelatedItemProvider == null) {
-      return NotNullLazyValue.<Collection<? extends GotoRelatedItem>>createConstantValue(Collections.<GotoRelatedItem>emptyList());
+      return NotNullLazyValue.createConstantValue(Collections.emptyList());
     }
 
     if (lazy) {
@@ -214,13 +219,14 @@ public class NavigationGutterIconBuilder<T> {
       };
     }
     Collection<GotoRelatedItem> concat = ContainerUtil.concat(factory.create(), gotoRelatedItemProvider);
-    return NotNullLazyValue.<Collection<? extends GotoRelatedItem>>createConstantValue(concat);
+    return NotNullLazyValue.createConstantValue(concat);
   }
 
   private void checkBuilt() {
     assert myTargets != null : "Must have called .setTargets() before calling create()";
   }
   
+  @NotNull
   private static <T> Factory<T> evaluateAndForget(NotNullLazyValue<T> lazyValue) {
     final Ref<NotNullLazyValue<T>> ref = Ref.create(lazyValue);
     return new Factory<T>() {
@@ -237,6 +243,7 @@ public class NavigationGutterIconBuilder<T> {
     };
   }
 
+  @NotNull
   private MyNavigationGutterIconRenderer createGutterIconRenderer(@NotNull final Project project) {
     checkBuilt();
 
@@ -269,6 +276,7 @@ public class NavigationGutterIconBuilder<T> {
     return new MyNavigationGutterIconRenderer(this, myAlignment, myIcon, myTooltipText, pointers, renderer, empty);
   }
 
+  @NotNull
   private static <T> NotNullLazyValue<List<SmartPsiElementPointer>> createPointersThunk(boolean lazy,
                                                                                         final Project project,
                                                                                         final Factory<Collection<T>> targets,

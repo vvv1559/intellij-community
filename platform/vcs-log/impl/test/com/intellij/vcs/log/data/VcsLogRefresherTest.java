@@ -16,6 +16,8 @@
 package com.intellij.vcs.log.data;
 
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.progress.EmptyProgressIndicator;
+import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.progress.Task;
 import com.intellij.openapi.progress.impl.ProgressManagerImpl;
@@ -25,19 +27,15 @@ import com.intellij.util.Consumer;
 import com.intellij.util.ExceptionUtil;
 import com.intellij.util.Function;
 import com.intellij.util.ObjectUtils;
-import com.intellij.util.containers.ConcurrentIntObjectMap;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.vcs.log.Hash;
 import com.intellij.vcs.log.TimedVcsCommit;
-import com.intellij.vcs.log.VcsCommitMetadata;
 import com.intellij.vcs.log.VcsLogProvider;
 import com.intellij.vcs.log.graph.GraphCommit;
-import com.intellij.vcs.log.impl.HashImpl;
-import com.intellij.vcs.log.impl.TestVcsLogProvider;
-import com.intellij.vcs.log.impl.TimedVcsCommitImpl;
-import com.intellij.vcs.log.impl.VcsRefImpl;
+import com.intellij.vcs.log.impl.*;
 import com.intellij.vcs.test.VcsPlatformTest;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import java.util.*;
 import java.util.concurrent.*;
@@ -99,7 +97,9 @@ public class VcsLogRefresherTest extends VcsPlatformTest {
   }
 
   public void test_initialize_shows_short_history() throws InterruptedException, ExecutionException, TimeoutException {
+    myLogProvider.blockFullLog();
     DataPack result = myLoader.readFirstBlock();
+    myLogProvider.unblockFullLog();
     assertNotNull(result);
     assertDataPack(log(myCommits.subList(0, 2)), result.getPermanentGraph().getAllCommits());
     waitForBackgroundTasksToComplete();
@@ -199,15 +199,28 @@ public class VcsLogRefresherTest extends VcsPlatformTest {
   }
 
   private VcsLogRefresherImpl createLoader(Consumer<DataPack> dataPackConsumer) {
-    myLogData = new VcsLogData(myProject, myLogProviders, LOG::error);
-    Disposer.register(myProject, myLogData);
-    return new VcsLogRefresherImpl(myProject, myLogData.getHashMap(), myLogProviders, myLogData.getUserRegistry(),
-                                   myLogData.getTopCommitsCache(), dataPackConsumer, FAILING_EXCEPTION_HANDLER, RECENT_COMMITS_COUNT) {
+    myLogData = new VcsLogData(myProject, myLogProviders, new FatalErrorHandler() {
       @Override
-      protected void startNewBackgroundTask(@NotNull final Task.Backgroundable refreshTask) {
+      public void consume(@Nullable Object source, @NotNull Exception exception) {
+        LOG.error(exception);
+      }
+
+      @Override
+      public void displayFatalErrorMessage(@NotNull String message) {
+        LOG.error(message);
+      }
+    });
+    Disposer.register(myProject, myLogData);
+    return new VcsLogRefresherImpl(myProject, myLogData.getStorage(), myLogProviders, myLogData.getUserRegistry(), myLogData.getIndex(),
+                                   new VcsLogProgress(),
+                                   myLogData.getTopCommitsCache(), dataPackConsumer, FAILING_EXCEPTION_HANDLER, RECENT_COMMITS_COUNT
+    ) {
+      @Override
+      protected ProgressIndicator startNewBackgroundTask(@NotNull final Task.Backgroundable refreshTask) {
         LOG.debug("Starting a background task...");
         myStartedTasks.add(((ProgressManagerImpl)ProgressManager.getInstance()).runProcessWithProgressAsynchronously(refreshTask));
         LOG.debug(myStartedTasks.size() + " started tasks");
+        return new EmptyProgressIndicator();
       }
     };
   }

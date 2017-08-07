@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,8 +22,8 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.plugins.groovy.lang.psi.impl.statements.expressions.TypesUtil;
 import org.jetbrains.plugins.groovy.lang.psi.impl.synthetic.GrLightMethodBuilder;
 
-import static org.jetbrains.plugins.groovy.lang.psi.impl.statements.blocks.GrDelegatesToUtil.DELEGATES_TO_KEY;
 import static org.jetbrains.plugins.groovy.lang.psi.util.GroovyCommonClassNames.GROOVY_LANG_CLOSURE;
+import static org.jetbrains.plugins.groovy.lang.resolve.delegatesTo.GrDelegatesToUtilKt.DELEGATES_TO_KEY;
 
 public class JsonDelegateContributor extends BuilderMethodsContributor {
 
@@ -45,6 +45,11 @@ public class JsonDelegateContributor extends BuilderMethodsContributor {
 
     GrLightMethodBuilder method;
     PsiClassType genericType;
+
+    // List ()
+    method = createMethod(name, clazz, place);
+    method.setReturnType(TypesUtil.createListType(place, null));
+    if (!processor.process(method)) return false;
 
     // T (T)
     method = createMethod(name, clazz, place);

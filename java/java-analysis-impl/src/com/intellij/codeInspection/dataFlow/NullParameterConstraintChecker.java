@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@ package com.intellij.codeInspection.dataFlow;
 import com.intellij.codeInsight.NullableNotNullManager;
 import com.intellij.codeInspection.dataFlow.instructions.AssignInstruction;
 import com.intellij.codeInspection.dataFlow.instructions.Instruction;
+import com.intellij.codeInspection.dataFlow.instructions.PushInstruction;
 import com.intellij.codeInspection.dataFlow.instructions.ReturnInstruction;
 import com.intellij.codeInspection.dataFlow.value.DfaValue;
 import com.intellij.codeInspection.dataFlow.value.DfaValueFactory;
@@ -32,6 +33,7 @@ import gnu.trove.THashSet;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Set;
 
 /**
@@ -47,14 +49,16 @@ import java.util.Set;
  */
 class NullParameterConstraintChecker extends DataFlowRunner {
   private final Set<PsiParameter> myPossiblyViolatedParameters;
+  private final Set<PsiParameter> myUsedParameters;
 
-  private NullParameterConstraintChecker(Collection<PsiParameter> parameters, boolean isOnTheFly) {
-    super(false, true, isOnTheFly);
+  private NullParameterConstraintChecker(Collection<PsiParameter> parameters) {
+    super(false, true);
     myPossiblyViolatedParameters = new THashSet<>(parameters);
+    myUsedParameters = new THashSet<>();
   }
 
   @NotNull
-  static PsiParameter[] checkMethodParameters(PsiMethod method, boolean isOnTheFly) {
+  static PsiParameter[] checkMethodParameters(PsiMethod method) {
     if (method.getBody() == null) return PsiParameter.EMPTY_ARRAY;
 
     final Collection<PsiParameter> nullableParameters = new SmartList<>();
@@ -63,26 +67,32 @@ class NullParameterConstraintChecker extends DataFlowRunner {
       PsiParameter parameter = parameters[index];
       if (!(parameter.getType() instanceof PsiPrimitiveType) &&
           !NullableNotNullManager.isNotNull(parameter) &&
+          !NullableNotNullManager.isNullable(parameter) &&
           JavaNullMethodArgumentUtil.hasNullArgument(method, index)) {
         nullableParameters.add(parameter);
       }
     }
     if (nullableParameters.isEmpty()) return PsiParameter.EMPTY_ARRAY;
 
-    final NullParameterConstraintChecker checker = new NullParameterConstraintChecker(nullableParameters, isOnTheFly);
+    final NullParameterConstraintChecker checker = new NullParameterConstraintChecker(nullableParameters);
     checker.analyzeMethod(method.getBody(), new StandardInstructionVisitor());
 
-    return checker.myPossiblyViolatedParameters.toArray(new PsiParameter[checker.myPossiblyViolatedParameters.size()]);
+    return checker.myPossiblyViolatedParameters.stream().filter(checker.myUsedParameters::contains).toArray(PsiParameter[]::new);
   }
 
   @NotNull
   @Override
   protected DfaInstructionState[] acceptInstruction(@NotNull InstructionVisitor visitor, @NotNull DfaInstructionState instructionState) {
-    DfaMemoryState memState = instructionState.getMemoryState();
-    if (memState.isEphemeral()) {
-      return DfaInstructionState.EMPTY_ARRAY;
-    }
     Instruction instruction = instructionState.getInstruction();
+    if (instruction instanceof PushInstruction) {
+      final DfaValue var = ((PushInstruction)instruction).getValue();
+      if (var instanceof DfaVariableValue) {
+        final PsiModifierListOwner psiVar = ((DfaVariableValue)var).getPsiVariable();
+        if (psiVar instanceof PsiParameter) {
+          myUsedParameters.add((PsiParameter)psiVar);
+        }
+      }
+    }
 
     if (instruction instanceof AssignInstruction) {
       final DfaValue value = ((AssignInstruction)instruction).getAssignedValue();
@@ -95,6 +105,7 @@ class NullParameterConstraintChecker extends DataFlowRunner {
     }
 
     if (instruction instanceof ReturnInstruction && !((ReturnInstruction)instruction).isViaException()) {
+      DfaMemoryState memState = instructionState.getMemoryState();
       for (PsiParameter parameter : myPossiblyViolatedParameters.toArray(new PsiParameter[myPossiblyViolatedParameters.size()])) {
         final DfaVariableValue dfaVar = getFactory().getVarFactory().createVariableValue(parameter, false);
         if (!memState.isNotNull(dfaVar)) {
@@ -116,6 +127,11 @@ class NullParameterConstraintChecker extends DataFlowRunner {
 
     protected MyDfaMemoryState(DfaValueFactory factory) {
       super(factory);
+      for (PsiParameter parameter : myPossiblyViolatedParameters) {
+        setVariableState(getFactory().getVarFactory().createVariableValue(parameter, false),
+                         new DfaVariableState(Collections.emptySet(), Collections.emptySet(),
+                                              DfaFactMap.EMPTY.with(DfaFactType.CAN_BE_NULL, true)));
+      }
     }
 
     protected MyDfaMemoryState(MyDfaMemoryState toCopy) {

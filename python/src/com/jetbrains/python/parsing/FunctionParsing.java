@@ -20,6 +20,7 @@ import com.intellij.lang.WhitespacesBinders;
 import com.intellij.psi.tree.IElementType;
 import com.jetbrains.python.PyElementTypes;
 import com.jetbrains.python.PyTokenTypes;
+import com.jetbrains.python.psi.LanguageLevel;
 import org.jetbrains.annotations.NotNull;
 
 import static com.jetbrains.python.PyBundle.message;
@@ -163,7 +164,7 @@ public class FunctionParsing extends Parsing {
       }
       boolean isStarParameter = atAnyOfTokens(PyTokenTypes.MULT, PyTokenTypes.EXP);
       if (!parseParameter(endToken, isLambda)) {
-        if (afterStarParameter) {
+        if (afterStarParameter && myContext.getLanguageLevel().isOlderThan(LanguageLevel.PYTHON36)) {
           myBuilder.error("expression expected");
         }
         break;
@@ -230,7 +231,7 @@ public class FunctionParsing extends Parsing {
     return true;
   }
 
-  protected void parseParameterAnnotation() {
+  public void parseParameterAnnotation() {
     if (myContext.getLanguageLevel().isPy3K() && atToken(PyTokenTypes.COLON)) {
       PsiBuilder.Marker annotationMarker = myBuilder.mark();
       nextToken();

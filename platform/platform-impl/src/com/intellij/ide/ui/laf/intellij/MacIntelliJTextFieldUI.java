@@ -15,19 +15,23 @@
  */
 package com.intellij.ide.ui.laf.intellij;
 
+import com.intellij.ide.ui.laf.darcula.DarculaUIUtil;
 import com.intellij.ide.ui.laf.darcula.ui.TextFieldWithPopupHandlerUI;
-import com.intellij.openapi.util.text.StringUtil;
+import com.intellij.ui.Gray;
 import com.intellij.util.ui.JBUI;
-import org.jetbrains.annotations.NotNull;
+import com.intellij.util.ui.MacUIUtil;
+import com.intellij.util.ui.UIUtil;
 
 import javax.swing.*;
 import javax.swing.plaf.ComponentUI;
 import javax.swing.text.JTextComponent;
 import java.awt.*;
-import java.awt.event.MouseEvent;
+import java.awt.geom.Path2D;
+import java.awt.geom.RoundRectangle2D;
 
 /**
  * @author Konstantin Bulenkov
+ * @author Sergey Malenkov
  */
 public class MacIntelliJTextFieldUI extends TextFieldWithPopupHandlerUI {
 
@@ -40,129 +44,128 @@ public class MacIntelliJTextFieldUI extends TextFieldWithPopupHandlerUI {
     return new MacIntelliJTextFieldUI((JTextField)c);
   }
 
-  public void showSearchPopup() {
-    final Object value = myTextField.getClientProperty("JTextField.Search.FindPopup");
-    final JTextComponent editor = getComponent();
-    if (editor != null && value instanceof JPopupMenu) {
-      final JPopupMenu popup = (JPopupMenu)value;
-      popup.show(editor, getSearchIconCoord().x, editor.getHeight());
-    }
-  }
-
-  private boolean hasText() {
-    JTextComponent component = getComponent();
-    return (component != null) && !StringUtil.isEmpty(component.getText());
-  }
-
-  public SearchAction getActionUnder(MouseEvent e) {
-    int off = JBUI.scale(8);
-    Point point = new Point(e.getX() - off, e.getY() - off);
-    return point.distance(getSearchIconCoord()) <= off
-           ? SearchAction.POPUP
-           : hasText() && point.distance(getClearIconCoord()) <= off
-             ? SearchAction.CLEAR
-             : null;
-  }
-
-  protected Rectangle getDrawingRect() {
-    return new Rectangle(0, (myTextField.getHeight() - 26) / 2, myTextField.getWidth(), myTextField.getHeight());
-  }
-
-  protected Point getSearchIconCoord() {
-    final Rectangle r = getDrawingRect();
-    return new Point(r.x + JBUI.scale(3), r.y + (r.height - JBUI.scale(16)) / 2 + JBUI.scale(1));
-  }
-
-  protected Point getClearIconCoord() {
-    final Rectangle r = getDrawingRect();
-    return new Point(r.x + r.width - JBUI.scale(16) - JBUI.scale(2), r.y + (r.height - JBUI.scale(16)) / 2);
+  @Override
+  protected Icon getSearchIcon(boolean hovered, boolean clickable) {
+    return MacIntelliJIconCache.getIcon(clickable ? "searchFieldWithHistory" : "search");
   }
 
   @Override
-  protected void paintBackground(Graphics graphics) {
-    Graphics2D g = (Graphics2D)graphics;
-    final JTextComponent c = getComponent();
-    final Container parent = c.getParent();
-    final Rectangle r = getDrawingRect();
-    if (c.isOpaque() && parent != null) {
-      g.setColor(parent.getBackground());
-      g.fillRect(0, 0, c.getWidth(), c.getHeight());
-    }
+  protected Icon getClearIcon(boolean hovered, boolean clickable) {
+    return !clickable ? null : MacIntelliJIconCache.getIcon("searchFieldClear");
+  }
 
-    if (isSearchField(c)) {
-      paintSearchField(g, c, r);
-    } else {
-      if (c.getBorder() instanceof MacIntelliJTextBorder) {
-        g.setColor(c.getBackground());
-        g.fillRect(3, 3, c.getWidth() - 6, c.getHeight() - 6);
-      } else {
+  @Override
+  protected int getMinimumHeight() {
+    return JBUI.scale(28);
+  }
+
+  @Override
+  protected int getClearIconPreferredSpace() {
+    return super.getClearIconPreferredSpace() - getClearIconGap();
+  }
+
+  @Override
+  protected void updateIconsLayout(Rectangle bounds) {
+    super.updateIconsLayout(bounds);
+    JTextComponent component = getComponent();
+    if (component == null || component.hasFocus()) return;
+    IconHolder clear = icons.get("clear");
+    if (clear == null || clear.icon != null) return;
+    IconHolder search = icons.get("search");
+    if (search == null || search.icon == null || search.isClickable()) return;
+    search.bounds.x = bounds.x + (bounds.width - search.bounds.width) / 2;
+  }
+
+  @Override
+  protected void paintBackground(Graphics g) {
+    JTextComponent component = getComponent();
+    if (component != null) {
+      Container parent = component.getParent();
+      if (parent != null && component.isOpaque()) {
+        g.setColor(parent.getBackground());
+        g.fillRect(0, 0, component.getWidth(), component.getHeight());
+      }
+      if (isSearchField(component)) {
+        paintSearchField((Graphics2D)g, component, new Rectangle(component.getWidth(), component.getHeight()));
+      }
+      else if (component.getBorder() instanceof MacIntelliJTextBorder) {
+        g.setColor(component.getBackground());
+        g.fillRect(JBUI.scale(3), JBUI.scale(3), component.getWidth() - JBUI.scale(6), component.getHeight() - JBUI.scale(6));
+      }
+      else {
         super.paintBackground(g);
       }
     }
   }
 
-  @NotNull
-  @Override
-  public Dimension getPreferredSize(JComponent c) {
-    Dimension size = super.getPreferredSize(c);
-    return new Dimension(size.width, Math.max(26, size.height));
-  }
+  private static void paintSearchField(Graphics2D g, JTextComponent c, Rectangle r) {
+    Graphics2D g2 = (Graphics2D)g.create();
+    try {
+      g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+      g2.setRenderingHint(RenderingHints.KEY_STROKE_CONTROL, MacUIUtil.USE_QUARTZ ? RenderingHints.VALUE_STROKE_PURE : RenderingHints.VALUE_STROKE_NORMALIZE);
+      g2.translate(r.x, r.y);
 
-  protected void paintSearchField(Graphics2D g, JTextComponent c, Rectangle r) {
-    final boolean noBorder = c.getClientProperty("JTextField.Search.noBorderRing") == Boolean.TRUE;
-    boolean hasFocus = c.hasFocus() && !noBorder;
-    Icon left = MacIntelliJIconCache.getIcon("searchFieldLeft", false, hasFocus);
-    Icon middle = MacIntelliJIconCache.getIcon("searchFieldMiddle", false, hasFocus);
-    Icon right = MacIntelliJIconCache.getIcon("searchFieldRight", false, hasFocus);
-    Graphics gg = g.create(0, 0, c.getWidth(), c.getHeight());
-    gg.setClip(r.x, r.y, r.width - right.getIconWidth(), r.height);
-    int x = r.x;
-    int stop = r.x + (r.width - right.getIconWidth());
-    left.paintIcon(c, g, r.x, r.y);
-    x += left.getIconWidth();
-    while (x < stop) {
-      middle.paintIcon(c, gg, x, r.y);
-      x+=middle.getIconWidth();
-    }
-    gg.dispose();
-    right.paintIcon(c, g, stop, r.y);
+      int arc = JBUI.scale(6);
+      double lw = UIUtil.isRetina(g2) ? 0.5 : 1.0;
+      Shape outerShape = new RoundRectangle2D.Double(JBUI.scale(3), JBUI.scale(3),
+                                                     r.width - JBUI.scale(6),
+                                                     r.height - JBUI.scale(6),
+                                                     arc, arc);
+      g2.setColor(c.getBackground());
+      g2.fill(outerShape);
 
-    boolean withHistoryPopup = isSearchFieldWithHistoryPopup(c);
-    Icon label = MacIntelliJIconCache.getIcon(withHistoryPopup ? "searchFieldWithHistory" : "searchFieldLabel");
-    if (StringUtil.isEmpty(c.getText()) && !c.hasFocus() && !withHistoryPopup) {
-      label.paintIcon(c, g, r.x + (r.width - label.getIconWidth())/ 2, r.y);
-    } else {
-      gg = g.create(0, 0, c.getWidth(), c.getHeight());
-      int offset = withHistoryPopup ? 5 : 8;
-      gg.setClip(r.x + offset, r.y, StringUtil.isEmpty(c.getText()) ? label.getIconWidth() : 16, label.getIconHeight());
-      label.paintIcon(c, gg, r.x + offset, r.y);
-    }
+      Path2D path = new Path2D.Double(Path2D.WIND_EVEN_ODD);
+      path.append(outerShape, false);
+      path.append(new RoundRectangle2D.Double(JBUI.scale(3) + lw, JBUI.scale(3) + lw,
+                                              r.width - JBUI.scale(6) - lw*2,
+                                              r.height - JBUI.scale(6) - lw*2,
+                                              arc-lw, arc-lw), false);
 
-    if (!StringUtil.isEmpty(c.getText())) {
-      Icon clear = MacIntelliJIconCache.getIcon("searchFieldClear");
-      clear.paintIcon(c, g, r.x + r.width - clear.getIconWidth() - 6, r.y);
+      g2.setColor(Gray.xBC);
+      g2.fill(path);
+
+      if (c.hasFocus() && c.getClientProperty("JTextField.Search.noBorderRing") != Boolean.TRUE) {
+        DarculaUIUtil.paintFocusBorder(g2, r.width, r.height, arc, true);
+      }
+
+      g2.translate(-r.x, -r.y);
+    } finally {
+      g2.dispose();
     }
   }
 
-  @Override
-  protected Rectangle getVisibleEditorRect() {
-    Rectangle rect = super.getVisibleEditorRect();
-    if (rect != null) {
-      if (isSearchField(myTextField)) {
-        rect.width -= 36;
-        rect.x += 19;
-        rect.y += 1;
-      } else {
-        rect.x += 2;
-        rect.width -=4;
+  public static void paintAquaSearchFocusRing(Graphics2D g, Rectangle r, Component c) {
+    Graphics2D g2 = (Graphics2D)g.create();
+    try {
+      g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+      g2.setRenderingHint(RenderingHints.KEY_STROKE_CONTROL, MacUIUtil.USE_QUARTZ ? RenderingHints.VALUE_STROKE_PURE : RenderingHints.VALUE_STROKE_NORMALIZE);
+      g2.translate(r.x, r.y);
+
+      int arc = JBUI.scale(6);
+      double lw = UIUtil.isRetina(g2) ? 0.5 : 1.0;
+      Shape outerShape = new RoundRectangle2D.Double(JBUI.scale(3), JBUI.scale(3),
+                                                     r.width - JBUI.scale(6),
+                                                     r.height - JBUI.scale(6),
+                                                     arc, arc);
+      g2.setColor(c.getBackground());
+      g2.fill(outerShape);
+
+      Path2D path = new Path2D.Double(Path2D.WIND_EVEN_ODD);
+      path.append(outerShape, false);
+      path.append(new RoundRectangle2D.Double(JBUI.scale(3) + lw, JBUI.scale(3) + lw,
+                                              r.width - JBUI.scale(6) - lw*2,
+                                              r.height - JBUI.scale(6) - lw*2,
+                                              arc-lw, arc-lw), false);
+
+      g2.setColor(Gray.xBC);
+      g2.fill(path);
+
+      if (c.hasFocus()) {
+        DarculaUIUtil.paintFocusBorder(g2, r.width, r.height, arc, true);
       }
     }
-    return rect;
-  }
-
-  @Override
-  protected void paintSafely(Graphics g) {
-    paintBackground(g);
-    super.paintSafely(g);
+    finally {
+      g2.dispose();
+    }
   }
 }

@@ -1,6 +1,7 @@
 package org.editorconfig.settings;
 
 import com.intellij.application.options.GeneralCodeStyleOptionsProvider;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.options.Configurable;
 import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.ui.VerticalFlowLayout;
@@ -10,6 +11,8 @@ import com.intellij.psi.codeStyle.CodeStyleSettingsProvider;
 import com.intellij.psi.codeStyle.CustomCodeStyleSettings;
 import com.intellij.ui.IdeBorderFactory;
 import com.intellij.ui.components.JBCheckBox;
+import com.intellij.util.messages.MessageBus;
+import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.UIUtil;
 import org.editorconfig.Utils;
 import org.jetbrains.annotations.NotNull;
@@ -35,7 +38,7 @@ public class EditorConfigConfigurable extends CodeStyleSettingsProvider implemen
     panel.add(myEnabled);
     final JLabel warning = new JLabel("EditorConfig may override the IDE code style settings");
     warning.setFont(UIUtil.getLabelFont(UIUtil.FontSize.SMALL));
-    warning.setBorder(IdeBorderFactory.createEmptyBorder(0, 20, 0, 0));
+    warning.setBorder(JBUI.Borders.emptyLeft(20));
     panel.add(warning);
     panel.setAlignmentY(Component.TOP_ALIGNMENT);
     result.add(panel);
@@ -58,7 +61,10 @@ public class EditorConfigConfigurable extends CodeStyleSettingsProvider implemen
 
   @Override
   public void apply(CodeStyleSettings settings) {
-    settings.getCustomSettings(EditorConfigSettings.class).ENABLED = myEnabled.isSelected();
+    boolean newValue = myEnabled.isSelected();
+    settings.getCustomSettings(EditorConfigSettings.class).ENABLED = newValue;
+    MessageBus bus = ApplicationManager.getApplication().getMessageBus();
+    bus.syncPublisher(EditorConfigSettings.EDITOR_CONFIG_ENABLED_TOPIC).valueChanged(newValue);
   }
 
   @Override
@@ -84,9 +90,6 @@ public class EditorConfigConfigurable extends CodeStyleSettingsProvider implemen
 
   @Override
   public void apply() throws ConfigurationException {}
-
-  @Override
-  public void reset() {}
 
   @Override
   public boolean hasSettingsPage() {

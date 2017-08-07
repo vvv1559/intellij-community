@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@ package com.intellij.debugger.engine;
 import com.intellij.debugger.engine.events.DebuggerCommandImpl;
 import com.intellij.debugger.jdi.ThreadReferenceProxyImpl;
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.util.registry.Registry;
 import com.sun.jdi.InternalException;
 import com.sun.jdi.ObjectCollectedException;
 import com.sun.jdi.event.EventSet;
@@ -233,18 +234,13 @@ public class SuspendManagerImpl implements SuspendManager {
   public boolean isSuspended(ThreadReferenceProxyImpl thread) throws ObjectCollectedException{
     DebuggerManagerThreadImpl.assertIsManagerThread();
 
-    boolean suspended = false;
+    boolean suspended;
 
     if (isFrozen(thread)) {
       suspended = true;
     }
     else {
-      for (SuspendContextImpl suspendContext : myEventContexts) {
-        if (suspendContext.suspends(thread)) {
-          suspended = true;
-          break;
-        }
-      }
+      suspended = myEventContexts.stream().anyMatch(suspendContext -> suspendContext.suspends(thread));
     }
 
     //bug in JDI : newly created thread may be resumed even when suspendPolicy == SUSPEND_ALL
@@ -316,8 +312,10 @@ public class SuspendManagerImpl implements SuspendManager {
         LOG.debug("vote paused");
         myDebugProcess.logThreads();
         myDebugProcess.cancelRunToCursorBreakpoint();
-        final ThreadReferenceProxyImpl thread = suspendContext.getThread();
-        myDebugProcess.deleteStepRequests(thread != null ? thread.getThreadReference() : null);
+        if (!Registry.is("debugger.keep.step.requests")) {
+          ThreadReferenceProxyImpl thread = suspendContext.getThread();
+          myDebugProcess.deleteStepRequests(thread != null ? thread.getThreadReference() : null);
+        }
         notifyPaused(suspendContext);
       }
     }

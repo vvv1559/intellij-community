@@ -96,6 +96,18 @@ public class PyAssignmentStatementImpl extends PyElementImpl implements PyAssign
     return targets.toArray(new PyExpression[targets.size()]);
   }
 
+  @Nullable
+  @Override
+  public PyAnnotation getAnnotation() {
+    return findChildByClass(PyAnnotation.class);
+  }
+
+  @Nullable
+  @Override
+  public String getAnnotationValue() {
+    return getAnnotationContentFromPsi(this);
+  }
+
   private static void addCandidate(List<PyExpression> candidates, PyExpression psi) {
     if (psi instanceof PyParenthesizedExpression) {
       addCandidate(candidates, ((PyParenthesizedExpression)psi).getContainedExpression());

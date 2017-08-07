@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@
 package org.jetbrains.plugins.groovy.intentions.style.parameterToEntry;
 
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.command.CommandProcessor;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Editor;
@@ -23,7 +24,6 @@ import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.progress.Task;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.util.Computable;
 import com.intellij.openapi.util.Ref;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.*;
@@ -33,7 +33,6 @@ import com.intellij.psi.search.searches.ReferencesSearch;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.refactoring.ui.ConflictsDialog;
 import com.intellij.refactoring.util.CommonRefactoringUtil;
-import com.intellij.util.Function;
 import com.intellij.util.IncorrectOperationException;
 import com.intellij.util.Processor;
 import com.intellij.util.containers.ContainerUtil;
@@ -89,7 +88,7 @@ public class ConvertParameterToMapEntryIntention extends Intention {
   @NonNls private static final String[] MY_POSSIBLE_NAMES = new String[]{"attrs", "args", "params", "map"};
 
   @Override
-  protected void processIntention(@NotNull final PsiElement element, final Project project, Editor editor) throws IncorrectOperationException {
+  protected void processIntention(@NotNull final PsiElement element, @NotNull final Project project, Editor editor) throws IncorrectOperationException {
     // Method or closure to be refactored
     final GrParametersOwner owner = PsiTreeUtil.getParentOfType(element, GrParametersOwner.class);
     final Collection<PsiElement> occurrences = new ArrayList<>();
@@ -439,19 +438,10 @@ public class ConvertParameterToMapEntryIntention extends Intention {
           return true;
         };
         ReferencesSearch.search(namedElem).forEach(consumer);
-        boolean isProperty = ApplicationManager.getApplication().runReadAction(new Computable<Boolean>() {
-          @Override
-          public Boolean compute() {
-            return namedElem instanceof GrField && ((GrField)namedElem).isProperty();
-          }
-        });
+        boolean isProperty =
+          ReadAction.compute(() -> namedElem instanceof GrField && ((GrField)namedElem).isProperty());
         if (isProperty) {
-          final GrAccessorMethod[] getters = ApplicationManager.getApplication().runReadAction(new Computable<GrAccessorMethod[]>() {
-            @Override
-            public GrAccessorMethod[] compute() {
-              return ((GrField)namedElem).getGetters();
-            }
-          });
+          final GrAccessorMethod[] getters = ReadAction.compute(() -> ((GrField)namedElem).getGetters());
           for (GrAccessorMethod getter : getters) {
             MethodReferencesSearch.search(getter).forEach(consumer);
           }
@@ -472,8 +462,8 @@ public class ConvertParameterToMapEntryIntention extends Intention {
       }
 
       @Override
-      public void onError(@NotNull Exception error) {
-        super.onError(error);
+      public void onThrowable(@NotNull Throwable error) {
+        super.onThrowable(error);
         result.set(false);
       }
 
@@ -494,7 +484,7 @@ public class ConvertParameterToMapEntryIntention extends Intention {
 
   private static class MyPsiElementPredicate implements PsiElementPredicate {
     @Override
-    public boolean satisfiedBy(final PsiElement element) {
+    public boolean satisfiedBy(@NotNull final PsiElement element) {
       GrParameter parameter = null;
       if (element instanceof GrParameter) {
         parameter = (GrParameter)element;

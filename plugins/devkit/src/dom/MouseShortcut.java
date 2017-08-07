@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@
 
 package org.jetbrains.idea.devkit.dom;
 
+import com.intellij.spellchecker.xml.NoSpellchecking;
 import com.intellij.util.xml.DomElement;
 import com.intellij.util.xml.GenericAttributeValue;
 import com.intellij.util.xml.Required;
@@ -31,22 +32,36 @@ public interface MouseShortcut extends DomElement {
 
 	/**
 	 * Returns the value of the keymap child.
-	 * Attribute keymap
+	 * Attribute {@code keymap}
 	 * @return the value of the keymap child.
 	 */
 	@NotNull
 	@Required
 	GenericAttributeValue<String> getKeymap();
 
-
 	/**
 	 * Returns the value of the keystroke child.
-	 * Attribute keystroke
+	 * Attribute {@code keystroke}
 	 * @return the value of the keystroke child.
 	 */
 	@NotNull
 	@Required
+        @NoSpellchecking
 	GenericAttributeValue<String> getKeystroke();
 
+        /**
+         * Returns the value of the should current shortcut be removed or not.
+         * Attribute {@code remove}
+         * @return the value of the should current shortcut be removed or not.
+         */
+        @NotNull
+        GenericAttributeValue<Boolean> getRemove();
 
+        /**
+         * Returns the value of the should all previous shortcuts be removed by that one or not.
+         * Attribute {@code replace-all}
+         * @return the value of the should all previous shortcuts be removed by that one or not.
+         */
+        @NotNull
+        GenericAttributeValue<Boolean> getReplaceAll();
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,11 +18,10 @@ package com.intellij.ui.components;
 import com.intellij.ide.DataManager;
 import com.intellij.openapi.actionSystem.DataProvider;
 import com.intellij.openapi.ide.CopyPasteManager;
-import com.intellij.openapi.util.Computable;
 import com.intellij.openapi.util.Disposer;
+import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.ui.*;
-import com.intellij.util.ArrayUtil;
 import com.intellij.util.NotNullFunction;
 import com.intellij.util.ui.*;
 import org.jetbrains.annotations.NotNull;
@@ -32,51 +31,58 @@ import javax.accessibility.Accessible;
 import javax.accessibility.AccessibleContext;
 import javax.accessibility.AccessibleRole;
 import javax.swing.*;
+import javax.swing.plaf.ListUI;
 import javax.swing.plaf.UIResource;
+import javax.swing.plaf.basic.BasicListUI;
 import javax.swing.text.JTextComponent;
 import java.awt.*;
 import java.awt.datatransfer.StringSelection;
 import java.awt.event.ActionEvent;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 
 /**
  * @author Anton Makeev
  * @author Konstantin Bulenkov
  */
-public class JBList extends JList implements ComponentWithEmptyText, ComponentWithExpandableItems<Integer>{
-  @NotNull private StatusText myEmptyText;
-  @NotNull private ExpandableItemsHandler<Integer> myExpandableItemsHandler;
+public class JBList<E> extends JList<E> implements ComponentWithEmptyText, ComponentWithExpandableItems<Integer>{
+  private StatusText myEmptyText;
+  private ExpandableItemsHandler<Integer> myExpandableItemsHandler;
 
   @Nullable private AsyncProcessIcon myBusyIcon;
   private boolean myBusy;
-
 
   public JBList() {
     init();
   }
 
-  public JBList(@NotNull ListModel dataModel) {
+  public JBList(@NotNull ListModel<E> dataModel) {
     super(dataModel);
     init();
   }
 
-  public JBList(@NotNull Object... listData) {
+  public JBList(@NotNull E... listData) {
     super(createDefaultListModel(listData));
     init();
   }
 
   @NotNull
-  public static DefaultListModel createDefaultListModel(@NotNull Object... items) {
-    final DefaultListModel model = new DefaultListModel();
-    for (Object item : items) {
+  public static <T> DefaultListModel<T> createDefaultListModel(@NotNull T... items) {
+    return createDefaultListModel(Arrays.asList(items));
+  }
+
+  @NotNull
+  public static <T> DefaultListModel<T> createDefaultListModel(@NotNull Iterable<T> items) {
+    DefaultListModel<T> model = new DefaultListModel<>();
+    for (T item : items) {
       model.add(model.getSize(), item);
     }
     return model;
   }
 
-  public JBList(@NotNull Collection items) {
-    this(ArrayUtil.toObjectArray(items));
+  public JBList(@NotNull Collection<E> items) {
+    this(createDefaultListModel(items));
   }
 
   @Override
@@ -113,6 +119,30 @@ public class JBList extends JList implements ComponentWithEmptyText, ComponentWi
     if (myBusyIcon != null) {
       myBusyIcon.updateLocation(this);
     }
+  }
+
+  @Override
+  public void repaint(long tm, int x, int y, int width, int height) {
+    if (width > 0 && height > 0) {
+      ListUI ui = getUI();
+      // do not paint a line background if layout orientation is not vertical
+      if (ui instanceof WideSelectionListUI && JList.VERTICAL == getLayoutOrientation()) {
+        x = 0;
+        width = getWidth();
+      }
+      super.repaint(tm, x, y, width, height);
+    }
+  }
+
+  @Override
+  public void setUI(ListUI ui) {
+    if (ui != null && Registry.is("ide.wide.selection.list.ui")) {
+      Class<? extends ListUI> type = ui.getClass();
+      if (type == BasicListUI.class) {
+        ui = new WideSelectionListUI();
+      }
+    }
+    super.setUI(ui);
   }
 
   public void setPaintBusy(boolean paintBusy) {
@@ -265,14 +295,14 @@ public class JBList extends JList implements ComponentWithEmptyText, ComponentWi
   }
 
   @Override
-  public void setCellRenderer(final ListCellRenderer cellRenderer) {
+  public void setCellRenderer(@NotNull ListCellRenderer<? super E> cellRenderer) {
     // myExpandableItemsHandler may not yeb be initialized
     //noinspection ConstantConditions
     if (myExpandableItemsHandler == null) {
       super.setCellRenderer(cellRenderer);
       return;
     }
-    super.setCellRenderer(new ExpandedItemListCellRendererWrapper(cellRenderer, myExpandableItemsHandler));
+    super.setCellRenderer(new ExpandedItemListCellRendererWrapper<>(cellRenderer, myExpandableItemsHandler));
   }
 
   public <T> void installCellRenderer(@NotNull final NotNullFunction<T, JComponent> fun) {
@@ -353,7 +383,7 @@ public class JBList extends JList implements ComponentWithEmptyText, ComponentWi
     }
 
     protected class AccessibleJBListChild extends AccessibleJListChild {
-      public AccessibleJBListChild(JBList parent, int indexInParent) {
+      public AccessibleJBListChild(JBList<E> parent, int indexInParent) {
         super(parent, indexInParent);
       }
 

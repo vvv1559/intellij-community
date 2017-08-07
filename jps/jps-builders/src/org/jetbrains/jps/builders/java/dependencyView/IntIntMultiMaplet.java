@@ -28,7 +28,7 @@ import java.util.List;
  * @author: db
  * Date: 03.11.11
  */
-abstract class IntIntMultiMaplet implements Streamable {
+abstract class IntIntMultiMaplet implements Streamable, CloseableMaplet {
   abstract boolean containsKey(final int key);
 
   abstract TIntHashSet get(final int key);
@@ -48,8 +48,6 @@ abstract class IntIntMultiMaplet implements Streamable {
   abstract void removeFrom(final int key, final int value);
 
   abstract void removeAll(final int key, final TIntHashSet values);
-
-  abstract void close();
 
   abstract void forEachEntry(TIntObjectProcedure<TIntHashSet> proc);
 
@@ -75,14 +73,11 @@ abstract class IntIntMultiMaplet implements Streamable {
       stream.println(context.getValue(a));
       stream.println("  Values:");
 
-      final List<String> list = new LinkedList<String>();
+      final List<String> list = new LinkedList<>();
 
-      b.forEach(new TIntProcedure() {
-        @Override
-        public boolean execute(final int value) {
-          list.add(context.getValue(value));
-          return true;
-        }
+      b.forEach(value -> {
+        list.add(context.getValue(value));
+        return true;
       });
 
       Collections.sort(list);

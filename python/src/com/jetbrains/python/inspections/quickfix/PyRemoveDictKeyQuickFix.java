@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -30,22 +30,16 @@ import org.jetbrains.annotations.NotNull;
 public class PyRemoveDictKeyQuickFix implements LocalQuickFix {
 
   @NotNull
-  public String getName() {
-    return PyBundle.message("QFIX.NAME.remove.dict.key");
-  }
-
-  @NonNls
-  @NotNull
   public String getFamilyName() {
-    return getName();
+    return PyBundle.message("QFIX.NAME.remove.dict.key");
   }
 
   public void applyFix(@NotNull final Project project, @NotNull final ProblemDescriptor descriptor) {
     final PsiElement element = descriptor.getPsiElement();
     final PyKeyValueExpression expression = PsiTreeUtil.getParentOfType(element, PyKeyValueExpression.class);
     if (expression == null) return;
-    final PsiElement nextSibling = PsiTreeUtil.skipSiblingsForward(expression, PsiWhiteSpace.class);
-    final PsiElement prevSibling = PsiTreeUtil.skipSiblingsBackward(expression, PsiWhiteSpace.class);
+    final PsiElement nextSibling = PsiTreeUtil.skipWhitespacesForward(expression);
+    final PsiElement prevSibling = PsiTreeUtil.skipWhitespacesBackward(expression);
     expression.delete();
     if (nextSibling != null && nextSibling.getNode().getElementType().equals(PyTokenTypes.COMMA)) {
       nextSibling.delete();

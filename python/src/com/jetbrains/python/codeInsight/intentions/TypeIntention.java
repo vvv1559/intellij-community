@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,7 +16,6 @@
 package com.jetbrains.python.codeInsight.intentions;
 
 import com.google.common.base.Function;
-import com.intellij.codeInsight.intention.IntentionAction;
 import com.intellij.lang.ASTNode;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.project.Project;
@@ -32,6 +31,9 @@ import com.jetbrains.python.psi.types.TypeEvalContext;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.Collections;
+import java.util.List;
+
 import static com.jetbrains.python.psi.PyUtil.as;
 
 /**
@@ -39,7 +41,7 @@ import static com.jetbrains.python.psi.PyUtil.as;
  *
  * Common part for type specifying intentions
  */
-public abstract class TypeIntention implements IntentionAction {
+public abstract class TypeIntention extends PyBaseIntentionAction {
 
   public boolean isAvailable(@NotNull Project project, Editor editor, PsiFile file) {
     if (!(file instanceof PyFile) || file instanceof PyDocstringFile) return false;
@@ -109,12 +111,7 @@ public abstract class TypeIntention implements IntentionAction {
   }
 
   private boolean isAvailableForReturn(@NotNull final PsiElement elementAt) {
-    return resolvesToFunction(elementAt, new Function<PyFunction, Boolean>() {
-      @Override
-      public Boolean apply(PyFunction input) {
-        return !isReturnTypeDefined(input);
-      }
-    });
+    return resolvesToFunction(elementAt, input -> !isReturnTypeDefined(input));
   }
 
   static boolean resolvesToFunction(@NotNull PsiElement elementAt, Function<PyFunction, Boolean> isAvailableForFunction) {
@@ -182,22 +179,26 @@ public abstract class TypeIntention implements IntentionAction {
     return PsiTreeUtil.getParentOfType(elementAt, PyCallExpression.class, false);
   }
 
-  @Nullable
-  static PyCallable getCallable(PsiElement elementAt) {
-    PyCallExpression callExpression = getCallExpression(elementAt);
+  @NotNull
+  static List<PyCallable> getMultiCallable(@Nullable PsiElement elementAt) {
+    final PyCallExpression call = getCallExpression(elementAt);
 
-    if (callExpression != null && elementAt != null) {
-      final PyCallable callable = callExpression.resolveCalleeFunction(getResolveContext(elementAt));
-      return callable == null ? PsiTreeUtil.getParentOfType(elementAt, PyFunction.class) : callable;
+    if (call != null && elementAt != null) {
+      final List<PyCallable> callables = call.multiResolveCalleeFunction(getResolveContext(elementAt));
+      if (!callables.isEmpty()) {
+        return callables;
+      }
     }
-    return PsiTreeUtil.getParentOfType(elementAt, PyFunction.class);
+
+    final PyFunction parentFunction = PsiTreeUtil.getParentOfType(elementAt, PyFunction.class);
+    if (parentFunction != null) {
+      return Collections.singletonList(parentFunction);
+    }
+
+    return Collections.emptyList();
   }
 
   protected static PyResolveContext getResolveContext(@NotNull PsiElement origin) {
     return PyResolveContext.defaultContext().withTypeEvalContext(TypeEvalContext.codeAnalysis(origin.getProject(), origin.getContainingFile()));
-  }
-
-  public boolean startInWriteAction() {
-    return true;
   }
 }

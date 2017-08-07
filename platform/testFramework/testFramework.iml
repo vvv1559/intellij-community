@@ -25,8 +25,7 @@
     <orderEntry type="module" module-name="images" exported="" scope="RUNTIME" />
     <orderEntry type="module" module-name="RegExpSupport" exported="" scope="RUNTIME" />
     <orderEntry type="library" name="KotlinJavaRuntime" level="project" />
-    <orderEntry type="library" scope="TEST" name="assertJ" level="project" />
-    <orderEntry type="library" scope="TEST" name="memoryfilesystem" level="project" />
     <orderEntry type="module" module-name="boot" />
+    <orderEntry type="module" module-name="jetCheck" exported="" scope="TEST" />
   </component>
 </module>

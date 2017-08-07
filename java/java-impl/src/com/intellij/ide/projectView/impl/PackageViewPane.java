@@ -224,6 +224,11 @@ public final class PackageViewPane extends AbstractProjectViewPSIPane {
       protected AbstractTreeNode createRoot(final Project project, ViewSettings settings) {
         return new PackageViewProjectNode(project, settings);
       }
+
+      @Override
+      public boolean isToBuildChildrenInBackground(Object element) {
+        return Registry.is("ide.projectView.PackageViewTreeStructure.BuildChildrenInBackground");
+      }
     };
   }
 
@@ -232,11 +237,6 @@ public final class PackageViewPane extends AbstractProjectViewPSIPane {
     return new ProjectViewTree(myProject, treeModel) {
       public String toString() {
         return getTitle() + " " + super.toString();
-      }
-
-      @Override
-      public DefaultMutableTreeNode getSelectedNode() {
-        return PackageViewPane.this.getSelectedNode();
       }
     };
   }

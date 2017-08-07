@@ -25,53 +25,34 @@ import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.vcs.log.VcsLogBranchFilter;
 import com.intellij.vcs.log.VcsLogDataPack;
-import com.intellij.vcs.log.data.VcsLogBranchFilterImpl;
-import com.intellij.vcs.log.data.VcsLogUiProperties;
-import com.intellij.vcs.log.ui.VcsLogUiImpl;
+import com.intellij.vcs.log.VcsRef;
+import com.intellij.vcs.log.impl.MainVcsLogUiProperties;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.List;
 
 public class BranchFilterPopupComponent extends MultipleValueFilterPopupComponent<VcsLogBranchFilter> {
-  @NotNull private final VcsLogUiImpl myUi;
-  private VcsLogClassicFilterUi.BranchFilterModel myBranchFilterModel;
+  private final VcsLogClassicFilterUi.BranchFilterModel myBranchFilterModel;
 
-  public BranchFilterPopupComponent(@NotNull VcsLogUiImpl ui,
-                                    @NotNull VcsLogUiProperties uiProperties,
+  public BranchFilterPopupComponent(@NotNull MainVcsLogUiProperties uiProperties,
                                     @NotNull VcsLogClassicFilterUi.BranchFilterModel filterModel) {
     super("Branch", uiProperties, filterModel);
-    myUi = ui;
     myBranchFilterModel = filterModel;
   }
 
   @NotNull
   @Override
   protected String getText(@NotNull VcsLogBranchFilter filter) {
-    return displayableText(getTextValues(filter));
+    return displayableText(myFilterModel.getFilterValues(filter));
   }
 
   @Nullable
   @Override
   protected String getToolTip(@NotNull VcsLogBranchFilter filter) {
-    return tooltip(getTextValues(filter));
-  }
-
-  @NotNull
-  @Override
-  protected VcsLogBranchFilter createFilter(@NotNull Collection<String> values) {
-    return VcsLogBranchFilterImpl
-      .fromTextPresentation(values, ContainerUtil.map2Set(myUi.getDataPack().getRefs().getBranches(), vcsRef -> vcsRef.getName()));
-  }
-
-  @Override
-  @NotNull
-  protected Collection<String> getTextValues(@Nullable VcsLogBranchFilter filter) {
-    if (filter == null) return Collections.emptySet();
-    return filter.getTextPresentation();
+    return tooltip(myFilterModel.getFilterValues(filter));
   }
 
   @Override
@@ -82,7 +63,7 @@ public class BranchFilterPopupComponent extends MultipleValueFilterPopupComponen
   @NotNull
   @Override
   protected ListPopup createPopupMenu() {
-    return new FlatSpeedSearchPopup(createActionGroup(), DataManager.getInstance().getDataContext(this));
+    return new BranchLogSpeedSearchPopup(createActionGroup(), DataManager.getInstance().getDataContext(this));
   }
 
   @Override
@@ -111,7 +92,7 @@ public class BranchFilterPopupComponent extends MultipleValueFilterPopupComponen
   @NotNull
   @Override
   protected List<String> getAllValues() {
-    return ContainerUtil.map(myFilterModel.getDataPack().getRefs().getBranches(), ref -> ref.getName());
+    return ContainerUtil.map(myFilterModel.getDataPack().getRefs().getBranches(), VcsRef::getName);
   }
 
   private class MyBranchPopupBuilder extends BranchPopupBuilder {
@@ -124,10 +105,10 @@ public class BranchFilterPopupComponent extends MultipleValueFilterPopupComponen
     @NotNull
     @Override
     public AnAction createAction(@NotNull String name) {
-      return new PredefinedValueAction(Collections.singleton(name)) {
+      return new PredefinedValueAction(name) {
         @Override
         public void actionPerformed(@NotNull AnActionEvent e) {
-          myFilterModel.setFilter(BranchFilterPopupComponent.this.createFilter(myValues)); // does not add to recent
+          myFilterModel.setFilter(myFilterModel.createFilter(myValues)); // does not add to recent
         }
       };
     }
@@ -140,7 +121,7 @@ public class BranchFilterPopupComponent extends MultipleValueFilterPopupComponen
     @NotNull
     @Override
     protected AnAction createCollapsedAction(String actionName) {
-      return createPredefinedValueAction(Collections.singleton(actionName)); // adds to recent
+      return new PredefinedValueAction(actionName); // adds to recent
     }
   }
 }

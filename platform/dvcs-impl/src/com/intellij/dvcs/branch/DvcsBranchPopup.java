@@ -30,12 +30,10 @@ import com.intellij.openapi.ui.popup.ListPopup;
 import com.intellij.openapi.util.Condition;
 import com.intellij.openapi.vcs.AbstractVcs;
 import com.intellij.openapi.vcs.VcsNotifier;
-import com.intellij.ui.popup.list.ListPopupImpl;
 import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
 import javax.swing.event.HyperlinkEvent;
 import java.util.List;
 
@@ -47,24 +45,25 @@ public abstract class DvcsBranchPopup<Repo extends Repository> {
   @NotNull protected final DvcsMultiRootBranchConfig<Repo> myMultiRootBranchConfig;
 
   @NotNull protected final Repo myCurrentRepository;
-  @NotNull protected final ListPopupImpl myPopup;
+  @NotNull protected final BranchActionGroupPopup myPopup;
+  @NotNull protected final String myRepoTitleInfo;
 
   protected DvcsBranchPopup(@NotNull Repo currentRepository,
                             @NotNull AbstractRepositoryManager<Repo> repositoryManager,
                             @NotNull DvcsMultiRootBranchConfig<Repo> multiRootBranchConfig,
                             @NotNull DvcsSyncSettings vcsSettings,
-                            @NotNull Condition<AnAction> preselectActionCondition) {
+                            @NotNull Condition<AnAction> preselectActionCondition, @Nullable String dimensionKey) {
     myProject = currentRepository.getProject();
     myCurrentRepository = currentRepository;
     myRepositoryManager = repositoryManager;
     myVcs = currentRepository.getVcs();
     myVcsSettings = vcsSettings;
     myMultiRootBranchConfig = multiRootBranchConfig;
-    String title = createPopupTitle(currentRepository);
-    myPopup = new BranchActionGroupPopup(title, myProject, preselectActionCondition, createActions());
-
+    String title = myVcs.getDisplayName() + " Branches";
+    myRepoTitleInfo = (myRepositoryManager.moreThanOneRoot() && myVcsSettings.getSyncSetting() == DvcsSyncSettings.Value.DONT_SYNC)
+                 ? " in " + DvcsUtil.getShortRepositoryName(currentRepository) : "";
+    myPopup = new BranchActionGroupPopup(title + myRepoTitleInfo, myProject, preselectActionCondition, createActions(), dimensionKey);
     initBranchSyncPolicyIfNotInitialized();
-    setCurrentBranchInfo();
     warnThatBranchesDivergedIfNeeded();
   }
 
@@ -83,20 +82,6 @@ public abstract class DvcsBranchPopup<Repo extends Repository> {
         myVcsSettings.setSyncSetting(DvcsSyncSettings.Value.DONT_SYNC);
       }
     }
-  }
-
-  @NotNull
-  private String createPopupTitle(@NotNull Repo currentRepository) {
-    String title = myVcs.getDisplayName() + " Branches";
-    if (myRepositoryManager.moreThanOneRoot() && myVcsSettings.getSyncSetting() == DvcsSyncSettings.Value.DONT_SYNC) {
-      title += " in " + DvcsUtil.getShortRepositoryName(currentRepository);
-    }
-    return title;
-  }
-
-  protected void setCurrentBranchInfo() {
-    String branchText = "Current branch : ";
-    myPopup.setAdText(branchText + myCurrentRepository.getCurrentBranchName(), SwingConstants.CENTER);
   }
 
   private void notifyAboutSyncedBranches() {
@@ -138,7 +123,7 @@ public abstract class DvcsBranchPopup<Repo extends Repository> {
     return popupGroup;
   }
 
-  private boolean userWantsSyncControl() {
+  protected boolean userWantsSyncControl() {
     return (myVcsSettings.getSyncSetting() != DvcsSyncSettings.Value.DONT_SYNC);
   }
 
@@ -152,18 +137,23 @@ public abstract class DvcsBranchPopup<Repo extends Repository> {
   }
 
   private void warnThatBranchesDivergedIfNeeded() {
-    if (myRepositoryManager.moreThanOneRoot() && myMultiRootBranchConfig.diverged() && userWantsSyncControl()) {
+    if (isBranchesDiverged()) {
       myPopup.setWarning("Branches have diverged");
     }
+  }
+
+  private boolean isBranchesDiverged() {
+    return myRepositoryManager.moreThanOneRoot() && myMultiRootBranchConfig.diverged() && userWantsSyncControl();
   }
 
   @NotNull
   protected abstract DefaultActionGroup createRepositoriesActions();
 
-  protected boolean highlightCurrentRepo() {
-    return !userWantsSyncControl() || myMultiRootBranchConfig.diverged();
-  }
-
   protected abstract void fillPopupWithCurrentRepositoryActions(@NotNull DefaultActionGroup popupGroup,
                                                                 @Nullable DefaultActionGroup actions);
+
+  public static class MyMoreIndex {
+    public static final int MAX_NUM = 8;
+    public static final int DEFAULT_NUM = 5;
+  }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -59,7 +59,10 @@ import org.jetbrains.plugins.groovy.refactoring.changeSignature.GrChangeSignatur
 import org.jetbrains.plugins.groovy.refactoring.changeSignature.GrParameterInfo;
 
 import javax.swing.*;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
 
 /**
  * @author Maxim.Medvedev
@@ -75,7 +78,7 @@ public class CreateParameterForFieldIntention extends Intention {
   }
 
   @Override
-  protected void processIntention(@NotNull PsiElement element, final Project project, final Editor editor)
+  protected void processIntention(@NotNull PsiElement element, @NotNull final Project project, final Editor editor)
     throws IncorrectOperationException {
     final List<GrField> candidates = findFieldCandidates(element);
     if (candidates != null) {
@@ -150,7 +153,7 @@ public class CreateParameterForFieldIntention extends Intention {
       JavaCodeStyleManager.getInstance(project).suggestVariableName(VariableKind.PARAMETER, selectedValue.getName(), null, null).names;
 
     final DefaultGroovyVariableNameValidator nameValidator =
-      new DefaultGroovyVariableNameValidator(constructor, Collections.<String>emptyList(), false);
+      new DefaultGroovyVariableNameValidator(constructor, Collections.emptyList(), false);
     String parameterName = ContainerUtil.find(suggestedNames, name -> !nameValidator.validateName(name, false).isEmpty());
 
     if (parameterName == null) {
@@ -210,7 +213,7 @@ public class CreateParameterForFieldIntention extends Intention {
 
   static class MyPredicate implements PsiElementPredicate {
     @Override
-    public boolean satisfiedBy(PsiElement element) {
+    public boolean satisfiedBy(@NotNull PsiElement element) {
       final List<GrField> candidates = findFieldCandidates(element);
       if (candidates != null && !candidates.isEmpty()) return true;
       final List<GrMethod> constructors = findConstructorCandidates(element);
@@ -242,7 +245,7 @@ public class CreateParameterForFieldIntention extends Intention {
     final PsiManager manager = clazz.getManager();
     block.accept(new GroovyRecursiveElementVisitor() {
       @Override
-      public void visitReferenceExpression(GrReferenceExpression referenceExpression) {
+      public void visitReferenceExpression(@NotNull GrReferenceExpression referenceExpression) {
         super.visitReferenceExpression(referenceExpression);
         final PsiElement resolved = referenceExpression.resolve();
         if (resolved instanceof GrField &&
@@ -253,23 +256,18 @@ public class CreateParameterForFieldIntention extends Intention {
       }
 
       @Override
-      public void visitTypeDefinition(GrTypeDefinition typeDefinition) {
+      public void visitTypeDefinition(@NotNull GrTypeDefinition typeDefinition) {
       }
 
       @Override
-      public void visitClosure(GrClosableBlock closure) {
+      public void visitClosure(@NotNull GrClosableBlock closure) {
       }
     });
 
     List<GrField> fields = new ArrayList<>();
     for (final GrField field : clazz.getFields()) {
       if (field.getInitializerGroovy() != null) continue;
-      if (ContainerUtil.find(usedFields, new Condition<PsiField>() {
-        @Override
-        public boolean value(PsiField o) {
-          return manager.areElementsEquivalent(o, field);
-        }
-      }) == null) {
+      if (ContainerUtil.find(usedFields, (Condition<PsiField>)o -> manager.areElementsEquivalent(o, field)) == null) {
         fields.add(field);
       }
     }

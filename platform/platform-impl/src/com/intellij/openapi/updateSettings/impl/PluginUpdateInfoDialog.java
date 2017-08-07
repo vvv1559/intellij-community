@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,7 +21,6 @@ import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.progress.PerformInBackgroundOption;
 import com.intellij.openapi.progress.ProgressIndicator;
-import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.progress.Task;
 import com.intellij.ui.TableUtil;
 import org.jetbrains.annotations.NotNull;
@@ -48,8 +47,8 @@ class PluginUpdateInfoDialog extends AbstractUpdateDialog {
   /**
    * Used from {@link UpdateInfoDialog} when both platform and plugin updates are available.
    */
-  PluginUpdateInfoDialog(Component parent, @NotNull Collection<PluginDownloader> updatePlugins) {
-    super(parent, false);
+  PluginUpdateInfoDialog(@NotNull Collection<PluginDownloader> updatePlugins) {
+    super(false);
     myUploadedPlugins = updatePlugins;
     myPlatformUpdate = true;
     init();
@@ -75,26 +74,16 @@ class PluginUpdateInfoDialog extends AbstractUpdateDialog {
   protected void doOKAction() {
     super.doOKAction();
 
-    if (myPlatformUpdate) {
-      ProgressManager.getInstance().run(new Task.Modal(null, IdeBundle.message("progress.downloading.plugins"), true) {
+    if (!myPlatformUpdate) {
+      new Task.Backgroundable(null, IdeBundle.message("update.notifications.title"), true, PerformInBackgroundOption.DEAF) {
         @Override
         public void run(@NotNull ProgressIndicator indicator) {
-          UpdateChecker.saveDisabledToUpdatePlugins();
-          UpdateChecker.installPluginUpdates(myUploadedPlugins, indicator);
-        }
-      });
-    }
-    else {
-      ProgressManager.getInstance().run(new Task.Backgroundable(null, IdeBundle.message("progress.downloading.plugins"), true, PerformInBackgroundOption.DEAF) {
-        @Override
-        public void run(@NotNull ProgressIndicator indicator) {
-          UpdateChecker.saveDisabledToUpdatePlugins();
-          boolean updated = UpdateChecker.installPluginUpdates(myUploadedPlugins, indicator);
+          boolean updated = UpdateInstaller.installPluginUpdates(myUploadedPlugins, indicator);
           if (updated) {
             ApplicationManager.getApplication().invokeLater(() -> PluginManagerMain.notifyPluginsUpdated(null), ModalityState.NON_MODAL);
           }
         }
-      });
+      }.queue();
     }
   }
 
@@ -120,9 +109,11 @@ class PluginUpdateInfoDialog extends AbstractUpdateDialog {
     }
 
     private void updateState(DetectedPluginsPanel panel) {
-      Set<String> skipped = panel.getSkippedPlugins();
-      boolean nothingSelected = myUploadedPlugins.stream().allMatch(plugin -> skipped.contains(plugin.getPluginId()));
-      getOKAction().setEnabled(!nothingSelected);
+      if (!myPlatformUpdate) {
+        Set<String> skipped = panel.getSkippedPlugins();
+        boolean nothingSelected = myUploadedPlugins.stream().allMatch(plugin -> skipped.contains(plugin.getPluginId()));
+        getOKAction().setEnabled(!nothingSelected);
+      }
     }
   }
 }

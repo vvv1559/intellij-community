@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,7 +15,6 @@
  */
 package com.intellij.execution.configurations;
 
-import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.util.EnvironmentUtil;
@@ -26,6 +25,7 @@ import org.jetbrains.annotations.Nullable;
 
 import java.io.File;
 import java.io.FileFilter;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 
@@ -34,8 +34,7 @@ import java.util.List;
  */
 public class PathEnvironmentVariableUtil {
 
-  private static final Logger LOG = Logger.getInstance(PathEnvironmentVariableUtil.class);
-  private static final String PATH_ENV_VAR_NAME = "PATH";
+  private static final String PATH = "PATH";
 
   private PathEnvironmentVariableUtil() { }
 
@@ -48,7 +47,7 @@ public class PathEnvironmentVariableUtil {
    */
   @Nullable
   public static File findInPath(@NotNull String fileBaseName) {
-    return findInPath(fileBaseName, false);
+    return findInPath(fileBaseName, null);
   }
 
   /**
@@ -56,44 +55,39 @@ public class PathEnvironmentVariableUtil {
    * listed in PATH environment variable and is accepted by filter.
    *
    * @param fileBaseName file base name
-   * @param filter exe file filter
+   * @param filter       exe file filter
    * @return {@link File} instance or null if not found
    */
   @Nullable
   public static File findInPath(@NotNull String fileBaseName, @Nullable FileFilter filter) {
-    return findInPath(fileBaseName, false, filter);
+    return findInPath(fileBaseName, EnvironmentUtil.getValue(PATH), filter);
   }
 
   /**
    * Finds an executable file with the specified base name, that is located in a directory
-   * listed in PATH environment variable.
+   * listed in the passed PATH environment variable value and is accepted by filter.
    *
-   * @param fileBaseName file base name
-   * @param  logDetails true if extra logging is needed
+   * @param fileBaseName      file base name
+   * @param pathVariableValue value of PATH environment variable
+   * @param filter            exe file filter
    * @return {@link File} instance or null if not found
    */
   @Nullable
-  public static File findInPath(@NotNull String fileBaseName, boolean logDetails) {
-    return findInPath(fileBaseName, logDetails, null);
-  }
-
-  @Nullable
-  private static File findInPath(@NotNull String fileBaseName, boolean logDetails, @Nullable FileFilter filter) {
-    List<File> exeFiles = findExeFilesInPath(fileBaseName, true, logDetails, filter);
+  public static File findInPath(@NotNull String fileBaseName, @Nullable String pathVariableValue, @Nullable FileFilter filter) {
+    List<File> exeFiles = findExeFilesInPath(true, filter, pathVariableValue, fileBaseName);
     return ContainerUtil.getFirstItem(exeFiles);
   }
 
   /**
    * Finds an executable file with the specified base name, that is located in a directory
    * listed in an original PATH environment variable.
-   * Original PATH environment variable value is a value returned by <code>System.getenv("PATH")</code>.
+   * Original PATH environment variable value is a value returned by {@code System.getenv("PATH")}.
    *
    * @param fileBaseName file base name
    * @return {@link File} instance or null if not found
    */
   private static File findInOriginalPath(@NotNull String fileBaseName) {
-    String originalPath = System.getenv(PATH_ENV_VAR_NAME);
-    List<File> exeFiles = doFindExeFilesInPath(originalPath, fileBaseName, true, false, null);
+    List<File> exeFiles = findExeFilesInPath(true, null, System.getenv(PATH), fileBaseName);
     return ContainerUtil.getFirstItem(exeFiles);
   }
 
@@ -111,52 +105,41 @@ public class PathEnvironmentVariableUtil {
 
   @NotNull
   public static List<File> findAllExeFilesInPath(@NotNull String fileBaseName, @Nullable FileFilter filter) {
-    return findExeFilesInPath(fileBaseName, false, false, filter);
+    return findExeFilesInPath(false, filter, EnvironmentUtil.getValue(PATH), fileBaseName);
   }
 
   @NotNull
-  private static List<File> findExeFilesInPath(@NotNull String fileBaseName,
-                                               boolean stopAfterFirstMatch,
-                                               boolean logDetails,
-                                               @Nullable FileFilter filter) {
-    String systemPath = EnvironmentUtil.getValue(PATH_ENV_VAR_NAME);
-    return doFindExeFilesInPath(systemPath, fileBaseName, stopAfterFirstMatch, logDetails, filter);
-  }
-
-  @NotNull
-  private static List<File> doFindExeFilesInPath(@Nullable String pathEnvVarValue,
-                                                 @NotNull String fileBaseName,
-                                                 boolean stopAfterFirstMatch,
-                                                 boolean logDetails,
-                                                 @Nullable FileFilter filter) {
-    if (logDetails) {
-      LOG.info("Finding files in PATH (base name=" + fileBaseName + ", PATH=" + StringUtil.notNullize(pathEnvVarValue) + ").");
-    }
+  private static List<File> findExeFilesInPath(boolean stopAfterFirstMatch,
+                                               @Nullable FileFilter filter,
+                                               @Nullable String pathEnvVarValue,
+                                               @NotNull String... fileBaseNames) {
     if (pathEnvVarValue == null) {
       return Collections.emptyList();
     }
     List<File> result = new SmartList<>();
-    List<String> paths = StringUtil.split(pathEnvVarValue, File.pathSeparator, true, true);
-    for (String path : paths) {
-      File dir = new File(path);
-      if (logDetails) {
-        File file = new File(dir, fileBaseName);
-        LOG.info("path:" + path + ", path.isAbsolute:" + dir.isAbsolute() + ", path.isDirectory:" + dir.isDirectory()
-                 + ", file.isFile:" + file.isFile() + ", file.canExecute:" + file.canExecute());
-      }
+    List<String> dirPaths = getPathDirs(pathEnvVarValue);
+    for (String dirPath : dirPaths) {
+      File dir = new File(dirPath);
       if (dir.isAbsolute() && dir.isDirectory()) {
-        File exeFile = new File(dir, fileBaseName);
-        if (exeFile.isFile() && exeFile.canExecute()) {
-          if (filter == null || filter.accept(exeFile)) {
-            result.add(exeFile);
-            if (stopAfterFirstMatch) {
-              return result;
+        for (String fileBaseName : fileBaseNames) {
+          File exeFile = new File(dir, fileBaseName);
+          if (exeFile.isFile() && exeFile.canExecute()) {
+            if (filter == null || filter.accept(exeFile)) {
+              result.add(exeFile);
+              if (stopAfterFirstMatch) {
+                return result;
+              }
             }
           }
         }
       }
     }
     return result;
+  }
+
+  @NotNull
+  public static List<String> getPathDirs(@NotNull String pathEnvVarValue) {
+    return StringUtil.split(pathEnvVarValue, File.pathSeparator, true, true);
   }
 
   /**
@@ -172,20 +155,12 @@ public class PathEnvironmentVariableUtil {
    *
    * @param exePath String path to exe file (basename, relative path or absolute path)
    * @return if an exe file can be found in {@code EnvironmentUtil.getValue("PATH")} and
-   *            nothing found in original PATH (i.e. {@code System.getenv("PATH")}),
-   *         return the found exe file absolute path.
-   *         Otherwise, return the passed in exe path.
+   * nothing found in original PATH (i.e. {@code System.getenv("PATH")}),
+   * return the found exe file absolute path.
+   * Otherwise, return the passed in exe path.
    */
   @NotNull
   public static String toLocatableExePath(@NotNull String exePath) {
-    //noinspection deprecation
-    return findAbsolutePathOnMac(exePath);
-  }
-
-  /**
-   * @deprecated use {@link #toLocatableExePath(String)} instead
-   */
-  public static String findAbsolutePathOnMac(@NotNull String exePath) {
     if (SystemInfo.isMac) {
       if (!StringUtil.containsChar(exePath, '/') && !StringUtil.containsChar(exePath, '\\')) {
         File originalResolvedExeFile = findInOriginalPath(exePath);
@@ -195,6 +170,35 @@ public class PathEnvironmentVariableUtil {
           if (resolvedExeFile != null) {
             exePath = resolvedExeFile.getAbsolutePath();
           }
+        }
+      }
+    }
+    return exePath;
+  }
+
+  @NotNull
+  public static List<String> getWindowsExecutableFileExtensions() {
+    if (SystemInfo.isWindows) {
+      String allExtensions = System.getenv("PATHEXT");
+      if (allExtensions != null) {
+        Collection<String> extensions = StringUtil.split(allExtensions, ";", true, true);
+        extensions = ContainerUtil.filter(extensions, s -> !StringUtil.isEmpty(s) && s.startsWith("."));
+        return ContainerUtil.map2List(extensions, s -> StringUtil.toLowerCase(s));
+      }
+    }
+    return Collections.emptyList();
+  }
+
+  public static String findExecutableInWindowsPath(@NotNull String exePath) {
+    if (SystemInfo.isWindows) {
+      if (!StringUtil.containsChar(exePath, '/') && !StringUtil.containsChar(exePath, '\\')) {
+        List<String> executableFileExtensions = getWindowsExecutableFileExtensions();
+
+        String[] baseNames = ContainerUtil.map2Array(executableFileExtensions, String.class, s -> exePath+s);
+        List<File> exeFiles = findExeFilesInPath(true, null, EnvironmentUtil.getValue(PATH), baseNames);
+        File foundFile = ContainerUtil.getFirstItem(exeFiles);
+        if(foundFile != null){
+          return foundFile.getAbsolutePath();
         }
       }
     }

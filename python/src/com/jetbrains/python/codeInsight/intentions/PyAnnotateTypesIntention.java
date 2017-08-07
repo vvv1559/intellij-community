@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,10 +15,8 @@
  */
 package com.jetbrains.python.codeInsight.intentions;
 
-import com.google.common.base.Function;
 import com.google.common.collect.Lists;
 import com.intellij.codeInsight.CodeInsightUtilCore;
-import com.intellij.codeInsight.intention.IntentionAction;
 import com.intellij.codeInsight.template.*;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.Editor;
@@ -39,18 +37,16 @@ import org.jetbrains.annotations.NotNull;
 import java.util.List;
 
 import static com.jetbrains.python.codeInsight.intentions.SpecifyTypeInPy3AnnotationsIntention.*;
-import static com.jetbrains.python.codeInsight.intentions.TypeIntention.getCallable;
+import static com.jetbrains.python.codeInsight.intentions.TypeIntention.getMultiCallable;
 import static com.jetbrains.python.codeInsight.intentions.TypeIntention.resolvesToFunction;
 
 /**
  * @author traff
  */
-public class PyAnnotateTypesIntention implements IntentionAction {
-  private String myText = PyBundle.message("INTN.annotate.types");
-
-  @NotNull
-  public String getText() {
-    return myText;
+public class PyAnnotateTypesIntention extends PyBaseIntentionAction {
+  
+  public PyAnnotateTypesIntention() {
+    setText(PyBundle.message("INTN.annotate.types"));
   }
 
   @NotNull
@@ -66,23 +62,17 @@ public class PyAnnotateTypesIntention implements IntentionAction {
     final PsiElement elementAt = PyUtil.findNonWhitespaceAtOffset(file, editor.getCaretModel().getOffset());
     if (elementAt == null) return false;
 
-    if (resolvesToFunction(elementAt, new Function<PyFunction, Boolean>() {
-      @Override
-      public Boolean apply(PyFunction input) {
-        return true;
-      }
-    })) {
+    if (resolvesToFunction(elementAt, input -> true)) {
       updateText();
       return true;
     }
     return false;
   }
 
-  public void invoke(@NotNull Project project, Editor editor, PsiFile file) throws IncorrectOperationException {
+  @Override
+  public void doInvoke(@NotNull Project project, Editor editor, PsiFile file) throws IncorrectOperationException {
     final PsiElement elementAt = PyUtil.findNonWhitespaceAtOffset(file, editor.getCaretModel().getOffset());
-    final PyCallable callable = getCallable(elementAt);
-
-    annotateTypes(editor, callable);
+    getMultiCallable(elementAt).forEach(callable -> annotateTypes(editor, callable));
   }
 
   public static void annotateTypes(Editor editor, PyCallable callable) {
@@ -167,7 +157,6 @@ public class PyAnnotateTypesIntention implements IntentionAction {
 
   private static void startTemplate(Project project, PyCallable callable, TemplateBuilder builder) {
     final Template template = ((TemplateBuilderImpl)builder).buildInlineTemplate();
-    ;
 
     int offset = callable.getTextRange().getStartOffset();
 
@@ -229,13 +218,7 @@ public class PyAnnotateTypesIntention implements IntentionAction {
     }
   }
 
-  @Override
-  public boolean startInWriteAction() {
-    return true;
-  }
-
-
   protected void updateText() {
-    myText = PyBundle.message("INTN.annotate.types");
+    setText(PyBundle.message("INTN.annotate.types"));
   }
 }

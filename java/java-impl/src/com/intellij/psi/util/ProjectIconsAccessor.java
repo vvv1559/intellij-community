@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,9 +24,14 @@ import com.intellij.psi.*;
 import com.intellij.psi.impl.source.resolve.reference.impl.providers.FileReference;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.SLRUMap;
+import com.intellij.util.ui.JBUI;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.uast.UElement;
+import org.jetbrains.uast.ULiteralExpression;
+import org.jetbrains.uast.UastContextKt;
+import org.jetbrains.uast.visitor.AbstractUastVisitor;
 
 import javax.swing.*;
 import java.io.File;
@@ -64,23 +69,23 @@ public class ProjectIconsAccessor {
   }
 
   @Nullable
-  public VirtualFile resolveIconFile(PsiType type, @Nullable PsiExpression initializer) {
-    if (initializer == null || !initializer.isValid() || !isIconClassType(type)) {
-      return null;
-    }
-
+  public VirtualFile resolveIconFile(PsiElement initializer) {
     final List<FileReference> refs = new ArrayList<>();
-    initializer.accept(new JavaRecursiveElementWalkingVisitor() {
+    UElement initializerElement = UastContextKt.toUElement(initializer);
+    if (initializerElement == null) return null;
+    initializerElement.accept(new AbstractUastVisitor() {
       @Override
-      public void visitElement(PsiElement element) {
-        if (element instanceof PsiLiteralExpression) {
-          for (PsiReference ref : element.getReferences()) {
+      public boolean visitLiteralExpression(ULiteralExpression node) {
+        PsiElement psi = node.getPsi();
+        if (psi != null) {
+          for (PsiReference ref : psi.getReferences()) {
             if (ref instanceof FileReference) {
               refs.add((FileReference)ref);
             }
           }
         }
-        super.visitElement(element);
+        super.visitLiteralExpression(node);
+        return true;
       }
     });
 
@@ -116,16 +121,20 @@ public class ProjectIconsAccessor {
   public Icon getIcon(@NotNull VirtualFile file) {
     final String path = file.getPath();
     final long stamp = file.getModificationStamp();
-    Pair<Long, Icon> iconInfo = iconsCache.get(path);
-    if (iconInfo == null || iconInfo.getFirst() < stamp) {
-      try {
-        final Icon icon = createOrFindBetterIcon(file, isIdeaProject(myProject));
-        iconInfo = new Pair<>(stamp, hasProperSize(icon) ? icon : null);
-        iconsCache.put(file.getPath(), iconInfo);
-      }
-      catch (Exception e) {//
-        iconInfo = null;
-        iconsCache.remove(path);
+
+    Pair<Long, Icon> iconInfo;
+    synchronized (iconsCache) {
+      iconInfo = iconsCache.get(path);
+      if (iconInfo == null || iconInfo.getFirst() < stamp) {
+        try {
+          final Icon icon = createOrFindBetterIcon(file, isIdeaProject(myProject));
+          iconInfo = new Pair<>(stamp, hasProperSize(icon) ? icon : null);
+          iconsCache.put(file.getPath(), iconInfo);
+        }
+        catch (Exception e) {
+          iconInfo = null;
+          iconsCache.remove(path);
+        }
       }
     }
     return iconInfo == null ? null : iconInfo.getSecond();
@@ -140,8 +149,8 @@ public class ProjectIconsAccessor {
   }
 
   private static boolean hasProperSize(Icon icon) {
-    return icon.getIconHeight() <= ICON_MAX_HEIGHT &&
-           icon.getIconWidth() <= ICON_MAX_WEIGHT;
+    return icon.getIconHeight() <= JBUI.scale(ICON_MAX_HEIGHT) &&
+           icon.getIconWidth() <= JBUI.scale(ICON_MAX_WEIGHT);
   }
 
   private static boolean isIdeaProject(Project project) {

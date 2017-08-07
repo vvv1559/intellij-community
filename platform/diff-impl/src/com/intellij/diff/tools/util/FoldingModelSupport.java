@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,10 +24,9 @@ import com.intellij.openapi.Disposable;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.editor.Document;
-import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.FoldRegion;
-import com.intellij.openapi.editor.event.DocumentAdapter;
 import com.intellij.openapi.editor.event.DocumentEvent;
+import com.intellij.openapi.editor.event.DocumentListener;
 import com.intellij.openapi.editor.ex.DocumentEx;
 import com.intellij.openapi.editor.ex.EditorEx;
 import com.intellij.openapi.editor.ex.FoldingListener;
@@ -50,6 +49,9 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
+
+import static com.intellij.diff.util.DiffUtil.getLineCount;
+import static com.intellij.util.ArrayUtil.toObjectArray;
 
 /**
  * This class allows to add custom foldings to hide unchanged regions in diff.
@@ -134,7 +136,7 @@ public class FoldingModelSupport {
 
       myLineCount = new int[myCount];
       for (int i = 0; i < myCount; i++) {
-        myLineCount[i] = myEditors[i].getDocument().getLineCount();
+        myLineCount[i] = getLineCount(myEditors[i].getDocument());
       }
     }
 
@@ -175,14 +177,14 @@ public class FoldingModelSupport {
         if (shift == -1) break;
 
         for (int i = 0; i < myCount; i++) {
-          rangeStarts[i] = bound(starts[i] + shift, i);
-          rangeEnds[i] = bound(ends[i] - shift, i);
+          rangeStarts[i] = DiffUtil.bound(starts[i] + shift, 0, myLineCount[i]);
+          rangeEnds[i] = DiffUtil.bound(ends[i] - shift, 0, myLineCount[i]);
         }
         ContainerUtil.addAllNotNull(result, createRange(rangeStarts, rangeEnds, myExpandSuggester.isExpanded(rangeStarts, rangeEnds)));
       }
 
       if (result.size() > 0) {
-        FoldedBlock[] block = ContainerUtil.toArray(result, new FoldedBlock[result.size()]);
+        FoldedBlock[] block = toObjectArray(result, FoldedBlock.class);
         for (FoldedBlock folding : block) {
           folding.installHighlighter(block);
         }
@@ -209,10 +211,6 @@ public class FoldingModelSupport {
       }
       return hasFolding ? new FoldedBlock(regions) : null;
     }
-
-    private int bound(int value, int index) {
-      return Math.min(Math.max(value, 0), myLineCount[index]);
-    }
   }
 
   @Nullable
@@ -229,16 +227,14 @@ public class FoldingModelSupport {
   private void runBatchOperation(@NotNull Runnable runnable) {
     Runnable lastRunnable = runnable;
 
-    for (int i = 0; i < myCount; i++) {
-      final Editor editor = myEditors[i];
+    for (EditorEx editor : myEditors) {
       final Runnable finalRunnable = lastRunnable;
       lastRunnable = () -> {
-        Runnable operation = () -> finalRunnable.run();
         if (DiffUtil.isFocusedComponent(editor.getComponent())) {
-          editor.getFoldingModel().runBatchFoldingOperationDoNotCollapseCaret(operation);
+          editor.getFoldingModel().runBatchFoldingOperationDoNotCollapseCaret(finalRunnable);
         }
         else {
-          editor.getFoldingModel().runBatchFoldingOperation(operation);
+          editor.getFoldingModel().runBatchFoldingOperation(finalRunnable);
         }
       };
     }
@@ -269,7 +265,7 @@ public class FoldingModelSupport {
   // Line numbers
   //
 
-  private class MyDocumentListener extends DocumentAdapter {
+  private class MyDocumentListener implements DocumentListener {
     @Override
     public void documentChanged(DocumentEvent e) {
       if (StringUtil.indexOf(e.getOldFragment(), '\n') != -1 ||

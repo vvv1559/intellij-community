@@ -35,11 +35,11 @@ public class PyExecutionException extends ExecutionException {
   @NotNull private final List<? extends PyExecutionFix> myFixes;
 
   public PyExecutionException(@NotNull String message, @NotNull String command, @NotNull List<String> args) {
-    this(message, command, args, "", "", 0, Collections.<PyExecutionFix>emptyList());
+    this(message, command, args, "", "", 0, Collections.emptyList());
   }
 
   public PyExecutionException(@NotNull String message, @NotNull String command, @NotNull List<String> args, @NotNull ProcessOutput output) {
-    this(message, command, args, output.getStdout(), output.getStderr(), output.getExitCode(), Collections.<PyExecutionFix>emptyList());
+    this(message, command, args, output.getStdout(), output.getStderr(), output.getExitCode(), Collections.emptyList());
   }
 
   public PyExecutionException(@NotNull String message, @NotNull String command, @NotNull List<String> args,
@@ -66,6 +66,8 @@ public class PyExecutionException extends ExecutionException {
     b.append(myStdout);
     b.append("\n");
     b.append(myStderr);
+    b.append("\n");
+    b.append(getMessage());
     return b.toString();
   }
 

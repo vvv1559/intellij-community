@@ -16,20 +16,18 @@
 
 package com.intellij.ui;
 
-import javax.accessibility.AccessibleAction;
-import javax.accessibility.AccessibleContext;
-import javax.accessibility.AccessibleRole;
 import com.intellij.ide.BrowserUtil;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.markup.EffectType;
 import com.intellij.openapi.editor.markup.TextAttributes;
-import com.intellij.util.NotNullProducer;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.ui.PlatformColors;
 import com.intellij.util.ui.UIUtil;
-import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import javax.accessibility.AccessibleAction;
+import javax.accessibility.AccessibleContext;
+import javax.accessibility.AccessibleRole;
 import javax.swing.*;
 import javax.swing.event.HyperlinkEvent;
 import javax.swing.event.HyperlinkListener;
@@ -61,6 +59,9 @@ public class HyperlinkLabel extends HighlightableComponent {
   private final TextAttributes myAnchorAttributes;
   private HyperlinkListener myHyperlinkListener = null;
 
+  private boolean myMouseHover;
+  private boolean myMousePressed;
+
   public HyperlinkLabel() {
     this("");
   }
@@ -74,8 +75,10 @@ public class HyperlinkLabel extends HighlightableComponent {
   }
 
   public HyperlinkLabel(String text, final Color textForegroundColor, final Color textBackgroundColor, final Color textEffectColor) {
-    myAnchorAttributes =
+    myAnchorAttributes = UIUtil.isUnderWin10LookAndFeel() ?
+      new Win10TextAttributes(textBackgroundColor) :
       new TextAttributes(textForegroundColor, textBackgroundColor, textEffectColor, EffectType.LINE_UNDERSCORE, Font.PLAIN);
+
     enforceBackgroundOutsideText(textBackgroundColor);
     setHyperlinkText(text);
     enableEvents(AWTEvent.MOUSE_EVENT_MASK | AWTEvent.MOUSE_MOTION_EVENT_MASK);
@@ -116,11 +119,21 @@ public class HyperlinkLabel extends HighlightableComponent {
   }
 
   protected void processMouseEvent(MouseEvent e) {
-    if (e.getID() == MouseEvent.MOUSE_EXITED) {
+    if (e.getID() == MouseEvent.MOUSE_ENTERED && isOnLink(e.getX())) {
+      myMouseHover = true;
+      repaint();
+    } else if (e.getID() == MouseEvent.MOUSE_EXITED) {
       setCursor(Cursor.getDefaultCursor());
-    }
-    else if (UIUtil.isActionClick(e, MouseEvent.MOUSE_PRESSED) && isOnLink(e.getX())) {
+      myMouseHover = false;
+      myMousePressed = false;
+      repaint();
+    } else if (UIUtil.isActionClick(e, MouseEvent.MOUSE_PRESSED) && isOnLink(e.getX())) {
       fireHyperlinkEvent();
+      myMousePressed = true;
+      repaint();
+    } else if (e.getID() == MouseEvent.MOUSE_RELEASED) {
+      myMousePressed = false;
+      repaint();
     }
     super.processMouseEvent(e);
   }
@@ -128,7 +141,14 @@ public class HyperlinkLabel extends HighlightableComponent {
   @Override
   protected void processMouseMotionEvent(MouseEvent e) {
     if (e.getID() == MouseEvent.MOUSE_MOVED) {
-      setCursor(isOnLink(e.getX()) ? Cursor.getPredefinedCursor(Cursor.HAND_CURSOR) : Cursor.getDefaultCursor());
+      boolean onLink = isOnLink(e.getX());
+      boolean needRepaint = myMouseHover != onLink;
+      myMouseHover = onLink;
+      setCursor(myMouseHover ? Cursor.getPredefinedCursor(Cursor.HAND_CURSOR) : Cursor.getDefaultCursor());
+
+      if (needRepaint) {
+        repaint();
+      }
     }
     super.processMouseMotionEvent(e);
   }
@@ -180,7 +200,7 @@ public class HyperlinkLabel extends HighlightableComponent {
     myListeners.remove(listener);
   }
 
-  String getText() {
+  public String getText() {
     return myHighlightedText.getText();
   }
 
@@ -204,7 +224,7 @@ public class HyperlinkLabel extends HighlightableComponent {
 
         @Override
         public void handleText(char[] data, int pos) {
-          highlightedText.appendText(new String(data), currentAttributes);
+          highlightedText.appendText(data, currentAttributes);
         }
 
         @Override
@@ -242,6 +262,7 @@ public class HyperlinkLabel extends HighlightableComponent {
 
   @Override
   public void updateUI() {
+    super.updateUI();
     setFont(UIUtil.getLabelFont());
   }
 
@@ -255,7 +276,7 @@ public class HyperlinkLabel extends HighlightableComponent {
 
   /**
    * Hyperlink accessibility: "HYPERLINK" role and expose a "click" action.
-   * @see javax.swing.AbstractButton.AccessibleAbstractButton
+   * @see AbstractButton.AccessibleAbstractButton
    */
   protected class AccessibleHyperlinkLabel extends AccessibleHighlightable implements AccessibleAction {
     @Override
@@ -291,6 +312,37 @@ public class HyperlinkLabel extends HighlightableComponent {
       } else {
         return false;
       }
+    }
+  }
+
+  private class Win10TextAttributes extends TextAttributes {
+    private Win10TextAttributes(Color textBackgroundColor) {
+      super(null, textBackgroundColor, null, null, Font.PLAIN);
+    }
+
+    @Override public Color getForegroundColor() {
+      return !isEnabled() ? UIManager.getColor("Label.disabledForeground") :
+             myMousePressed ? UIManager.getColor("link.pressed.foreground") :
+             myMouseHover ? UIManager.getColor("link.hover.foreground") :
+             UIManager.getColor("link.foreground");
+    }
+
+    @Override public Color getEffectColor() {
+      return getForegroundColor();
+    }
+
+    @Override public EffectType getEffectType() {
+      return !isEnabled() || myMouseHover || myMousePressed ? EffectType.LINE_UNDERSCORE : null;
+    }
+
+    @Override public void setForegroundColor(Color color) {
+      throw new UnsupportedOperationException();
+    }
+    @Override public void setEffectColor(Color color) {
+      throw new UnsupportedOperationException();
+    }
+    @Override public void setEffectType(EffectType effectType) {
+      throw new UnsupportedOperationException();
     }
   }
 }

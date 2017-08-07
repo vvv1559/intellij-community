@@ -46,7 +46,6 @@ public class CucumberMain {
       exitStatus = 1;
     }
     System.exit(exitStatus);
-
   }
 
   public static int run(final String[] argv, final ClassLoader classLoader) throws IOException {
@@ -55,21 +54,18 @@ public class CucumberMain {
 
     try {
       TestRunnerUtil.replaceIdeEventQueueSafely();
-      UIUtil.invokeAndWaitIfNeeded(new Runnable() {
-        @Override
-        public void run() {
-          try {
-            RuntimeOptions runtimeOptions = new RuntimeOptions(new ArrayList(Arrays.asList(argv)));
-            MultiLoader resourceLoader = new MultiLoader(classLoader);
-            ResourceLoaderClassFinder classFinder = new ResourceLoaderClassFinder(resourceLoader, classLoader);
-            Runtime runtime = new Runtime(resourceLoader, classFinder, classLoader, runtimeOptions);
-            runtimeRef.set(runtime);
-            runtime.run();
-          }
-          catch (Throwable throwable) {
-            errorRef.set(throwable);
-            Logger.getInstance(CucumberMain.class).error(throwable);
-          }
+      UIUtil.invokeAndWaitIfNeeded((Runnable)() -> {
+        try {
+          RuntimeOptions runtimeOptions = new RuntimeOptions(new ArrayList(Arrays.asList(argv)));
+          MultiLoader resourceLoader = new MultiLoader(classLoader);
+          ResourceLoaderClassFinder classFinder = new ResourceLoaderClassFinder(resourceLoader, classLoader);
+          Runtime runtime = new Runtime(resourceLoader, classFinder, classLoader, runtimeOptions);
+          runtimeRef.set(runtime);
+          runtime.run();
+        }
+        catch (Throwable throwable) {
+          errorRef.set(throwable);
+          Logger.getInstance(CucumberMain.class).error(throwable);
         }
       });
     }

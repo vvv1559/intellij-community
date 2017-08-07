@@ -14,10 +14,6 @@
  * limitations under the License.
  */
 
-/*
- * User: anna
- * Date: 27-Jul-2007
- */
 package com.intellij.ide.todo;
 
 import com.intellij.ide.util.PropertiesComponent;
@@ -40,7 +36,7 @@ public class ScopeBasedTodosPanel extends TodoPanel {
 
   public ScopeBasedTodosPanel(final Project project, TodoPanelSettings settings, Content content){
     super(project,settings,false,content);
-    myAlarm = new Alarm(Alarm.ThreadToUse.POOLED_THREAD, project);
+    myAlarm = new Alarm(Alarm.ThreadToUse.POOLED_THREAD, this);
     myScopes.getChildComponent().addActionListener(new ActionListener() {
       @Override
       public void actionPerformed(ActionEvent e) {

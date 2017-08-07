@@ -248,7 +248,8 @@ public class PyKeywordCompletionContributor extends CompletionContributor {
       psiElement().inFile(psiFile(PyDocstringFile.class)));
 
   private static final ElementPattern<PsiElement> IN_FUNCTION_HEADER =
-    or(psiElement().inside(PyFunction.class).andNot(psiElement().inside(false, psiElement(PyStatementList.class), psiElement(PyFunction.class))),
+    or(psiElement().inside(PyFunction.class).andNot(or(psiElement().inside(false, psiElement(PyStatementList.class), psiElement(PyFunction.class)),
+                                                       psiElement().inside(false, psiElement(PyParameterList.class), psiElement(PyFunction.class)))),
        psiElement().inside(PyClass.class).andNot(psiElement().inside(false, psiElement(PyStatementList.class), psiElement(PyClass.class))));
 
   public static final PsiElementPattern.Capture<PsiElement> AFTER_QUALIFIER =
@@ -419,7 +420,8 @@ public class PyKeywordCompletionContributor extends CompletionContributor {
       .andNot(IN_PARAM_LIST)
       .andNot(IN_ARG_LIST)
       .andNot(BEFORE_COND)
-      .andNot(AFTER_QUALIFIER);
+      .andNot(AFTER_QUALIFIER)
+      .andNot(IN_STRING_LITERAL);
 
     extend(
       CompletionType.BASIC,
@@ -603,12 +605,12 @@ public class PyKeywordCompletionContributor extends CompletionContributor {
     extend(
       CompletionType.BASIC, psiElement()
       .withLanguage(PythonLanguage.getInstance())
-      .and(PY3K)
       .andNot(IN_COMMENT)
       .andNot(IN_IMPORT_STMT)
       .and(NOT_PARAMETER_OR_DEFAULT_VALUE)
       .andNot(AFTER_QUALIFIER)
       .andNot(IN_FUNCTION_HEADER)
+      .andNot(IN_STRING_LITERAL)
       ,
       new PyKeywordCompletionProvider(TailType.NONE, PyNames.TRUE, PyNames.FALSE, PyNames.NONE));
     extend(CompletionType.BASIC,
@@ -708,7 +710,7 @@ public class PyKeywordCompletionContributor extends CompletionContributor {
                     psiElement()
                       .inside(false, psiElement(PyAugAssignmentStatement.class), psiElement(PyTargetExpression.class))
                       .afterLeaf(psiElement().withElementType(PyTokenTypes.AUG_ASSIGN_OPERATIONS)),
-                    psiElement().inside(true, psiElement(PyParenthesizedExpression.class))),
+                    psiElement().inside(true, psiElement(PyParenthesizedExpression.class))).andNot(IN_STRING_LITERAL),
            new PyKeywordCompletionProvider(PyNames.YIELD));
   }
 
@@ -758,7 +760,7 @@ public class PyKeywordCompletionContributor extends CompletionContributor {
            psiElement()
              .withLanguage(PythonLanguage.getInstance())
              .and(psiElement()).afterLeaf(psiElement().afterLeaf(PyNames.FOR)),
-           new PyKeywordCompletionProvider("in"));
+           new PyKeywordCompletionProvider(PyNames.IN));
 
   }
 

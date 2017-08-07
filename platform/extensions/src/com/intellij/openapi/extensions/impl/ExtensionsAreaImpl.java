@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -32,14 +32,12 @@ import org.picocontainer.PicoContainer;
 
 import java.util.*;
 
-import static com.intellij.openapi.extensions.Extensions.isComponentSuitableForOs;
-
-@SuppressWarnings({"HardCodedStringLiteral"})
+@SuppressWarnings("HardCodedStringLiteral")
 public class ExtensionsAreaImpl implements ExtensionsArea {
   private final LogProvider myLogger;
   public static final String ATTRIBUTE_AREA = "area";
 
-  private static final Map<String,String> ourDefaultEPs = new THashMap<String, String>();
+  private static final Map<String,String> ourDefaultEPs = new THashMap<>();
 
   static {
     ourDefaultEPs.put(EPAvailabilityListenerExtension.EXTENSION_POINT_NAME, EPAvailabilityListenerExtension.class.getName());
@@ -50,9 +48,9 @@ public class ExtensionsAreaImpl implements ExtensionsArea {
   private final AreaPicoContainer myPicoContainer;
   private final Throwable myCreationTrace;
   private final Map<String, ExtensionPointImpl> myExtensionPoints = ContainerUtil.newConcurrentMap();
-  private final Map<String,Throwable> myEPTraces = DEBUG_REGISTRATION ? new THashMap<String, Throwable>():null;
+  private final Map<String,Throwable> myEPTraces = DEBUG_REGISTRATION ? new THashMap<>() : null;
   private final MultiMap<String, ExtensionPointAvailabilityListener> myAvailabilityListeners = MultiMap.createSmart();
-  private final List<Runnable> mySuspendedListenerActions = new ArrayList<Runnable>();
+  private final List<Runnable> mySuspendedListenerActions = new ArrayList<>();
   private boolean myAvailabilityNotificationsActive = true;
 
   private final AreaInstance myAreaInstance;
@@ -139,7 +137,7 @@ public class ExtensionsAreaImpl implements ExtensionsArea {
   public void registerExtension(@NotNull final PluginDescriptor pluginDescriptor, @NotNull final Element extensionElement) {
     final PluginId pluginId = pluginDescriptor.getPluginId();
 
-    if (!isComponentSuitableForOs(extensionElement.getAttributeValue("os"))) {
+    if (!Extensions.isComponentSuitableForOs(extensionElement.getAttributeValue("os"))) {
       return;
     }
 
@@ -201,7 +199,7 @@ public class ExtensionsAreaImpl implements ExtensionsArea {
     return myPicoContainer;
   }
 
-  @SuppressWarnings({"unchecked"})
+  @SuppressWarnings("unchecked")
   private void initialize() {
     for (Map.Entry<String, String> entry : ourDefaultEPs.entrySet()) {
       String epName = entry.getKey();
@@ -246,7 +244,7 @@ public class ExtensionsAreaImpl implements ExtensionsArea {
     return adapter.getComponentInstance(getPicoContainer());
   }
 
-  @SuppressWarnings({"UnusedDeclaration"})
+  @SuppressWarnings("UnusedDeclaration")
   public Throwable getCreationTrace() {
     return myCreationTrace;
   }
@@ -279,16 +277,17 @@ public class ExtensionsAreaImpl implements ExtensionsArea {
                                       @NotNull PluginDescriptor descriptor,
                                       @NotNull ExtensionPoint.Kind kind) {
     if (hasExtensionPoint(extensionPointName)) {
+      if (extensionPointName.equals("org.jetbrains.uast.uastLanguagePlugin")) return;
+      final String message =
+        "Duplicate registration for EP: " + extensionPointName + ": original plugin " + getExtensionPoint(extensionPointName).getDescriptor().getPluginId() +
+        ", new plugin " + descriptor.getPluginId();
       if (DEBUG_REGISTRATION) {
-        final ExtensionPointImpl oldEP = getExtensionPoint(extensionPointName);
-        myLogger.error("Duplicate registration for EP: " + extensionPointName + ": original plugin " + oldEP.getDescriptor().getPluginId() +
-                       ", new plugin " + descriptor.getPluginId(),
-                       myEPTraces.get(extensionPointName));
+        myLogger.error(message, myEPTraces.get(extensionPointName));
       }
-      throw new RuntimeException("Duplicate registration for EP: " + extensionPointName);
+      throw new PicoPluginExtensionInitializationException(message, null, descriptor.getPluginId());
     }
 
-    registerExtensionPoint(new ExtensionPointImpl(extensionPointName, extensionPointBeanClass, kind, this, myAreaInstance, myLogger, descriptor));
+    registerExtensionPoint(new ExtensionPointImpl(extensionPointName, extensionPointBeanClass, kind, this, myAreaInstance, descriptor));
   }
 
   public void registerExtensionPoint(@NotNull ExtensionPointImpl extensionPoint) {
@@ -309,12 +308,7 @@ public class ExtensionsAreaImpl implements ExtensionsArea {
   }
 
   private void notifyAvailableListener(final ExtensionPointAvailabilityListener listener, final ExtensionPoint extensionPoint) {
-    queueNotificationAction(new Runnable() {
-      @Override
-      public void run() {
-        listener.extensionPointRegistered(extensionPoint);
-      }
-    });
+    queueNotificationAction(() -> listener.extensionPointRegistered(extensionPoint));
   }
 
   private void queueNotificationAction(final Runnable action) {
@@ -367,12 +361,7 @@ public class ExtensionsAreaImpl implements ExtensionsArea {
   }
 
   private void notifyUnavailableListener(final ExtensionPoint extensionPoint, final ExtensionPointAvailabilityListener listener) {
-    queueNotificationAction(new Runnable() {
-      @Override
-      public void run() {
-        listener.extensionPointRemoved(extensionPoint);
-      }
-    });
+    queueNotificationAction(() -> listener.extensionPointRemoved(extensionPoint));
   }
 
   @Override
@@ -408,7 +397,7 @@ public class ExtensionsAreaImpl implements ExtensionsArea {
     mySuspendedListenerActions.clear();
   }
 
-  public void removeAllComponents(final Set<ExtensionComponentAdapter> extensionAdapters) {
+  void removeAllComponents(final Set<ExtensionComponentAdapter> extensionAdapters) {
     for (final Object extensionAdapter : extensionAdapters) {
       ExtensionComponentAdapter componentAdapter = (ExtensionComponentAdapter)extensionAdapter;
       internalGetPluginContainer().unregisterComponent(componentAdapter.getComponentKey());
@@ -418,5 +407,12 @@ public class ExtensionsAreaImpl implements ExtensionsArea {
   @Override
   public String toString() {
     return (myAreaClass == null ? "Root" : myAreaClass)+" Area";
+  }
+
+  void error(@NotNull String msg) {
+    myLogger.error(msg);
+  }
+  void error(@NotNull Throwable msg) {
+    myLogger.error(msg);
   }
 }

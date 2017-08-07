@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -40,6 +40,7 @@ import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.Segment;
 import com.intellij.openapi.util.TextRange;
@@ -64,6 +65,8 @@ import java.util.*;
  */
 public class InjectedLanguageManagerImpl extends InjectedLanguageManager implements Disposable {
   private static final Logger LOG = Logger.getInstance("#com.intellij.psi.impl.source.tree.injected.InjectedLanguageManagerImpl");
+  @SuppressWarnings("RedundantStringConstructorCall")
+  static final Object ourInjectionPsiLock = new String("injectionPsiLock");
   private final Project myProject;
   private final DumbService myDumbService;
   private volatile DaemonProgressIndicator myProgress;
@@ -105,7 +108,7 @@ public class InjectedLanguageManagerImpl extends InjectedLanguageManager impleme
     project.getMessageBus().connect(this).subscribe(DaemonCodeAnalyzer.DAEMON_EVENT_TOPIC, new DaemonCodeAnalyzer.DaemonListenerAdapter() {
       @Override
       public void daemonCancelEventOccurred(@NotNull String reason) {
-        myProgress.cancel();
+        if (!myProgress.isCanceled()) myProgress.cancel();
       }
     });
   }
@@ -152,21 +155,14 @@ public class InjectedLanguageManagerImpl extends InjectedLanguageManager impleme
       if (myProgress.isCanceled()) return;
       JobLauncher.getInstance().invokeConcurrentlyUnderProgress(new ArrayList<>(injected), myProgress, true, commitProcessor);
 
-      synchronized (PsiLock.LOCK) {
+      synchronized (ourInjectionPsiLock) {
         injected.clear();
         injected.addAll(newDocuments);
       }
     };
 
     if (synchronously) {
-      if (Thread.holdsLock(PsiLock.LOCK)) {
-        // hack for the case when docCommit was called from within PSI modification, e.g. in formatter.
-        // we can't spawn threads to do injections there, otherwise a deadlock is imminent
-        ContainerUtil.process(new ArrayList<>(injected), commitProcessor);
-      }
-      else {
-        commitInjectionsRunnable.run();
-      }
+      commitInjectionsRunnable.run();
     }
     else {
       JobLauncher.getInstance().submitToJobThread(() -> ApplicationManagerEx.getApplicationEx().tryRunReadAction(commitInjectionsRunnable), null);
@@ -210,14 +206,16 @@ public class InjectedLanguageManagerImpl extends InjectedLanguageManager impleme
   private final Set<MultiHostInjector> myManualInjectors = Collections.synchronizedSet(new LinkedHashSet<MultiHostInjector>());
   private volatile ClassMapCachingNulls<MultiHostInjector> cachedInjectors;
 
-  public void processInjectableElements(Collection<PsiElement> in, Processor<PsiElement> processor) {
+  public void processInjectableElements(@NotNull Collection<PsiElement> in, @NotNull Processor<PsiElement> processor) {
     ClassMapCachingNulls<MultiHostInjector> map = getInjectorMap();
     for (PsiElement element : in) {
-      if (map.get(element.getClass()) != null)
+      if (map.get(element.getClass()) != null) {
         processor.process(element);
+      }
     }
   }
 
+  @NotNull
   private ClassMapCachingNulls<MultiHostInjector> getInjectorMap() {
     ClassMapCachingNulls<MultiHostInjector> cached = cachedInjectors;
     if (cached != null) {
@@ -241,7 +239,7 @@ public class InjectedLanguageManagerImpl extends InjectedLanguageManager impleme
       }
     }
 
-    ClassMapCachingNulls<MultiHostInjector> result = new ClassMapCachingNulls<>(injectors, new MultiHostInjector[0]);
+    ClassMapCachingNulls<MultiHostInjector> result = new ClassMapCachingNulls<>(injectors, new MultiHostInjector[0], allInjectors);
     cachedInjectors = result;
     return result;
   }
@@ -254,6 +252,12 @@ public class InjectedLanguageManagerImpl extends InjectedLanguageManager impleme
   public void registerMultiHostInjector(@NotNull MultiHostInjector injector) {
     myManualInjectors.add(injector);
     clearInjectorCache();
+  }
+
+  @Override
+  public void registerMultiHostInjector(@NotNull MultiHostInjector injector, @NotNull Disposable parentDisposable) {
+    registerMultiHostInjector(injector);
+    Disposer.register(parentDisposable, () -> unregisterMultiHostInjector(injector));
   }
 
   @Override
@@ -392,13 +396,19 @@ public class InjectedLanguageManagerImpl extends InjectedLanguageManager impleme
     return result;
   }
 
-  private static int appendRange(List<TextRange> result, int start, int length) {
+  @Override
+  public boolean mightHaveInjectedFragmentAtOffset(@NotNull Document hostDocument, int hostOffset) {
+    return InjectedLanguageUtil.mightHaveInjectedFragmentAtCaret(myProject, hostDocument, hostOffset);
+  }
+
+  private static int appendRange(@NotNull List<TextRange> result, int start, int length) {
     if (length > 0) {
       int lastIndex = result.size() - 1;
       TextRange lastRange = lastIndex >= 0 ? result.get(lastIndex) : null;
       if (lastRange != null && lastRange.getEndOffset() == start) {
         result.set(lastIndex, lastRange.grown(length));
-      } else {
+      }
+      else {
         result.add(TextRange.from(start, length));
       }
     }
@@ -443,8 +453,9 @@ public class InjectedLanguageManagerImpl extends InjectedLanguageManager impleme
     }
   }
 
+  @FunctionalInterface
   interface InjProcessor {
-    boolean process(PsiElement element, MultiHostInjector injector);
+    boolean process(@NotNull PsiElement element, @NotNull MultiHostInjector injector);
   }
   void processInPlaceInjectorsFor(@NotNull PsiElement element, @NotNull InjProcessor processor) {
     MultiHostInjector[] infos = getInjectorMap().get(element.getClass());

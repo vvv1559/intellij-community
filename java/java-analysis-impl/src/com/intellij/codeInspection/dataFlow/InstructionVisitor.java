@@ -17,9 +17,8 @@ package com.intellij.codeInspection.dataFlow;
 
 import com.intellij.codeInspection.dataFlow.instructions.*;
 import com.intellij.codeInspection.dataFlow.value.DfaUnknownValue;
-import com.intellij.codeInspection.dataFlow.value.DfaVariableValue;
 import com.intellij.codeInspection.dataFlow.value.DfaValue;
-import com.intellij.psi.PsiExpression;
+import com.intellij.codeInspection.dataFlow.value.DfaVariableValue;
 
 import java.util.ArrayList;
 
@@ -31,6 +30,10 @@ public abstract class InstructionVisitor {
   public DfaInstructionState[] visitAssign(AssignInstruction instruction, DataFlowRunner runner, DfaMemoryState memState) {
     memState.pop();
     memState.push(memState.pop());
+    return nextInstruction(instruction, runner, memState);
+  }
+
+  public DfaInstructionState[] visitCheckNotNull(CheckNotNullInstruction instruction, DataFlowRunner runner, DfaMemoryState memState) {
     return nextInstruction(instruction, runner, memState);
   }
 
@@ -138,8 +141,7 @@ public abstract class InstructionVisitor {
   }
 
   public DfaInstructionState[] visitMethodCall(MethodCallInstruction instruction, DataFlowRunner runner, DfaMemoryState memState) {
-    //noinspection UnusedDeclaration
-    for (PsiExpression arg : instruction.getArgs()) {
+    for(int i = instruction.getArgCount(); i > 0; i--) {
       memState.pop();
     }
 
@@ -161,6 +163,13 @@ public abstract class InstructionVisitor {
   }
 
   public DfaInstructionState[] visitPush(PushInstruction instruction, DataFlowRunner runner, DfaMemoryState memState) {
+    memState.push(instruction.getValue());
+    return nextInstruction(instruction, runner, memState);
+  }
+
+  public DfaInstructionState[] visitArrayAccess(ArrayAccessInstruction instruction, DataFlowRunner runner, DfaMemoryState memState) {
+    memState.pop(); // index
+    memState.pop(); // array reference
     memState.push(instruction.getValue());
     return nextInstruction(instruction, runner, memState);
   }

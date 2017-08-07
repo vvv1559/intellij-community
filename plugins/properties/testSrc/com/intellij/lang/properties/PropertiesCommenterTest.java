@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,11 +15,10 @@
  */
 package com.intellij.lang.properties;
 
-import com.intellij.codeInsight.generation.actions.CommentByLineCommentAction;
-import com.intellij.ide.DataManager;
-import com.intellij.openapi.actionSystem.AnActionEvent;
+import com.intellij.openapi.actionSystem.IdeActions;
 import com.intellij.openapi.application.PluginPathManager;
 import com.intellij.testFramework.LightPlatformCodeInsightTestCase;
+import com.intellij.testFramework.PlatformTestUtil;
 import org.jetbrains.annotations.NotNull;
 
 /**
@@ -28,6 +27,8 @@ import org.jetbrains.annotations.NotNull;
 public class PropertiesCommenterTest extends LightPlatformCodeInsightTestCase {
   public void testProp1() { doTest(); }
   public void testUncomment() { doTest(); }
+  public void testExclamationMark() { doTest(); }
+  public void testEmptyLineDuringUncomment() { doTest(); }
 
   @NotNull
   @Override
@@ -37,12 +38,7 @@ public class PropertiesCommenterTest extends LightPlatformCodeInsightTestCase {
 
   private void doTest() {
     configureByFile("/propertiesFile/comment/before" + getTestName(false) + ".properties");
-    performAction();
+    PlatformTestUtil.invokeNamedAction(IdeActions.ACTION_COMMENT_LINE);
     checkResultByFile("/propertiesFile/comment/after" + getTestName(false) + ".properties");
-  }
-
-  private static void performAction() {
-    CommentByLineCommentAction action = new CommentByLineCommentAction();
-    action.actionPerformed(AnActionEvent.createFromAnAction(action, null, "", DataManager.getInstance().getDataContext()));
   }
 }

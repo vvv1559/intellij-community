@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,12 +17,14 @@ package org.jetbrains.plugins.gradle.config;
 
 import com.intellij.compiler.options.CompileStepBeforeRun;
 import com.intellij.compiler.options.CompileStepBeforeRunNoErrorCheck;
-import com.intellij.execution.*;
+import com.intellij.execution.CantRunException;
+import com.intellij.execution.Location;
+import com.intellij.execution.RunManagerEx;
 import com.intellij.execution.configurations.JavaParameters;
-import com.intellij.execution.configurations.RunProfile;
 import com.intellij.openapi.components.ServiceManager;
+import com.intellij.openapi.externalSystem.ExternalSystemModulePropertyManager;
 import com.intellij.openapi.externalSystem.psi.search.ExternalModuleBuildGlobalSearchScope;
-import com.intellij.openapi.externalSystem.util.ExternalSystemConstants;
+import com.intellij.openapi.externalSystem.util.ExternalSystemApiUtil;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleUtilCore;
 import com.intellij.openapi.project.Project;
@@ -92,7 +94,7 @@ public class GradleScriptType extends GroovyRunnableScriptType {
 
   @Override
   public boolean isConfigurationByLocation(@NotNull GroovyScriptRunConfiguration existing, @NotNull Location location) {
-    final String params = existing.getScriptParameters();
+    final String params = existing.getProgramParameters();
     if (params == null) {
       return false;
     }
@@ -111,7 +113,7 @@ public class GradleScriptType extends GroovyRunnableScriptType {
     List<String> tasks = getTasksTarget(location);
     if (tasks != null) {
       String s = StringUtil.join(tasks, " ");
-      configuration.setScriptParameters(s);
+      configuration.setProgramParameters(s);
       configuration.setName("gradle:" + s);
     }
     RunManagerEx.disableTasks(file.getProject(), configuration, CompileStepBeforeRun.ID, CompileStepBeforeRunNoErrorCheck.ID);
@@ -172,12 +174,10 @@ public class GradleScriptType extends GroovyRunnableScriptType {
       }
 
       @Override
-      public boolean ensureRunnerConfigured(@Nullable Module module, RunProfile profile, Executor executor, final Project project) throws ExecutionException {
-        if (project != null && profile instanceof GroovyScriptRunConfiguration) {
-          GroovyScriptRunConfiguration configuration = (GroovyScriptRunConfiguration)profile;
-          String parameters = configuration.getScriptParameters();
-          if (parameters != null) {
-            // TODO den implement
+      public void ensureRunnerConfigured(@NotNull GroovyScriptRunConfiguration configuration) {
+        String parameters = configuration.getProgramParameters();
+        if (parameters != null) {
+          // TODO den implement
 //            GradleTasksList list = GradleUtil.getToolWindowElement(GradleTasksList.class, project, ExternalSystemDataKeys.RECENT_TASKS_LIST);
 //            if (list != null) {
 //              ExternalSystemTaskDescriptor descriptor = new ExternalSystemTaskDescriptor(parameters, null);
@@ -185,7 +185,6 @@ public class GradleScriptType extends GroovyRunnableScriptType {
 //              list.setFirst(descriptor);
 //              GradleLocalSettings.getInstance(project).setRecentTasks(list.getModel().getTasks());
 //            }
-          }
         }
         final GradleInstallationManager libraryManager = ServiceManager.getService(GradleInstallationManager.class);
         // TODO den implement
@@ -203,7 +202,6 @@ public class GradleScriptType extends GroovyRunnableScriptType {
 //            return false;
 //          }
 //        }
-        return true;
       }
 
       @Override
@@ -214,13 +212,12 @@ public class GradleScriptType extends GroovyRunnableScriptType {
         throws CantRunException
       {
         final Project project = configuration.getProject();
-        String scriptParameters = configuration.getScriptParameters();
 
         final GradleInstallationManager libraryManager = ServiceManager.getService(GradleInstallationManager.class);
         if (module == null) {
           throw new CantRunException("Target module is undefined");
         }
-        String rootProjectPath = module.getOptionValue(ExternalSystemConstants.ROOT_PROJECT_PATH_KEY);
+        String rootProjectPath = ExternalSystemModulePropertyManager.getInstance(module).getRootProjectPath();
         if (StringUtil.isEmpty(rootProjectPath)) {
           throw new CantRunException(String.format("Module '%s' is not backed by gradle", module.getName()));
         }
@@ -271,7 +268,6 @@ public class GradleScriptType extends GroovyRunnableScriptType {
         }
         params.getProgramParametersList().add(FileUtil.toSystemDependentName(scriptPath));
         params.getProgramParametersList().addParametersString(configuration.getProgramParameters());
-        params.getProgramParametersList().addParametersString(scriptParameters);
       }
     };
   }
@@ -322,9 +318,7 @@ public class GradleScriptType extends GroovyRunnableScriptType {
 
   public GlobalSearchScope patchResolveScopeInner(@Nullable Module module, @NotNull GlobalSearchScope baseScope) {
     if (module == null) return GlobalSearchScope.EMPTY_SCOPE;
-    final String externalSystemId = module.getOptionValue(ExternalSystemConstants.EXTERNAL_SYSTEM_ID_KEY);
-    if (!GradleConstants.SYSTEM_ID.toString().equals(externalSystemId)) return baseScope;
-
+    if (!ExternalSystemApiUtil.isExternalSystemAwareModule(GradleConstants.SYSTEM_ID, module)) return baseScope;
     GlobalSearchScope result = GlobalSearchScope.EMPTY_SCOPE;
     final Project project = module.getProject();
     for (OrderEntry entry : ModuleRootManager.getInstance(module).getOrderEntries()) {
@@ -334,7 +328,7 @@ public class GradleScriptType extends GroovyRunnableScriptType {
       }
     }
 
-    String modulePath = module.getOptionValue(ExternalSystemConstants.LINKED_PROJECT_PATH_KEY);
+    String modulePath = ExternalSystemApiUtil.getExternalProjectPath(module);
     if (modulePath == null) return result;
 
     final Collection<VirtualFile> files = GradleBuildClasspathManager.getInstance(project).getModuleClasspathEntries(modulePath);

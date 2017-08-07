@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,13 +16,10 @@
 package org.jetbrains.io;
 
 import com.intellij.openapi.diagnostic.Logger;
-import com.intellij.openapi.util.Condition;
+import com.intellij.util.io.NettyKt;
 import io.netty.bootstrap.Bootstrap;
-import io.netty.bootstrap.BootstrapUtil;
 import io.netty.channel.*;
-import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.nio.NioSocketChannel;
-import io.netty.channel.socket.oio.OioSocketChannel;
 import io.netty.handler.codec.http.HttpMethod;
 import io.netty.handler.codec.http.HttpObjectAggregator;
 import io.netty.handler.codec.http.HttpRequestDecoder;
@@ -33,17 +30,11 @@ import io.netty.handler.codec.http.cors.CorsHandler;
 import io.netty.handler.stream.ChunkedWriteHandler;
 import io.netty.util.concurrent.GlobalEventExecutor;
 import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.TestOnly;
-import org.jetbrains.concurrency.AsyncPromise;
-import org.jetbrains.concurrency.Promise;
-import org.jetbrains.ide.PooledThreadExecutor;
 
 import java.io.IOException;
 import java.net.BindException;
 import java.net.ConnectException;
-import java.net.InetSocketAddress;
-import java.net.Socket;
 import java.util.concurrent.TimeUnit;
 
 public final class NettyUtil {
@@ -78,114 +69,6 @@ public final class NettyUtil {
     }
   }
 
-  @Nullable
-  static Channel doConnect(@NotNull Bootstrap bootstrap,
-                           @NotNull InetSocketAddress remoteAddress,
-                           @Nullable AsyncPromise<?> promise,
-                           int maxAttemptCount,
-                           @NotNull Condition<Void> stopCondition) throws Throwable {
-    int attemptCount = 0;
-    if (bootstrap.config().group() instanceof NioEventLoopGroup) {
-      return connectNio(bootstrap, remoteAddress, promise, maxAttemptCount, stopCondition, attemptCount);
-    }
-
-    bootstrap.validate();
-
-    Socket socket;
-    while (true) {
-      try {
-        //noinspection IOResourceOpenedButNotSafelyClosed,SocketOpenedButNotSafelyClosed
-        socket = new Socket(remoteAddress.getAddress(), remoteAddress.getPort());
-        break;
-      }
-      catch (IOException e) {
-        if (stopCondition.value(null) || (promise != null && promise.getState() != Promise.State.PENDING)) {
-          return null;
-        }
-        else if (maxAttemptCount == -1) {
-          if (sleep(promise, 300)) {
-            return null;
-          }
-          attemptCount++;
-        }
-        else if (++attemptCount < maxAttemptCount) {
-          if (sleep(promise, attemptCount * MIN_START_TIME)) {
-            return null;
-          }
-        }
-        else {
-          if (promise != null) {
-            promise.setError(e);
-          }
-          return null;
-        }
-      }
-    }
-
-    OioSocketChannel channel = new OioSocketChannel(socket);
-    BootstrapUtil.initAndRegister(channel, bootstrap).sync();
-    return channel;
-  }
-
-  @Nullable
-  private static Channel connectNio(@NotNull Bootstrap bootstrap,
-                                    @NotNull InetSocketAddress remoteAddress,
-                                    @Nullable AsyncPromise<?> promise,
-                                    int maxAttemptCount,
-                                    @NotNull Condition<Void> stopCondition,
-                                    int attemptCount) {
-    while (true) {
-      ChannelFuture future = bootstrap.connect(remoteAddress).awaitUninterruptibly();
-      if (future.isSuccess()) {
-        if (!future.channel().isOpen()) {
-          continue;
-        }
-        return future.channel();
-      }
-      else if (stopCondition.value(null) || (promise != null && promise.getState() == Promise.State.REJECTED)) {
-        return null;
-      }
-      else if (maxAttemptCount == -1) {
-        if (sleep(promise, 300)) {
-          return null;
-        }
-        attemptCount++;
-      }
-      else if (++attemptCount < maxAttemptCount) {
-        if (sleep(promise, attemptCount * MIN_START_TIME)) {
-          return null;
-        }
-      }
-      else {
-        @SuppressWarnings("ThrowableResultOfMethodCallIgnored")
-        Throwable cause = future.cause();
-        if (promise != null) {
-          if (cause == null) {
-            promise.setError("Cannot connect: unknown error");
-          }
-          else {
-            promise.setError(cause);
-          }
-        }
-        return null;
-      }
-    }
-  }
-
-  private static boolean sleep(@Nullable AsyncPromise<?> promise, int time) {
-    try {
-      //noinspection BusyWait
-      Thread.sleep(time);
-    }
-    catch (InterruptedException ignored) {
-      if (promise != null) {
-        promise.setError("Interrupted");
-      }
-      return true;
-    }
-    return false;
-  }
-
   private static boolean isAsWarning(@NotNull Throwable throwable) {
     String message = throwable.getMessage();
     if (message == null) {
@@ -198,10 +81,12 @@ public final class NettyUtil {
            (message.startsWith("Connection reset") || message.equals("Operation timed out") || message.equals("Connection timed out"));
   }
 
+  @NotNull
   public static Bootstrap nioClientBootstrap() {
-    return nioClientBootstrap(new NioEventLoopGroup(1, PooledThreadExecutor.INSTANCE));
+    return nioClientBootstrap(NettyKt.MultiThreadEventLoopGroup(2));
   }
 
+  @NotNull
   public static Bootstrap nioClientBootstrap(@NotNull EventLoopGroup eventLoopGroup) {
     Bootstrap bootstrap = new Bootstrap().group(eventLoopGroup).channel(NioSocketChannel.class);
     bootstrap.option(ChannelOption.TCP_NODELAY, true).option(ChannelOption.SO_KEEPALIVE, true);
@@ -223,7 +108,7 @@ public final class NettyUtil {
                                                                        .allowCredentials()
                                                                        .allowNullOrigin()
                                                                        .allowedRequestMethods(HttpMethod.GET, HttpMethod.POST, HttpMethod.PUT, HttpMethod.DELETE, HttpMethod.HEAD, HttpMethod.PATCH)
-                                                                       .allowedRequestHeaders("origin", "accept", "authorization", "content-type")
+                                                                       .allowedRequestHeaders("origin", "accept", "authorization", "content-type", "x-ijt")
                                                                        .build()));
   }
 

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,7 +28,7 @@ import org.jetbrains.plugins.groovy.lang.psi.api.statements.GrVariable;
 import org.jetbrains.plugins.groovy.lang.psi.api.statements.expressions.GrAssignmentExpression;
 import org.jetbrains.plugins.groovy.lang.psi.api.statements.expressions.GrExpression;
 import org.jetbrains.plugins.groovy.lang.psi.api.statements.expressions.GrReferenceExpression;
-import org.jetbrains.plugins.groovy.lang.psi.api.statements.expressions.GrTupleExpression;
+import org.jetbrains.plugins.groovy.lang.psi.api.statements.expressions.GrTuple;
 import org.jetbrains.plugins.groovy.lang.psi.api.statements.typedef.GrTypeDefinition;
 import org.jetbrains.plugins.groovy.lang.psi.api.types.GrTypeElement;
 
@@ -115,29 +115,32 @@ public class GrBindingVariable extends GrLightVariable implements GrVariable {
 
     myFile.accept(new GroovyRecursiveElementVisitor() {
       @Override
-      public void visitAssignmentExpression(GrAssignmentExpression expression) {
+      public void visitAssignmentExpression(@NotNull GrAssignmentExpression expression) {
         final GrExpression lValue = expression.getLValue();
-        if (lValue instanceof GrTupleExpression) {
-          for (GrExpression grExpression : ((GrTupleExpression)lValue).getExpressions()) {
-            if (isRefToMe(grExpression)) {
-              myHasWriteAccess = true;
-              break;
-            }
-          }
-        }
-        else if (isRefToMe(lValue)) {
+        if (isRefToMe(lValue)) {
           myHasWriteAccess = true;
         }
         super.visitAssignmentExpression(expression);
       }
 
       @Override
-      public void visitTypeDefinition(GrTypeDefinition typeDefinition) {
+      public void visitTuple(@NotNull GrTuple tuple) {
+        for (GrExpression grExpression : tuple.getExpressions()) {
+          if (isRefToMe(grExpression)) {
+            myHasWriteAccess = true;
+            break;
+          }
+        }
+        super.visitTuple(tuple);
+      }
+
+      @Override
+      public void visitTypeDefinition(@NotNull GrTypeDefinition typeDefinition) {
         //don't go inside type definitions
       }
 
       @Override
-      public void visitElement(GroovyPsiElement element) {
+      public void visitElement(@NotNull GroovyPsiElement element) {
         if (myHasWriteAccess == null) {
           super.visitElement(element);
         }

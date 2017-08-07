@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@
 package org.jetbrains.plugins.groovy.intentions.conversions;
 
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.WriteAction;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.io.FileUtilRt;
@@ -25,6 +26,7 @@ import com.intellij.psi.PsiFile;
 import com.intellij.refactoring.util.CommonRefactoringUtil;
 import com.intellij.util.IncorrectOperationException;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 import org.jetbrains.plugins.groovy.actions.GroovyTemplates;
 import org.jetbrains.plugins.groovy.actions.GroovyTemplatesFactory;
 import org.jetbrains.plugins.groovy.intentions.GroovyIntentionsBundle;
@@ -40,8 +42,20 @@ import org.jetbrains.plugins.groovy.lang.psi.api.statements.typedef.GrTypeDefini
  * @author Maxim.Medvedev
  */
 public class MoveClassToNewFileIntention extends Intention {
+
   @Override
-  protected void processIntention(@NotNull PsiElement element, Project project, Editor editor) throws IncorrectOperationException {
+  public boolean startInWriteAction() {
+    return false;
+  }
+
+  @Nullable
+  @Override
+  public PsiElement getElementToMakeWritable(@NotNull PsiFile currentFile) {
+    return currentFile;
+  }
+
+  @Override
+  protected void processIntention(@NotNull PsiElement element, @NotNull Project project, Editor editor) throws IncorrectOperationException {
     final GrTypeDefinition psiClass = (GrTypeDefinition)element.getParent();
     final String name = psiClass.getName();
 
@@ -61,23 +75,25 @@ public class MoveClassToNewFileIntention extends Intention {
 
     final GroovyFile newFile = (GroovyFile)GroovyTemplatesFactory.createFromTemplate(dir, name, newFileName, GroovyTemplates.GROOVY_CLASS,
                                                                                      true);
-    final GrTypeDefinition template = newFile.getTypeDefinitions()[0];
-    final PsiElement newClass = template.replace(psiClass);
-    final GrDocComment docComment = psiClass.getDocComment();
-    if (newClass instanceof GrTypeDefinition && docComment != null) {
-      final GrDocComment newDoc = ((GrTypeDefinition)newClass).getDocComment();
-      if (newDoc != null) {
-        newDoc.replace(docComment);
+    WriteAction.run(() -> {
+      GrTypeDefinition template = newFile.getTypeDefinitions()[0];
+      PsiElement newClass = template.replace(psiClass);
+      GrDocComment docComment = psiClass.getDocComment();
+      if (newClass instanceof GrTypeDefinition && docComment != null) {
+        GrDocComment newDoc = ((GrTypeDefinition)newClass).getDocComment();
+        if (newDoc != null) {
+          newDoc.replace(docComment);
+        }
+        else {
+          PsiElement parent = newClass.getParent();
+          parent.addBefore(docComment, psiClass);
+          parent.getNode().addLeaf(GroovyTokenTypes.mNLS, "\n", psiClass.getNode());
+        }
+        docComment.delete();
       }
-      else {
-        final PsiElement parent = newClass.getParent();
-        parent.addBefore(docComment, psiClass);
-        parent.getNode().addLeaf(GroovyTokenTypes.mNLS, "\n", psiClass.getNode());
-      }
-      docComment.delete();
-    }
-    psiClass.delete();
-    IntentionUtils.positionCursor(project, newClass.getContainingFile(), newClass.getNavigationElement());
+      psiClass.delete();
+      IntentionUtils.positionCursor(project, newClass.getContainingFile(), newClass.getNavigationElement());
+    });
   }
 
 

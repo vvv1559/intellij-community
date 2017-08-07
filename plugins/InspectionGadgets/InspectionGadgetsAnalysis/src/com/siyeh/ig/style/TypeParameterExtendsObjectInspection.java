@@ -1,5 +1,5 @@
 /*
- * Copyright 2003-2010 Dave Griffith, Bas Leijdekkers
+ * Copyright 2003-2017 Dave Griffith, Bas Leijdekkers
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -70,15 +70,9 @@ public class TypeParameterExtendsObjectInspection extends BaseInspection {
 
     @Override
     @NotNull
-    public String getName() {
+    public String getFamilyName() {
       return InspectionGadgetsBundle.message(
         "extends.object.remove.quickfix");
-    }
-
-    @NotNull
-    @Override
-    public String getFamilyName() {
-      return getName();
     }
 
     @Override
@@ -127,8 +121,7 @@ public class TypeParameterExtendsObjectInspection extends BaseInspection {
     @Override
     public void visitTypeParameter(PsiTypeParameter parameter) {
       super.visitTypeParameter(parameter);
-      final PsiClassType[] extendsListTypes =
-        parameter.getExtendsListTypes();
+      final PsiClassType[] extendsListTypes = parameter.getExtendsListTypes();
       if (extendsListTypes.length != 1) {
         return;
       }
@@ -159,8 +152,8 @@ public class TypeParameterExtendsObjectInspection extends BaseInspection {
       if (!wildcardType.isExtends()) {
         return;
       }
-      final PsiType extendsBound = wildcardType.getBound();
-      if (!TypeUtils.isJavaLangObject(extendsBound)) {
+      final PsiTypeElement extendsBound = (PsiTypeElement)typeElement.getLastChild();
+      if (extendsBound.getAnnotations().length > 0 || !TypeUtils.isJavaLangObject(extendsBound.getType())) {
         return;
       }
       final PsiElement firstChild = typeElement.getFirstChild();

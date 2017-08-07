@@ -38,6 +38,8 @@ import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.psi.xml.XmlElement;
 import com.intellij.psi.xml.XmlFile;
 import com.intellij.psi.xml.XmlTag;
+import com.intellij.testFramework.LightVirtualFile;
+import com.intellij.util.ObjectUtils;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.xml.*;
 import com.intellij.util.xml.reflect.DomCollectionChildDescription;
@@ -47,9 +49,11 @@ import org.jetbrains.idea.maven.dom.model.*;
 import org.jetbrains.idea.maven.model.MavenConstants;
 import org.jetbrains.idea.maven.model.MavenId;
 import org.jetbrains.idea.maven.model.MavenResource;
+import org.jetbrains.idea.maven.plugins.groovy.MavenGroovyPomCompletionContributor;
 import org.jetbrains.idea.maven.project.MavenProject;
 import org.jetbrains.idea.maven.project.MavenProjectsManager;
 import org.jetbrains.idea.maven.utils.MavenLog;
+import org.jetbrains.idea.maven.utils.MavenUtil;
 
 import java.util.Collections;
 import java.util.HashSet;
@@ -75,10 +79,15 @@ public class MavenDomUtil {
   public static boolean isProjectFile(PsiFile file) {
     if (!(file instanceof XmlFile)) return false;
 
-    String name = file.getName();
-    return name.equals(MavenConstants.POM_XML) ||
-           name.endsWith(".pom") ||
-           name.equals(MavenConstants.SUPER_POM_XML);
+    XmlTag rootTag = ((XmlFile)file).getRootTag();
+    if (rootTag == null || !"project".equals(rootTag.getName())) return false;
+
+    String xmlns = rootTag.getAttributeValue("xmlns");
+    if (xmlns != null && xmlns.startsWith("http://maven.apache.org/POM/")) {
+      return true;
+    }
+
+    return MavenUtil.isPomFileName(file.getName());
   }
 
   public static boolean isProfilesFile(PsiFile file) {
@@ -185,7 +194,11 @@ public class MavenDomUtil {
   private static VirtualFile getVirtualFile(PsiFile psiFile) {
     if (psiFile == null) return null;
     psiFile = psiFile.getOriginalFile();
-    return psiFile.getVirtualFile();
+    VirtualFile virtualFile = psiFile.getVirtualFile();
+    if (virtualFile instanceof LightVirtualFile) {
+      virtualFile = ObjectUtils.chooseNotNull(psiFile.getUserData(MavenGroovyPomCompletionContributor.ORIGINAL_POM_FILE), virtualFile);
+    }
+    return virtualFile;
   }
 
   @Nullable
@@ -450,5 +463,22 @@ public class MavenDomUtil {
       }
     }
     return -1;
+  }
+
+  @NotNull
+  public static String getProjectName(MavenDomProjectModel model) {
+    MavenProject mavenProject = findProject(model);
+    if (mavenProject != null) {
+      return mavenProject.getDisplayName();
+    }
+    else {
+      String name = model.getName().getStringValue();
+      if (!StringUtil.isEmptyOrSpaces(name)) {
+        return name;
+      }
+      else {
+        return "pom.xml"; // ?
+      }
+    }
   }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,7 +16,6 @@
 package com.intellij.testFramework;
 
 import com.intellij.ide.highlighter.ModuleFileType;
-import com.intellij.openapi.application.AccessToken;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.WriteAction;
 import com.intellij.openapi.command.WriteCommandAction;
@@ -25,7 +24,6 @@ import com.intellij.openapi.module.ModuleManager;
 import com.intellij.openapi.module.ModuleType;
 import com.intellij.openapi.module.StdModuleTypes;
 import com.intellij.openapi.module.impl.ModuleImpl;
-import com.intellij.openapi.util.Computable;
 import com.intellij.openapi.util.Ref;
 import com.intellij.openapi.util.ThrowableComputable;
 import com.intellij.openapi.util.io.FileUtil;
@@ -57,30 +55,24 @@ public abstract class ModuleTestCase extends IdeaTestCase {
   @Override
   protected void tearDown() throws Exception {
     try {
-      ModuleManager moduleManager = ModuleManager.getInstance(myProject);
-      List<Throwable> errors = null;
-      AccessToken token = WriteAction.start();
-      try {
-        for (Module module : myModulesToDispose) {
-          try {
-            String moduleName = module.getName();
-            if (moduleManager.findModuleByName(moduleName) != null) {
-              moduleManager.disposeModule(module);
+      if (!myModulesToDispose.isEmpty()) {
+        List<Throwable> errors = new SmartList<>();
+        WriteAction.run(() -> {
+          ModuleManager moduleManager = ModuleManager.getInstance(myProject);
+          for (Module module : myModulesToDispose) {
+            try {
+              String moduleName = module.getName();
+              if (moduleManager.findModuleByName(moduleName) != null) {
+                moduleManager.disposeModule(module);
+              }
+            }
+            catch (Throwable e) {
+              errors.add(e);
             }
           }
-          catch (Throwable e) {
-            if (errors == null) {
-              errors = new SmartList<>();
-            }
-            errors.add(e);
-          }
-        }
+        });
+        CompoundRuntimeException.throwIfNotEmpty(errors);
       }
-      finally {
-        token.finish();
-      }
-
-      CompoundRuntimeException.throwIfNotEmpty(errors);
     }
     finally {
       myModulesToDispose.clear();
@@ -88,7 +80,7 @@ public abstract class ModuleTestCase extends IdeaTestCase {
     }
   }
 
-  protected Module createModule(final File moduleFile) {
+  protected Module createModule(@NotNull File moduleFile) {
     return createModule(moduleFile, StdModuleTypes.JAVA);
   }
 
@@ -98,22 +90,22 @@ public abstract class ModuleTestCase extends IdeaTestCase {
   }
 
   protected Module createModule(final String path, final ModuleType moduleType) {
-    Module module = ApplicationManager.getApplication().runWriteAction(
-      (Computable<Module>)() -> ModuleManager.getInstance(myProject).newModule(path, moduleType.getId())
-    );
+    Module module = WriteAction.compute(() -> ModuleManager.getInstance(myProject).newModule(path, moduleType.getId()));
 
     myModulesToDispose.add(module);
     return module;
   }
 
-  protected Module loadModule(@NotNull String modulePath) {
-    final String normalizedPath = FileUtil.toSystemIndependentName(modulePath);
-    LocalFileSystem.getInstance().refreshAndFindFileByPath(normalizedPath);
+  protected Module loadModule(@NotNull VirtualFile file) {
+    return loadModule(file.getPath());
+  }
 
+  protected Module loadModule(@NotNull String modulePath) {
     final ModuleManager moduleManager = ModuleManager.getInstance(myProject);
     Module module;
     try {
-      module = ApplicationManager.getApplication().runWriteAction((ThrowableComputable<Module, Exception>)() -> moduleManager.loadModule(normalizedPath));
+      module = ApplicationManager.getApplication().runWriteAction((ThrowableComputable<Module, Exception>)() -> moduleManager.loadModule(
+        FileUtil.toSystemIndependentName(modulePath)));
     }
     catch (Exception e) {
       LOG.error(e);
@@ -137,7 +129,7 @@ public abstract class ModuleTestCase extends IdeaTestCase {
       @Override
       public boolean visitFile(@NotNull VirtualFile file) {
         if (!file.isDirectory() && file.getName().endsWith(ModuleFileType.DOT_DEFAULT_EXTENSION)) {
-          ModuleImpl module = (ModuleImpl)loadModule(file.getPath());
+          ModuleImpl module = (ModuleImpl)loadModule(file);
           if (moduleConsumer != null) {
             moduleConsumer.consume(module);
           }

@@ -14,26 +14,15 @@
  * limitations under the License.
  */
 
-/*
- * Created by IntelliJ IDEA.
- * User: max
- * Date: Dec 24, 2001
- * Time: 2:46:32 PM
- * To change template for new class use
- * Code Style | Class Templates options (Tools | IDE Options).
- */
 package com.intellij.codeInspection.deadCode;
 
 import com.intellij.analysis.AnalysisScope;
 import com.intellij.codeInsight.FileModificationService;
-import com.intellij.codeInsight.daemon.GroupNames;
 import com.intellij.codeInspection.*;
 import com.intellij.codeInspection.ex.EntryPointsManager;
-import com.intellij.codeInspection.ex.EntryPointsManagerImpl;
 import com.intellij.codeInspection.reference.*;
 import com.intellij.codeInspection.unusedSymbol.UnusedSymbolLocalInspectionBase;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.util.Comparing;
 import com.intellij.psi.*;
 import com.intellij.psi.search.PsiReferenceProcessor;
 import com.intellij.psi.search.PsiReferenceProcessorAdapter;
@@ -44,15 +33,10 @@ import com.intellij.psi.util.PsiModificationTracker;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.refactoring.changeSignature.ChangeSignatureProcessor;
 import com.intellij.refactoring.changeSignature.ParameterInfoImpl;
-import com.intellij.util.ui.JBUI;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
-import java.awt.*;
 import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
 import java.util.List;
 
 class UnusedParametersInspection extends GlobalJavaBatchInspectionTool {
@@ -91,9 +75,7 @@ class UnusedParametersInspection extends GlobalJavaBatchInspectionTool {
         final PsiIdentifier psiIdentifier = parameter != null ? parameter.getNameIdentifier() : null;
         if (psiIdentifier != null) {
           result.add(manager.createProblemDescriptor(psiIdentifier,
-                                                     refMethod.isAbstract()
-                                                     ? InspectionsBundle.message("inspection.unused.parameter.composer")
-                                                     : InspectionsBundle.message("inspection.unused.parameter.composer1"),
+                                                     InspectionsBundle.message(refMethod.isAbstract() ? "inspection.unused.parameter.composer" : "inspection.unused.parameter.composer1"),
                                                      new AcceptSuggested(globalContext.getRefManager(), processor, refParameter.toString()),
                                                      ProblemHighlightType.LIKE_UNUSED_SYMBOL, false));
         }
@@ -118,11 +100,11 @@ class UnusedParametersInspection extends GlobalJavaBatchInspectionTool {
         if (refEntity instanceof RefMethod) {
           RefMethod refMethod = (RefMethod)refEntity;
           final PsiModifierListOwner element = refMethod.getElement();
-          if (element instanceof PsiMethod) { //implicit constructors are invisible
-            PsiMethod psiMethod = (PsiMethod)element;
-            if (!refMethod.isStatic() && !refMethod.isConstructor() && !PsiModifier.PRIVATE.equals(refMethod.getAccessModifier())) {
-              final ArrayList<RefParameter> unusedParameters = getUnusedParameters(refMethod);
-              if (unusedParameters.isEmpty()) return;
+          if (!refMethod.isStatic() && !refMethod.isConstructor() && !PsiModifier.PRIVATE.equals(refMethod.getAccessModifier())) {
+            final ArrayList<RefParameter> unusedParameters = getUnusedParameters(refMethod);
+            if (unusedParameters.isEmpty()) return;
+            if (element instanceof PsiMethod) {
+              PsiMethod psiMethod = (PsiMethod)element;
               PsiMethod[] derived = OverridingMethodsSearch.search(psiMethod).toArray(PsiMethod.EMPTY_ARRAY);
               for (final RefParameter refParameter : unusedParameters) {
                 if (refMethod.isAbstract() && derived.length == 0) {
@@ -192,15 +174,15 @@ class UnusedParametersInspection extends GlobalJavaBatchInspectionTool {
   }
 
   private static void clearUsedParameters(@NotNull RefMethod refMethod, RefParameter[] params, boolean checkDeep) {
-    RefParameter[] methodParms = refMethod.getParameters();
+    RefParameter[] methodParams = refMethod.getParameters();
 
-    for (int i = 0; i < methodParms.length; i++) {
-      if (methodParms[i].isUsedForReading()) params[i] = null;
+    for (int i = 0; i < methodParams.length; i++) {
+      if (methodParams[i].isUsedForReading()) params[i] = null;
     }
 
     if (checkDeep) {
       for (RefMethod refOverride : refMethod.getDerivedMethods()) {
-        clearUsedParameters(refOverride, params, checkDeep);
+        clearUsedParameters(refOverride, params, true);
       }
     }
   }
@@ -222,14 +204,8 @@ class UnusedParametersInspection extends GlobalJavaBatchInspectionTool {
 
     @Override
     @NotNull
-    public String getName() {
-      return InspectionsBundle.message("inspection.unused.parameter.delete.quickfix");
-    }
-
-    @Override
-    @NotNull
     public String getFamilyName() {
-      return getName();
+      return InspectionsBundle.message("inspection.unused.parameter.delete.quickfix");
     }
 
     @Override

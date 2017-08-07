@@ -27,7 +27,7 @@ import com.intellij.openapi.roots.SourceFolder;
 import com.intellij.openapi.roots.ui.configuration.SourceRootPresentation;
 import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.openapi.vfs.impl.jrt.JrtFileSystem;
+import com.intellij.openapi.vfs.jrt.JrtFileSystem;
 import com.intellij.openapi.vfs.newvfs.ArchiveFileSystem;
 import com.intellij.psi.JavaDirectoryService;
 import com.intellij.psi.PsiDirectory;
@@ -58,6 +58,9 @@ public class JavaDirectoryIconProvider extends IconProvider implements DumbAware
       else if (ProjectRootsUtil.isModuleContentRoot(vFile, project)) {
         Module module = ProjectRootManager.getInstance(project).getFileIndex().getModuleForFile(vFile);
         symbolIcon = module != null ? ModuleType.get(module).getIcon() : PlatformIcons.CONTENT_ROOT_ICON_CLOSED;
+      }
+      else if (ProjectRootsUtil.computeNameOfUnloadedModuleByContentRoot(vFile, project) != null) {
+        symbolIcon = AllIcons.Modules.UnloadedModule;
       }
       else if ((sourceFolder = ProjectRootsUtil.getModuleSourceRoot(vFile, project)) != null) {
         symbolIcon = SourceRootPresentation.getSourceRootIcon(sourceFolder);

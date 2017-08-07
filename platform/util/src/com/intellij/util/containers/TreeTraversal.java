@@ -26,6 +26,8 @@ import java.util.Iterator;
 import java.util.Map;
 import java.util.NoSuchElementException;
 
+import static com.intellij.openapi.util.Conditions.not;
+
 /**
  * A redesigned version of com.google.common.collect.TreeTraversal.
  * <p/>
@@ -64,7 +66,7 @@ public abstract class TreeTraversal {
   }
 
   @NotNull
-  public <T> JBIterable<T> traversal(@NotNull final Iterable<? extends T> roots, @NotNull final Function<T, ? extends Iterable<? extends T>> tree) {
+  public final <T> JBIterable<T> traversal(@NotNull final Iterable<? extends T> roots, @NotNull final Function<T, ? extends Iterable<? extends T>> tree) {
     return new JBIterable<T>() {
       @NotNull
       @Override
@@ -75,16 +77,92 @@ public abstract class TreeTraversal {
   }
 
   @NotNull
-  public <T> JBIterable<T> traversal(@Nullable final T root, @NotNull final Function<T, ? extends Iterable<? extends T>> tree) {
+  public final <T> JBIterable<T> traversal(@Nullable final T root, @NotNull final Function<T, ? extends Iterable<? extends T>> tree) {
     return traversal(ContainerUtil.createMaybeSingletonList(root), tree);
   }
 
   @NotNull
-  public <T> Function<T, JBIterable<T>> traversal(@NotNull final Function<T, ? extends Iterable<? extends T>> tree) {
+  public final <T> Function<T, JBIterable<T>> traversal(@NotNull final Function<T, ? extends Iterable<? extends T>> tree) {
     return new Function<T, JBIterable<T>>() {
       @Override
       public JBIterable<T> fun(T t) {
         return traversal(t, tree);
+      }
+    };
+  }
+
+  /**
+   * Configures the traversal to skip already visited nodes.
+   * @see TreeTraversal#unique(Function)
+   */
+  @NotNull
+  public final TreeTraversal unique() {
+    return unique(Function.ID);
+  }
+
+  /**
+   * Configures the traversal to skip already visited nodes.
+   * @param identity function
+   */
+  @NotNull
+  public TreeTraversal unique(@NotNull final Function<?, ?> identity) {
+    final TreeTraversal original = this;
+    return new TreeTraversal(debugName + " (UNIQUE)") {
+
+      @NotNull
+      @Override
+      public <T> It<T> createIterator(@NotNull Iterable<? extends T> roots,
+                                      @NotNull final Function<T, ? extends Iterable<? extends T>> tree) {
+        class WrappedTree implements Condition<T>, Function<T, Iterable<? extends T>> {
+          HashSet<Object> visited;
+
+          @Override
+          public boolean value(T e) {
+            if (visited == null) visited = new HashSet<Object>();
+            //noinspection unchecked
+            return visited.add(((Function<T, Object>)identity).fun(e));
+          }
+
+          @Override
+          public Iterable<? extends T> fun(T t) {
+            return JBIterable.from(tree.fun(t)).filter(this);
+          }
+        }
+        if (tree instanceof WrappedTree) return original.createIterator(roots, tree);
+        WrappedTree wrappedTree = new WrappedTree();
+        return original.createIterator(JBIterable.from(roots).filter(wrappedTree), wrappedTree);
+      }
+    };
+  }
+
+  /**
+   * Configures the traversal to expand and return the nodes within the range only.
+   * It is an optimized version of expand-and-filter operation.
+   * It skips all the nodes "before" the {@code rangeCondition} return true for the first time,
+   * processes as usual the nodes while the condition return true and
+   * stops when the {@code rangeCondition} return false after that.
+   */
+  @NotNull
+  public TreeTraversal onRange(@NotNull final Condition<?> rangeCondition) {
+    final TreeTraversal original = this;
+    return new TreeTraversal(original.toString() + " (ON_RANGE)") {
+      @NotNull
+      @Override
+      public <T> It<T> createIterator(@NotNull Iterable<? extends T> roots,
+                                      @NotNull final Function<T, ? extends Iterable<? extends T>> tree) {
+        final Condition<? super T> inRangeCondition = (Condition < ? super T >)rangeCondition;
+        final Condition<? super T> notInRangeCondition = (Condition<? super T>)not(rangeCondition);
+        class WrappedTree implements Function<T, Iterable<? extends T>> {
+          @Override
+          public Iterable<? extends T> fun(T t) {
+            return JBIterable.from(tree.fun(t))
+              .skipWhile(notInRangeCondition)
+              .takeWhile(inRangeCondition);
+          }
+        }
+        if (tree instanceof WrappedTree) return original.createIterator(roots, tree);
+        WrappedTree wrappedTree = new WrappedTree();
+        return original.createIterator(JBIterable.from(roots).filter(inRangeCondition), wrappedTree);
       }
     };
   }
@@ -99,7 +177,7 @@ public abstract class TreeTraversal {
   public abstract <T> It<T> createIterator(@NotNull Iterable<? extends T> roots, @NotNull Function<T, ? extends Iterable<? extends T>> tree);
 
   @Override
-  public String toString() {
+  public final String toString() {
     return debugName;
   }
 
@@ -180,8 +258,8 @@ public abstract class TreeTraversal {
   }
 
   /**
-   * Returns an iterator over the nodes in a tree structure, using pre-order
-   * traversal. That is, each node's subtrees are traversed after the node itself is returned.
+   * Returns an iterator over the nodes in a tree structure, using pre-order traversal.
+   * That is, each node's subtrees are traversed after the node itself is returned.
    *
    * <p>No guarantees are made about the behavior of the traversal when nodes change while
    * iteration is in progress or when the iterators generated by {@code tree} are advanced.
@@ -196,8 +274,8 @@ public abstract class TreeTraversal {
   };
 
   /**
-   * Returns an iterator over the nodes in a tree structure, using post-order
-   * traversal. That is, each node's subtrees are traversed before the node itself is returned.
+   * Returns an iterator over the nodes in a tree structure, using post-order DFS traversal.
+   * That is, each node's subtrees are traversed before the node itself is returned.
    * <p/>
    * <p>No guarantees are made about the behavior of the traversal when nodes change while
    * iteration is in progress or when the iterators generated by {@code tree} are advanced.
@@ -212,6 +290,10 @@ public abstract class TreeTraversal {
   };
 
 
+  /**
+   * Returns an iterator over the leaf nodes only in a tree structure, using DFS traversal.
+   * That is, each node's subtrees are traversed before the node itself is returned.
+   */
   @NotNull
   public static final TreeTraversal LEAVES_DFS = new TreeTraversal("LEAVES_DFS") {
     @NotNull
@@ -222,9 +304,8 @@ public abstract class TreeTraversal {
   };
 
   /**
-   * Returns an iterator over the nodes in a tree structure, using interlaced pre-order
-   * traversal. That is, all paths are traversed in an interlaced manner that is suitable
-   * for infinite and cyclic graphs
+   * Returns an iterator over the nodes in a tree structure, using interlaced pre-order DFS traversal.
+   * That is, all paths are traversed in an interlaced manner that is suitable for infinite and cyclic graphs
    * and each node's subtrees are traversed before the node itself is returned.
    * <p/>
    * <p>No guarantees are made about the behavior of the traversal when nodes change while
@@ -240,8 +321,8 @@ public abstract class TreeTraversal {
   };
 
   /**
-   * Returns an iterator over the nodes in a tree structure, using breadth-first
-   * traversal. That is, all the nodes of depth 0 are returned, then depth 1, then 2, and so on.
+   * Returns an iterator over the nodes in a tree structure, using breadth-first traversal.
+   * That is, all the nodes of depth 0 are returned, then depth 1, then 2, and so on.
    * <p/>
    * <p>No guarantees are made about the behavior of the traversal when nodes change while
    * iteration is in progress or when the iterators generated by {@code tree} are advanced.
@@ -255,6 +336,11 @@ public abstract class TreeTraversal {
     }
   };
 
+  /**
+   * Same as {@code PLAIN_BFS} but with {@code TracingIt}.
+   * That is, a path to the current node can be retrieved during some traversal.
+   * @see TreeTraversal.TracingIt
+   */
   @NotNull
   public static final TreeTraversal TRACING_BFS = new TreeTraversal("TRACING_BFS") {
     @NotNull
@@ -264,6 +350,10 @@ public abstract class TreeTraversal {
     }
   };
 
+  /**
+   * Returns an iterator over the leaf nodes only in a tree structure, using BFS traversal.
+   * That is, all the leaves of depth 0 are returned, then depth 1, then 2, and so on.
+   */
   @NotNull
   public static final TreeTraversal LEAVES_BFS = new TreeTraversal("LEAVES_BFS") {
     @NotNull

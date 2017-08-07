@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -45,7 +45,7 @@ public class Py3UnresolvedReferencesInspectionTest extends PyTestCase {
   }
 
   private void doTest() {
-    runWithLanguageLevel(LanguageLevel.PYTHON35, () -> {
+    runWithLanguageLevel(LanguageLevel.PYTHON36, () -> {
       myFixture.configureByFile(TEST_DIRECTORY + getTestName(true) + ".py");
       myFixture.enableInspections(PyUnresolvedReferencesInspection.class);
       myFixture.checkHighlighting(true, false, false);
@@ -57,7 +57,7 @@ public class Py3UnresolvedReferencesInspectionTest extends PyTestCase {
   }
 
   private void doMultiFileTest(@NotNull final String filename, @NotNull List<String> sourceRoots) {
-    runWithLanguageLevel(LanguageLevel.PYTHON35, () -> {
+    runWithLanguageLevel(LanguageLevel.PYTHON36, () -> {
       final String testName = getTestName(false);
       myFixture.copyDirectoryToProject(TEST_DIRECTORY + testName, "");
       final Module module = myFixture.getModule();
@@ -92,6 +92,16 @@ public class Py3UnresolvedReferencesInspectionTest extends PyTestCase {
 
   // PY-10208
   public void testMetaclassMethods() {
+    doTest();
+  }
+
+  // PY-19702
+  public void testMetaclassAttribute() {
+    doTest();
+  }
+
+  // PY-19702
+  public void testNonexistentMetaclassAttribute() {
     doTest();
   }
 
@@ -174,5 +184,40 @@ public class Py3UnresolvedReferencesInspectionTest extends PyTestCase {
   // PY-19691
   public void testNestedPackageNamedAsSourceRoot() {
     doMultiFileTest("a.py", Collections.singletonList("lib1"));
+  }
+  
+  // PY-18972
+  public void testReferencesInFStringLiterals() {
+    doTest();
+  }
+
+  // PY-11208
+  public void testMockPatchObject() {
+    doMultiFileTest(getTestName(true) + ".py");
+  }
+
+  // PY-22525
+  public void testTypingIterableDunderGetItem() {
+    doTest();
+  }
+
+  // PY-22642
+  public void testTypingGenericDunderGetItem() {
+    doTest();
+  }
+
+  // PY-21655
+  public void testUsageOfFunctionDecoratedWithAsyncioCoroutine() {
+    doMultiFileTest("a.py");
+  }
+
+  // PY-21655
+  public void testUsageOfFunctionDecoratedWithTypesCoroutine() {
+    doMultiFileTest("a.py");
+  }
+
+  // PY-22899, PY-22937
+  public void testCallTypeGetAttributeAndSetAttrInInheritor() {
+    doTest();
   }
 }

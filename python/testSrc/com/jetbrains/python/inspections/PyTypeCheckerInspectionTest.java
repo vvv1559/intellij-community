@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@
 package com.jetbrains.python.inspections;
 
 import com.jetbrains.python.fixtures.PyTestCase;
+import com.jetbrains.python.psi.LanguageLevel;
 
 /**
  * @author vlan
@@ -100,10 +101,6 @@ public class PyTypeCheckerInspectionTest extends PyTestCase {
   }
 
   public void testNotNone() {
-    doTest();
-  }
-
-  public void testBuiltinFunctions() {
     doTest();
   }
 
@@ -297,6 +294,16 @@ public class PyTypeCheckerInspectionTest extends PyTestCase {
     doTest();
   }
 
+  // PY-20460
+  public void testStringGetItemWithSlice() {
+    doTest();
+  }
+
+  // PY-20460
+  public void testUnicodeGetItemWithSlice() {
+    doTest();
+  }
+
   // PY-19884
   public void testAbsSetAndMutableSet() {
     doTest();
@@ -314,6 +321,129 @@ public class PyTypeCheckerInspectionTest extends PyTestCase {
 
   // PY-16055
   public void testFunctionReturnType() {
+    doTest();
+  }
+
+  // PY-19522
+  public void testCsvRegisterDialect() {
+    doMultiFileTest();
+  }
+
+  // PY-20364
+  public void testActualBasestringExpectedUnionStrUnicode() {
+    doTest();
+  }
+
+  // PY-21083
+  public void testFloatFromhex() {
+    doTest();
+  }
+
+  // PY-20073
+  public void testMapArgumentsInOppositeOrder() {
+    doTest();
+  }
+
+  public void testPositionalArguments() {
+    doTest();
+  }
+
+  // PY-19723
+  public void testKeywordArguments() {
+    doTest();
+  }
+
+  // PY-21350
+  public void testBuiltinInputPy2() {
+    doTest();
+  }
+
+  // PY-21350
+  public void testBuiltinRawInput() {
+    doTest();
+  }
+
+  // PY-22222
+  public void testPassClassWithDunderSlotsToMethodThatUsesSlottedAttribute() {
+    doTest();
+  }
+
+  // PY-22391
+  public void testIteratingOverListAfterIfNot() {
+    doTest();
+  }
+
+  // EA-98555, EA-98663
+  public void testNullArgumentMappedToPositionalParameter() {
+    doTest();
+  }
+
+  // PY-23138
+  public void testHomogeneousTuplePlusHeterogeneousTupleWithTheSameElementsType() {
+    doTest();
+  }
+
+  // PY-22763
+  public void testChainedComparisons() {
+    doTest();
+  }
+
+  // PY-22971
+  public void testTopLevelOverloadsAndImplementation() {
+    runWithLanguageLevel(LanguageLevel.PYTHON35, this::doTest);
+  }
+
+  // PY-22971
+  public void testOverloadsAndImplementationInClass() {
+    runWithLanguageLevel(LanguageLevel.PYTHON35, this::doTest);
+  }
+
+  // PY-22971
+  public void testOverloadsAndImplementationInImportedModule() {
+    runWithLanguageLevel(LanguageLevel.PYTHON35, this::doMultiFileTest);
+  }
+
+  // PY-22971
+  public void testOverloadsAndImplementationInImportedClass() {
+    runWithLanguageLevel(LanguageLevel.PYTHON35, this::doMultiFileTest);
+  }
+
+  // PY-23429
+  public void testMatchingModuleAgainstStructuralType() {
+    doMultiFileTest();
+  }
+
+  // PY-24287
+  public void testPromotingBytearrayToStrAndUnicode() {
+    doTest();
+  }
+
+  // PY-24930
+  public void testCallOperator() {
+    runWithLanguageLevel(LanguageLevel.PYTHON35, this::doTest);
+  }
+
+  // PY-24763
+  public void testAnnotatedDunderInitInGenericClass() {
+    runWithLanguageLevel(LanguageLevel.PYTHON35, this::doTest);
+  }
+
+  public void testDunderInitAnnotatedAsNonNone() {
+    runWithLanguageLevel(LanguageLevel.PYTHON35, this::doTest);
+  }
+
+  // PY-23367
+  public void testComparingFloatAndInt() {
+    doTest();
+  }
+
+  // PY-25120
+  public void testIterateOverDictValueWhenItsTypeIsUnion() {
+    doTest();
+  }
+
+  // PY-23864
+  public void testClassObjectAndMetaclassCompatibility() {
     doTest();
   }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,10 +26,10 @@ import com.intellij.debugger.requests.Requestor;
 import com.intellij.debugger.settings.DebuggerSettings;
 import com.intellij.debugger.ui.breakpoints.FilteredRequestor;
 import com.intellij.diagnostic.ThreadDumper;
-import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.diagnostic.Logger;
-import com.intellij.openapi.util.Computable;
 import com.intellij.openapi.util.Key;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.PsiClass;
 import com.intellij.ui.classFilter.ClassFilter;
 import com.intellij.util.containers.HashMap;
@@ -143,7 +143,8 @@ public class RequestManagerImpl extends DebugProcessAdapterImpl implements Reque
       request.setSuspendPolicy(EventRequest.SUSPEND_EVENT_THREAD);
     }
 
-    if (requestor.isCountFilterEnabled() && requestor.getCountFilter() > 0) {
+    // count filter has to be applied manually if condition is specified
+    if (requestor.isCountFilterEnabled() && !requestor.isConditionEnabled()) {
       request.addCountFilter(requestor.getCountFilter());
     }
 
@@ -154,14 +155,12 @@ public class RequestManagerImpl extends DebugProcessAdapterImpl implements Reque
           if (!filter.isEnabled()) {
             continue;
           }
-          final JVMName jvmClassName = ApplicationManager.getApplication().runReadAction(new Computable<JVMName>() {
-            public JVMName compute() {
-              PsiClass psiClass = DebuggerUtils.findClass(filter.getPattern(), myDebugProcess.getProject(), myDebugProcess.getSearchScope());
-              if (psiClass == null) {
-                return null;
-              }
-              return JVMNameUtil.getJVMQualifiedName(psiClass);
+          final JVMName jvmClassName = ReadAction.compute(() -> {
+            PsiClass psiClass = DebuggerUtils.findClass(filter.getPattern(), myDebugProcess.getProject(), myDebugProcess.getSearchScope());
+            if (psiClass == null) {
+              return null;
             }
+            return JVMNameUtil.getJVMQualifiedName(psiClass);
           });
           String pattern = filter.getPattern();
           try {
@@ -192,7 +191,7 @@ public class RequestManagerImpl extends DebugProcessAdapterImpl implements Reque
     request.putProperty(REQUESTOR, requestor);
   }
 
-  private void registerRequest(Requestor requestor, EventRequest request) {
+  public void registerRequest(Requestor requestor, EventRequest request) {
     myRequestorToBelongedRequests.computeIfAbsent(requestor, r -> new HashSet<>()).add(request);
   }
 
@@ -205,8 +204,10 @@ public class RequestManagerImpl extends DebugProcessAdapterImpl implements Reque
 
     ClassPrepareRequest classPrepareRequest = myEventRequestManager.createClassPrepareRequest();
     classPrepareRequest.setSuspendPolicy(EventRequest.SUSPEND_EVENT_THREAD);
-    classPrepareRequest.addClassFilter(pattern);
-    classPrepareRequest.putProperty(CLASS_NAME, pattern);
+    if (!StringUtil.isEmpty(pattern)) {
+      classPrepareRequest.addClassFilter(pattern);
+      classPrepareRequest.putProperty(CLASS_NAME, pattern);
+    }
 
     registerRequestInternal(requestor, classPrepareRequest);
     return classPrepareRequest;
@@ -312,9 +313,12 @@ public class RequestManagerImpl extends DebugProcessAdapterImpl implements Reque
     }
 
     for (ClassPrepareRequest prepareRequest : prepareRequests) {
-      registerRequest(requestor, prepareRequest);
-      prepareRequest.enable();
+      if (prepareRequest != null) {
+        registerRequest(requestor, prepareRequest);
+        prepareRequest.enable();
+      }
     }
+    myDebugProcess.getVirtualMachineProxy().clearCaches(); // to force reload classes available so far
   }
 
   public void callbackOnPrepareClasses(ClassPrepareRequestor requestor, String classOrPatternToBeLoaded) {
@@ -327,6 +331,7 @@ public class RequestManagerImpl extends DebugProcessAdapterImpl implements Reque
       if (LOG.isDebugEnabled()) {
         LOG.debug("classOrPatternToBeLoaded = " + classOrPatternToBeLoaded);
       }
+      myDebugProcess.getVirtualMachineProxy().clearCaches(); // to force reload classes available so far
     }
   }
 

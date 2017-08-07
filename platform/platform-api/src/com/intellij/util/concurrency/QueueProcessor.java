@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,12 +24,14 @@ import com.intellij.openapi.util.Condition;
 import com.intellij.openapi.util.Conditions;
 import com.intellij.util.Consumer;
 import com.intellij.util.PairConsumer;
+import org.jetbrains.annotations.Debugger;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.ArrayDeque;
 import java.util.Deque;
-import java.util.HashMap;
 import java.util.Map;
+
+import static com.intellij.util.containers.ContainerUtil.newIdentityTroveMap;
 
 /**
  * <p>QueueProcessor processes elements which are being added to a queue via {@link #add(Object)} and {@link #addFirst(Object)} methods.</p>
@@ -49,27 +51,13 @@ public class QueueProcessor<T> {
 
   private final PairConsumer<T, Runnable> myProcessor;
   private final Deque<T> myQueue = new ArrayDeque<>();
-  private final Runnable myContinuationContext = new Runnable() {
-    @Override
-    public void run() {
-      synchronized (myQueue) {
-        isProcessing = false;
-        if (myQueue.isEmpty()) {
-          myQueue.notifyAll();
-        }
-        else {
-          startProcessing();
-        }
-      }
-    }
-  };
 
   private boolean isProcessing;
   private boolean myStarted;
 
   private final ThreadToUse myThreadToUse;
   private final Condition<?> myDeathCondition;
-  private final Map<MyOverrideEquals, ModalityState> myModalityState = new HashMap<>();
+  private final Map<Object, ModalityState> myModalityState = newIdentityTroveMap();
 
   /**
    * Constructs a QueueProcessor, which will autostart as soon as the first element is added to it.
@@ -109,11 +97,11 @@ public class QueueProcessor<T> {
 
   /**
    * Constructs a QueueProcessor with the given processor and autostart setting.
-   * By default QueueProcessor starts processing when it receives the first element. Pass <code>false</code> to alternate its behavior.
+   * By default QueueProcessor starts processing when it receives the first element. Pass {@code false} to alternate its behavior.
    *
    * @param processor processor of queue elements.
-   * @param autostart if <code>true</code> (which is by default), the queue will be processed immediately when it receives the first element.
-   *                  If <code>false</code>, then it will wait for the {@link #start()} command.
+   * @param autostart if {@code true} (which is by default), the queue will be processed immediately when it receives the first element.
+   *                  If {@code false}, then it will wait for the {@link #start()} command.
    *                  After QueueProcessor has started once, autostart setting doesn't matter anymore: all other elements will be processed immediately.
    */
 
@@ -142,10 +130,22 @@ public class QueueProcessor<T> {
       }
     }
   }
+  
+  private void finishProcessing(boolean continueProcessing) {
+    synchronized (myQueue) {
+      isProcessing = false;
+      if (myQueue.isEmpty()) {
+        myQueue.notifyAll();
+      }
+      else if (continueProcessing){
+        startProcessing();
+      }
+    }
+  }
 
   public void add(@NotNull T t, ModalityState state) {
     synchronized (myQueue) {
-      myModalityState.put(new MyOverrideEquals(t), state);
+      myModalityState.put(t, state);
     }
     doAdd(t, false);
   }
@@ -188,6 +188,27 @@ public class QueueProcessor<T> {
       }
     }
   }
+  
+  boolean waitFor(long timeoutMS) {
+    synchronized (myQueue) {
+      long start = System.currentTimeMillis();
+      
+      while (isProcessing) {
+        long rest = timeoutMS - (System.currentTimeMillis() - start);
+        
+        if (rest <= 0) return !isProcessing;
+        
+        try {
+          myQueue.wait(rest);
+        }
+        catch (InterruptedException e) {
+          //ok
+        }
+      }
+      
+      return true;
+    }
+  }
 
   private boolean startProcessing() {
     LOG.assertTrue(Thread.holdsLock(myQueue));
@@ -198,12 +219,15 @@ public class QueueProcessor<T> {
     isProcessing = true;
     final T item = myQueue.removeFirst();
     final Runnable runnable = () -> {
-      if (myDeathCondition.value(null)) return;
-      runSafely(() -> myProcessor.consume(item, myContinuationContext));
+      if (myDeathCondition.value(null)) {
+        finishProcessing(false);
+        return;
+      }
+      runSafely(() -> myProcessor.consume(item, () -> finishProcessing(true)));
     };
     final Application application = ApplicationManager.getApplication();
     if (myThreadToUse == ThreadToUse.AWT) {
-      final ModalityState state = myModalityState.remove(new MyOverrideEquals(item));
+      final ModalityState state = myModalityState.remove(item);
       if (state != null) {
         application.invokeLater(runnable, state);
       }
@@ -217,7 +241,7 @@ public class QueueProcessor<T> {
     return true;
   }
 
-  public static void runSafely(@NotNull Runnable run) {
+  public static void runSafely(@Debugger.Insert(group = "com.intellij.util.Alarm._addRequest") @NotNull Runnable run) {
     try {
       run.run();
     }
@@ -255,24 +279,6 @@ public class QueueProcessor<T> {
   public boolean hasPendingItemsToProcess() {
     synchronized (myQueue) {
       return !myQueue.isEmpty();
-    }
-  }
-
-  private static class MyOverrideEquals {
-    private final Object myDelegate;
-
-    private MyOverrideEquals(@NotNull Object delegate) {
-      myDelegate = delegate;
-    }
-
-    @Override
-    public int hashCode() {
-      return myDelegate.hashCode();
-    }
-
-    @Override
-    public boolean equals(Object obj) {
-      return ((MyOverrideEquals)obj).myDelegate == myDelegate;
     }
   }
 

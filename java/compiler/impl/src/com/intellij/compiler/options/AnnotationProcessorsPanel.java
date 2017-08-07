@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -31,13 +31,13 @@ import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.ui.AnActionButton;
 import com.intellij.ui.ColoredTreeCellRenderer;
-import com.intellij.ui.IdeBorderFactory;
 import com.intellij.ui.ToolbarDecorator;
 import com.intellij.ui.awt.RelativePoint;
 import com.intellij.ui.components.JBList;
 import com.intellij.ui.treeStructure.Tree;
 import com.intellij.util.SmartList;
 import com.intellij.util.ui.EditableTreeModel;
+import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.tree.TreeUtil;
 import org.jetbrains.jps.model.java.compiler.ProcessorConfigProfile;
 import org.jetbrains.jps.model.java.impl.compiler.ProcessorConfigProfileImpl;
@@ -165,7 +165,7 @@ public class AnnotationProcessorsPanel extends JPanel {
       }
     });
     myProfilePanel = new ProcessorProfilePanel(project);
-    myProfilePanel.setBorder(IdeBorderFactory.createEmptyBorder(0, 6, 0, 0));
+    myProfilePanel.setBorder(JBUI.Borders.emptyLeft(6));
     splitter.setSecondComponent(myProfilePanel);
   }
 
@@ -200,19 +200,6 @@ public class AnnotationProcessorsPanel extends JPanel {
       myProfilePanel.saveTo(selectedProfile);
     }
     return myModuleProfiles;
-  }
-
-  private static void expand(JTree tree) {
-    int oldRowCount = 0;
-    do {
-      int rowCount = tree.getRowCount();
-      if (rowCount == oldRowCount) break;
-      oldRowCount = rowCount;
-      for (int i = 0; i < rowCount; i++) {
-        tree.expandRow(i);
-      }
-    }
-    while (true);
   }
 
   private class MyTreeModel extends DefaultTreeModel implements EditableTreeModel{
@@ -317,7 +304,7 @@ public class AnnotationProcessorsPanel extends JPanel {
       }
       children = newKids;
       ((DefaultTreeModel)myTree.getModel()).reload();
-      expand(myTree);
+      TreeUtil.expandAll(myTree);
       return this;
     }
   }

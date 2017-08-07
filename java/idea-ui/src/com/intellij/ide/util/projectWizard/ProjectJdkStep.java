@@ -14,18 +14,14 @@
  * limitations under the License.
  */
 
-/*
- * Created by IntelliJ IDEA.
- * User: Anna.Kozlova
- * Date: 16-Aug-2006
- * Time: 18:01:13
- */
 package com.intellij.ide.util.projectWizard;
 
 import com.intellij.ide.IdeBundle;
+import com.intellij.ide.util.importProject.ProjectDescriptor;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.project.ProjectManager;
+import com.intellij.openapi.projectRoots.JavaSdkVersion;
 import com.intellij.openapi.projectRoots.Sdk;
 import com.intellij.openapi.roots.ui.configuration.ProjectJdksConfigurable;
 import com.intellij.openapi.ui.Messages;
@@ -41,6 +37,7 @@ import java.awt.*;
  */
 public class ProjectJdkStep extends ModuleWizardStep {
   private final WizardContext myContext;
+  private ProjectDescriptor myProjectDescriptor;
 
   protected final ProjectJdksConfigurable myProjectJdksConfigurable;
 
@@ -73,6 +70,17 @@ public class ProjectJdkStep extends ModuleWizardStep {
     myJDKsComponent.setBorder(BorderFactory.createEmptyBorder(4, 0, 0, 0));
     panel.add(myJDKsComponent, new GridBagConstraints(0, GridBagConstraints.RELATIVE, 1, 1, 1, 1.0, GridBagConstraints.NORTHWEST, GridBagConstraints.BOTH, JBUI.emptyInsets(), 0, 0));
     return panel;
+  }
+
+  @Override
+  public void updateStep() {
+    final Sdk jdk = myContext.getProjectJdk();
+    if (jdk == null) {
+      JavaSdkVersion requiredJdkVersion = myProjectDescriptor != null ? myProjectDescriptor.getRequiredJdkVersion() : null;
+      if (requiredJdkVersion != null) {
+        myProjectJdksConfigurable.selectJdkVersion(requiredJdkVersion);
+      }
+    }
   }
 
   public void updateDataModel() {
@@ -109,5 +117,9 @@ public class ProjectJdkStep extends ModuleWizardStep {
   public void disposeUIResources() {
     super.disposeUIResources();
     myProjectJdksConfigurable.disposeUIResources();
+  }
+
+  public void setProjectDescriptor(ProjectDescriptor projectDescriptor) {
+    myProjectDescriptor = projectDescriptor;
   }
 }

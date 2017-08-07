@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -66,7 +66,7 @@ public class JavaQualifiedNameProvider implements QualifiedNameProvider {
     }
 
     if (element instanceof PsiJavaModule) {
-      return ((PsiJavaModule)element).getModuleName();
+      return ((PsiJavaModule)element).getName();
     }
 
     if (element instanceof PsiJavaModuleReferenceElement) {
@@ -74,7 +74,7 @@ public class JavaQualifiedNameProvider implements QualifiedNameProvider {
       if (reference != null) {
         PsiElement target = reference.resolve();
         if (target instanceof PsiJavaModule) {
-          return ((PsiJavaModule)target).getModuleName();
+          return ((PsiJavaModule)target).getName();
         }
       }
     }
@@ -219,30 +219,27 @@ public class JavaQualifiedNameProvider implements QualifiedNameProvider {
       final PsiExpression expression;
       try {
         expression = factory.createExpressionFromText(toInsert + suffix, elementAtCaret);
-      }
-      catch (IncorrectOperationException e) {
-        LOG.error(e);
-        return;
-      }
-      final PsiReferenceExpression referenceExpression = expression instanceof PsiMethodCallExpression
-                                                         ? ((PsiMethodCallExpression)expression).getMethodExpression()
-                                                         : expression instanceof PsiReferenceExpression
-                                                           ? (PsiReferenceExpression)expression
-                                                           : null;
-      if (referenceExpression == null || !referenceExpression.isValid()) {
-        toInsert = fqn;
-      }
-      else if (!isReferencedTo(referenceExpression, targetElement)) {
-        try {
-          referenceExpression.bindToElement(targetElement);
-        }
-        catch (IncorrectOperationException e) {
-          // failed to bind
-        }
-        if (!referenceExpression.isValid() || !isReferencedTo(referenceExpression, targetElement)) {
+        final PsiReferenceExpression referenceExpression = expression instanceof PsiMethodCallExpression
+                                                           ? ((PsiMethodCallExpression)expression).getMethodExpression()
+                                                           : expression instanceof PsiReferenceExpression
+                                                             ? (PsiReferenceExpression)expression
+                                                             : null;
+        if (referenceExpression == null || !referenceExpression.isValid()) {
           toInsert = fqn;
         }
+        else if (!isReferencedTo(referenceExpression, targetElement)) {
+          try {
+            referenceExpression.bindToElement(targetElement);
+          }
+          catch (IncorrectOperationException e) {
+            // failed to bind
+          }
+          if (!referenceExpression.isValid() || !isReferencedTo(referenceExpression, targetElement)) {
+            toInsert = fqn;
+          }
+        }
       }
+      catch (IncorrectOperationException ignored) {}
     }
     if (toInsert == null) toInsert = "";
 

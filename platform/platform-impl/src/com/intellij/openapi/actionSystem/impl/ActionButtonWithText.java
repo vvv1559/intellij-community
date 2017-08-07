@@ -133,7 +133,7 @@ public class ActionButtonWithText extends ActionButton {
                                                      SwingConstants.CENTER, horizontalTextAlignment(),
                                                      SwingConstants.CENTER, horizontalTextPosition(),
                                                      viewRect, iconRect, textRect, iconTextSpace());
-    ActionButtonLook look = ActionButtonLook.IDEA_LOOK;
+    ActionButtonLook look = ActionButtonLook.DEFAULT_LOOK;
     look.paintBackground(g, this);
     look.paintIconAt(g, this, icon, iconRect.x, iconRect.y);
     look.paintBorder(g, this);
@@ -205,5 +205,9 @@ public class ActionButtonWithText extends ActionButton {
   private String getText() {
     final String text = myPresentation.getText();
     return text != null ? text : "";
+  }
+
+  public int getMnemonic() {
+    return KeyEvent.getExtendedKeyCodeForChar(myPresentation.getMnemonic());
   }
 }

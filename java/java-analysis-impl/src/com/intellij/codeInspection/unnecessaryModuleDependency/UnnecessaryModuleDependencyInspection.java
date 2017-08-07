@@ -27,10 +27,6 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
 
-/**
- * User: anna
- * Date: 09-Jan-2006
- */
 public class UnnecessaryModuleDependencyInspection extends GlobalInspectionTool {
 
   private SoftReference<Graph<Module>> myGraph = new SoftReference<>(null);
@@ -158,14 +154,8 @@ public class UnnecessaryModuleDependencyInspection extends GlobalInspectionTool 
 
     @Override
     @NotNull
-    public String getName() {
-      return "Remove dependency";
-    }
-
-    @Override
-    @NotNull
     public String getFamilyName() {
-      return getName();
+      return "Remove dependency";
     }
 
     @Override

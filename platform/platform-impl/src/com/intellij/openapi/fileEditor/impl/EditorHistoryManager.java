@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,8 +17,12 @@ package com.intellij.openapi.fileEditor.impl;
 
 import com.intellij.ide.ui.UISettings;
 import com.intellij.ide.ui.UISettingsListener;
+import com.intellij.openapi.Disposable;
 import com.intellij.openapi.application.ApplicationManager;
-import com.intellij.openapi.components.*;
+import com.intellij.openapi.components.PersistentStateComponent;
+import com.intellij.openapi.components.State;
+import com.intellij.openapi.components.Storage;
+import com.intellij.openapi.components.StoragePathMacros;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.fileEditor.*;
 import com.intellij.openapi.fileEditor.ex.FileEditorManagerEx;
@@ -46,7 +50,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 
 @State(name = "editorHistoryManager", storages = @Storage(StoragePathMacros.WORKSPACE_FILE))
-public final class EditorHistoryManager implements PersistentStateComponent<Element>, ProjectComponent {
+public final class EditorHistoryManager implements PersistentStateComponent<Element>, Disposable {
   private static final Logger LOG = Logger.getInstance(EditorHistoryManager.class);
 
   private final Project myProject;
@@ -60,17 +64,13 @@ public final class EditorHistoryManager implements PersistentStateComponent<Elem
    */
   private final List<HistoryEntry> myEntriesList = new ArrayList<>();
 
-  EditorHistoryManager(@NotNull Project project, @NotNull UISettings uiSettings) {
+  EditorHistoryManager(@NotNull Project project) {
     myProject = project;
 
-    uiSettings.addUISettingsListener(new UISettingsListener() {
-      @Override
-      public void uiSettingsChanged(UISettings source) {
-        trimToSize();
-      }
-    }, project);
-
     MessageBusConnection connection = project.getMessageBus().connect();
+
+    connection.subscribe(UISettingsListener.TOPIC, uiSettings -> trimToSize());
+
     connection.subscribe(FileEditorManagerListener.Before.FILE_EDITOR_MANAGER, new FileEditorManagerListener.Before.Adapter() {
       @Override
       public void beforeFileClosed(@NotNull FileEditorManager source, @NotNull VirtualFile file) {
@@ -110,10 +110,9 @@ public final class EditorHistoryManager implements PersistentStateComponent<Elem
     final Pair<FileEditor[], FileEditorProvider[]> editorsWithProviders = editorManager.getEditorsWithProviders(file);
     FileEditor[] editors = editorsWithProviders.getFirst();
     FileEditorProvider[] oldProviders = editorsWithProviders.getSecond();
-    if (editors.length <= 0 && fallbackEditor != null) {
+    LOG.assertTrue(editors.length == oldProviders.length, "Different number of editors and providers");
+    if (editors.length <= 0 && fallbackEditor != null && fallbackProvider != null) {
       editors = new FileEditor[] { fallbackEditor };
-    }
-    if (oldProviders.length <= 0 && fallbackProvider != null) {
       oldProviders = new FileEditorProvider[] { fallbackProvider };
     }
     if (editors.length <= 0) {
@@ -137,10 +136,11 @@ public final class EditorHistoryManager implements PersistentStateComponent<Elem
       for (int i = states.length - 1; i >= 0; i--) {
         final FileEditorProvider provider = oldProviders [i];
         LOG.assertTrue(provider != null);
-        FileEditor editor = editors[i];
-        if (!editor.isValid()) continue;
         providers[i] = provider;
-        states[i] = editor.getState(FileEditorStateLevel.FULL);
+        FileEditor editor = editors[i];
+        if (editor.isValid()) {
+          states[i] = editor.getState(FileEditorStateLevel.FULL);
+        }
       }
       addEntry(HistoryEntry.createHeavy(myProject, file, providers, states, providers[selectedProviderIndex]));
       trimToSize();
@@ -187,6 +187,7 @@ public final class EditorHistoryManager implements PersistentStateComponent<Elem
       for (int i = editors.length - 1; i >= 0; i--) {
         final FileEditor           editor = editors   [i];
         final FileEditorProvider provider = providers [i];
+        if (provider == null) continue; // can happen if fallbackProvider is null
         if (!editor.isValid()) {
           // this can happen for example if file extension was changed
           // and this method was called during corresponding myEditor close up
@@ -245,11 +246,11 @@ public final class EditorHistoryManager implements PersistentStateComponent<Elem
   }
 
   /**
-   * Removes specified <code>file</code> from history. The method does
-   * nothing if <code>file</code> is not in the history.
+   * Removes specified {@code file} from history. The method does
+   * nothing if {@code file} is not in the history.
    *
-   * @exception IllegalArgumentException if <code>file</code>
-   * is <code>null</code>
+   * @exception IllegalArgumentException if {@code file}
+   * is {@code null}
    */
   public synchronized void removeFile(@NotNull final VirtualFile file){
     final HistoryEntry entry = getEntry(file);
@@ -283,11 +284,11 @@ public final class EditorHistoryManager implements PersistentStateComponent<Elem
   }
 
   /**
-   * If total number of files in history more then <code>UISettings.RECENT_FILES_LIMIT</code>
+   * If total number of files in history more then {@code UISettings.RECENT_FILES_LIMIT}
    * then removes the oldest ones to fit the history to new size.
    */
   private synchronized void trimToSize(){
-    final int limit = UISettings.getInstance().RECENT_FILES_LIMIT + 1;
+    final int limit = UISettings.getInstance().getRecentFilesLimit() + 1;
     while(myEntriesList.size()>limit){
       HistoryEntry removed = myEntriesList.remove(0);
       removed.destroy();
@@ -300,25 +301,19 @@ public final class EditorHistoryManager implements PersistentStateComponent<Elem
     // which is done via corresponding EditorProviders, those are not accessible before their
     // is initComponent() called
     final Element state = element.clone();
-    StartupManager.getInstance(myProject).runWhenProjectIsInitialized(new DumbAwareRunnable() {
-      @Override
-      public void run() {
-        for (Element e : state.getChildren(HistoryEntry.TAG)) {
-          try {
-            addEntry(HistoryEntry.createHeavy(myProject, e));
-          }
-          catch (InvalidDataException e1) {
-            // OK here
-          }
-          catch (ProcessCanceledException e1) {
-            // OK here
-          }
-          catch (Exception anyException) {
-            LOG.error(anyException);
-          }
+    StartupManager.getInstance(myProject).runWhenProjectIsInitialized((DumbAwareRunnable)() -> {
+      for (Element e : state.getChildren(HistoryEntry.TAG)) {
+        try {
+          addEntry(HistoryEntry.createHeavy(myProject, e));
         }
-        trimToSize();
+        catch (InvalidDataException | ProcessCanceledException e1) {
+          // OK here
+        }
+        catch (Exception anyException) {
+          LOG.error(anyException);
+        }
       }
+      trimToSize();
     });
   }
 
@@ -342,35 +337,17 @@ public final class EditorHistoryManager implements PersistentStateComponent<Elem
   }
 
   @Override
-  public void projectOpened() {
-  }
-
-  @Override
-  public void projectClosed() {
-  }
-
-  @Override
-  public void initComponent() {
-  }
-
-  @Override
-  public synchronized void disposeComponent() {
+  public synchronized void dispose() {
     for (HistoryEntry entry : myEntriesList) {
       entry.destroy();
     }
     myEntriesList.clear();
   }
-
-  @NotNull
-  @Override
-  public String getComponentName() {
-    return "editorHistoryManager";
-  }
-
+  
   /**
    * Updates history
    */
-  private final class MyEditorManagerListener extends FileEditorManagerAdapter{
+  private final class MyEditorManagerListener implements FileEditorManagerListener {
     @Override
     public void fileOpened(@NotNull final FileEditorManager source, @NotNull final VirtualFile file){
       fileOpenedImpl(file, null, null);
@@ -381,6 +358,10 @@ public final class EditorHistoryManager implements PersistentStateComponent<Elem
       // updateHistoryEntry does commitDocument which is 1) very expensive and 2) cannot be performed from within PSI change listener
       // so defer updating history entry until documents committed to improve responsiveness
       PsiDocumentManager.getInstance(myProject).performWhenAllCommitted(() -> {
+        FileEditor newEditor = event.getNewEditor();
+        if(newEditor != null && !newEditor.isValid())
+          return;
+
         updateHistoryEntry(event.getOldFile(), event.getOldEditor(), event.getOldProvider(), false);
         updateHistoryEntry(event.getNewFile(), true);
       });

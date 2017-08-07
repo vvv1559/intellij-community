@@ -23,10 +23,6 @@ import com.intellij.util.ObjectUtils;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-/**
- * User: anna
- * Date: 28-Dec-2005
- */
 public class GlobalInspectionToolWrapper extends InspectionToolWrapper<GlobalInspectionTool, InspectionEP> {
   public GlobalInspectionToolWrapper(@NotNull GlobalInspectionTool globalInspectionTool) {
     super(globalInspectionTool);
@@ -65,7 +61,7 @@ public class GlobalInspectionToolWrapper extends InspectionToolWrapper<GlobalIns
   @NotNull
   public JobDescriptor[] getJobDescriptors(@NotNull GlobalInspectionContext context) {
     GlobalInspectionTool tool = getTool();
-    JobDescriptor[] additionalJobs = ObjectUtils.notNull(tool.getAdditionalJobs(), JobDescriptor.EMPTY_ARRAY);
+    JobDescriptor[] additionalJobs = ObjectUtils.notNull(tool.getAdditionalJobs(context), JobDescriptor.EMPTY_ARRAY);
     StdJobDescriptors stdJobDescriptors = context.getStdJobDescriptors();
     if (tool.isGraphNeeded()) {
       additionalJobs = additionalJobs.length == 0 ? stdJobDescriptors.BUILD_GRAPH_ONLY :
@@ -91,6 +87,12 @@ public class GlobalInspectionToolWrapper extends InspectionToolWrapper<GlobalIns
       return null;
     }
     //noinspection TestOnlyProblems
-    return new LocalInspectionToolWrapper(sharedTool);
+    return new LocalInspectionToolWrapper(sharedTool){
+      @Nullable
+      @Override
+      public String getLanguage() {
+        return GlobalInspectionToolWrapper.this.getLanguage(); // inherit "language=" xml tag from the global inspection EP
+      }
+    };
   }
 }

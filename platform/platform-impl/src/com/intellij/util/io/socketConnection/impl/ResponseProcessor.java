@@ -9,7 +9,6 @@ import com.intellij.util.SmartList;
 import com.intellij.util.io.socketConnection.*;
 import gnu.trove.TIntObjectHashMap;
 import gnu.trove.TIntObjectProcedure;
-import gnu.trove.TObjectProcedure;
 import org.jetbrains.annotations.NotNull;
 
 import java.io.IOException;
@@ -30,8 +29,8 @@ public class ResponseProcessor<R extends AbstractResponse> {
   private Thread myThread;
   private final Alarm myTimeoutAlarm;
 
-  public ResponseProcessor(SocketConnection<?, R> connection) {
-    myTimeoutAlarm = new Alarm(Alarm.ThreadToUse.SHARED_THREAD, connection);
+  public ResponseProcessor(@NotNull SocketConnection<?, R> connection) {
+    myTimeoutAlarm = new Alarm(Alarm.ThreadToUse.POOLED_THREAD, connection);
   }
 
   public void startReading(final ResponseReader<R> reader) {
@@ -149,11 +148,9 @@ public class ResponseProcessor<R extends AbstractResponse> {
     final Ref<Long> nextTime = Ref.create(Long.MAX_VALUE);
     synchronized (myLock) {
       if (myTimeoutHandlers.isEmpty()) return;
-      myTimeoutHandlers.forEachValue(new TObjectProcedure<TimeoutHandler>() {
-        public boolean execute(TimeoutHandler handler) {
-          nextTime.set(Math.min(nextTime.get(), handler.myLastTime));
-          return true;
-        }
+      myTimeoutHandlers.forEachValue(handler -> {
+        nextTime.set(Math.min(nextTime.get(), handler.myLastTime));
+        return true;
       });
     }
     final int delay = (int)(nextTime.get() - System.currentTimeMillis() + 100);

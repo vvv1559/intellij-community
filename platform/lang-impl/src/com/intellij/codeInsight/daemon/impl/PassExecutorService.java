@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,8 +24,9 @@ import com.intellij.concurrency.JobLauncher;
 import com.intellij.injected.editor.EditorWindow;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.application.ApplicationManager;
-import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.application.ex.ApplicationManagerEx;
+import com.intellij.openapi.application.ex.ApplicationUtil;
+import com.intellij.openapi.application.impl.ApplicationImpl;
 import com.intellij.openapi.application.impl.ApplicationInfoImpl;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Document;
@@ -46,6 +47,7 @@ import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.util.Functions;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.MultiMap;
 import gnu.trove.THashMap;
@@ -195,7 +197,7 @@ class PassExecutorService implements Disposable {
       createScheduledPass(fileEditor, pass, toBeSubmitted, ContainerUtil.emptyList(), freePasses, dependentPasses, updateProgress, threadsToStartCountdown);
     }
 
-    if (CHECK_CONSISTENCY && !ApplicationInfoImpl.isInPerformanceTest()) {
+    if (CHECK_CONSISTENCY && !ApplicationInfoImpl.isInStressTest()) {
       assertConsistency(freePasses, toBeSubmitted, threadsToStartCountdown);
     }
 
@@ -385,7 +387,7 @@ class PassExecutorService implements Disposable {
     private final AtomicInteger myRunningPredecessorsCount = new AtomicInteger(0);
     private final Collection<ScheduledPass> mySuccessorsOnCompletion = new ArrayList<>();
     private final Collection<ScheduledPass> mySuccessorsOnSubmit = new ArrayList<>();
-    private final DaemonProgressIndicator myUpdateProgress;
+    @NotNull private final DaemonProgressIndicator myUpdateProgress;
 
     private ScheduledPass(@NotNull FileEditor fileEditor,
                           @NotNull TextEditorHighlightingPass pass,
@@ -399,13 +401,18 @@ class PassExecutorService implements Disposable {
 
     @Override
     public void run() {
-      try {
-        doRun();
-      }
-      catch (RuntimeException | Error e) {
-        saveException(e,myUpdateProgress);
-        throw e;
-      }
+      ((ApplicationImpl)ApplicationManager.getApplication()).executeByImpatientReader(() -> {
+        try {
+          doRun();
+        }
+        catch (ApplicationUtil.CannotRunReadActionException e) {
+          myUpdateProgress.cancel();
+        }
+        catch (RuntimeException | Error e) {
+          saveException(e, myUpdateProgress);
+          throw e;
+        }
+      });
     }
 
     private void doRun() {
@@ -492,10 +499,15 @@ class PassExecutorService implements Disposable {
         log(updateProgress, pass, " is canceled during apply, sorry");
         return;
       }
+      Document document = pass.getDocument();
       try {
         if (fileEditor.getComponent().isDisplayable() || ApplicationManager.getApplication().isUnitTestMode()) {
-          log(updateProgress, pass, " Applied");
           pass.applyInformationToEditor();
+          FileStatusMap fileStatusMap = DaemonCodeAnalyzerEx.getInstanceEx(myProject).getFileStatusMap();
+          if (document != null) {
+            fileStatusMap.markFileUpToDate(document, pass.getId());
+          }
+          log(updateProgress, pass, " Applied");
         }
       }
       catch (ProcessCanceledException e) {
@@ -503,7 +515,6 @@ class PassExecutorService implements Disposable {
         throw e;
       }
       catch (RuntimeException e) {
-        Document document = pass.getDocument();
         VirtualFile file = document == null ? null : FileDocumentManager.getInstance().getFile(document);
         FileType fileType = file == null ? null : file.getFileType();
         String message = "Exception while applying information to " + fileEditor + "("+fileType+")";
@@ -511,13 +522,14 @@ class PassExecutorService implements Disposable {
         throw new RuntimeException(message, e);
       }
       if (threadsToStartCountdown.decrementAndGet() == 0) {
+        HighlightingSessionImpl.waitForAllSessionsHighlightInfosApplied(updateProgress);
         log(updateProgress, pass, "Stopping ");
         updateProgress.stopIfRunning();
       }
       else {
         log(updateProgress, pass, "Finished but there are passes in the queue: " + threadsToStartCountdown.get());
       }
-    }, ModalityState.stateForComponent(fileEditor.getComponent()));
+    }, updateProgress.getModalityState());
   }
 
   protected boolean isDisposed() {
@@ -537,7 +549,7 @@ class PassExecutorService implements Disposable {
   }
 
   private static void sortById(@NotNull List<TextEditorHighlightingPass> result) {
-    ContainerUtil.quickSort(result, (o1, o2) -> o1.getId() - o2.getId());
+    ContainerUtil.quickSort(result, Comparator.comparingInt(TextEditorHighlightingPass::getId));
   }
 
   private static int getThreadNum() {
@@ -548,18 +560,15 @@ class PassExecutorService implements Disposable {
 
   static void log(ProgressIndicator progressIndicator, TextEditorHighlightingPass pass, @NonNls @NotNull Object... info) {
     if (LOG.isDebugEnabled()) {
-      CharSequence docText = pass == null ? "" : StringUtil.first(pass.getDocument().getCharsSequence(), 10, true);
+      CharSequence docText = pass == null || pass.getDocument() == null ? "" : ": '" + StringUtil.first(pass.getDocument().getCharsSequence(), 10, true)+ "'";
       synchronized (PassExecutorService.class) {
-        StringBuilder s = new StringBuilder();
-        for (Object o : info) {
-          s.append(o).append(" ");
-        }
+        String infos = StringUtil.join(info, Functions.TO_STRING(), " ");
         String message = StringUtil.repeatSymbol(' ', getThreadNum() * 4)
                          + " " + pass + " "
-                         + s
+                         + infos
                          + "; progress=" + (progressIndicator == null ? null : progressIndicator.hashCode())
                          + " " + (progressIndicator == null ? "?" : progressIndicator.isCanceled() ? "X" : "V")
-                         + " : '" + docText + "'";
+                         + docText;
         LOG.debug(message);
         //System.out.println(message);
       }

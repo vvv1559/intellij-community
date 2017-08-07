@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -63,7 +63,7 @@ public class GrSetStrongTypeIntention extends Intention {
   private static final Logger LOG = Logger.getInstance(GrSetStrongTypeIntention.class);
 
   @Override
-  protected void processIntention(@NotNull PsiElement element, Project project, final Editor editor) throws IncorrectOperationException {
+  protected void processIntention(@NotNull PsiElement element, @NotNull Project project, final Editor editor) throws IncorrectOperationException {
     PsiElement parent = element.getParent();
 
     PsiElement elementToBuildTemplate;
@@ -237,7 +237,7 @@ public class GrSetStrongTypeIntention extends Intention {
   protected PsiElementPredicate getElementPredicate() {
     return new PsiElementPredicate() {
       @Override
-      public boolean satisfiedBy(PsiElement element) {
+      public boolean satisfiedBy(@NotNull PsiElement element) {
         PsiElement parent = element.getParent();
 
         PsiElement pparent;

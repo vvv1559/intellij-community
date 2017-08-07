@@ -15,8 +15,10 @@
  */
 package com.jetbrains.python.inspections.quickfix;
 
+import com.intellij.codeInsight.FileModificationService;
 import com.intellij.codeInspection.LocalQuickFix;
 import com.intellij.codeInspection.ProblemDescriptor;
+import com.intellij.openapi.application.WriteAction;
 import com.intellij.openapi.project.Project;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.util.PsiTreeUtil;
@@ -24,26 +26,16 @@ import com.intellij.util.Function;
 import com.intellij.util.FunctionUtil;
 import com.jetbrains.python.PyBundle;
 import com.jetbrains.python.psi.*;
-import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 
-/**
- * User: ktisha
- */
 public class PyMoveAttributeToInitQuickFix implements LocalQuickFix {
 
   public PyMoveAttributeToInitQuickFix() {
   }
 
   @NotNull
-  public String getName() {
-    return PyBundle.message("QFIX.move.attribute");
-  }
-
-  @NonNls
-  @NotNull
   public String getFamilyName() {
-    return getName();
+    return PyBundle.message("QFIX.move.attribute");
   }
 
   public void applyFix(@NotNull final Project project, @NotNull final ProblemDescriptor descriptor) {
@@ -55,15 +47,22 @@ public class PyMoveAttributeToInitQuickFix implements LocalQuickFix {
     final PyAssignmentStatement assignment = PsiTreeUtil.getParentOfType(element, PyAssignmentStatement.class);
     if (containingClass == null || assignment == null) return;
 
-    final Function<String, PyStatement> callback = FunctionUtil.<String, PyStatement>constant(assignment);
-    AddFieldQuickFix.addFieldToInit(project, containingClass, ((PyTargetExpression)element).getName(), callback);
-    removeDefinition(assignment);
+    if (!FileModificationService.getInstance().preparePsiElementForWrite(containingClass)) return;
+
+    WriteAction.run(() -> {
+      AddFieldQuickFix.addFieldToInit(project, containingClass, ((PyTargetExpression)element).getName(), x -> assignment);
+      removeDefinition(assignment);
+    });
   }
 
-  private static boolean removeDefinition(PyAssignmentStatement assignment) {
+  @Override
+  public boolean startInWriteAction() {
+    return false;
+  }
+
+  private static void removeDefinition(PyAssignmentStatement assignment) {
     final PyStatementList statementList = PsiTreeUtil.getParentOfType(assignment, PyStatementList.class);
-    if (statementList == null) return false;
+    if (statementList == null) return;
     assignment.delete();
-    return true;
   }
 }

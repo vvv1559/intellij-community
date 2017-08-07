@@ -14,14 +14,6 @@
  * limitations under the License.
  */
 
-/*
- * Created by IntelliJ IDEA.
- * User: dsl
- * Date: 06.05.2002
- * Time: 16:54:19
- * To change template for new class use
- * Code Style | Class Templates options (Tools | IDE Options).
- */
 package com.intellij.refactoring.introduceParameter;
 
 import com.intellij.codeInspection.AnonymousCanBeLambdaInspection;
@@ -121,8 +113,9 @@ public class IntroduceParameterDialog extends RefactoringDialog {
 
 
 
+  @NotNull
   private String getParameterName() {
-    return  myParameterNameField.getEnteredName().trim();
+    return myParameterNameField.getEnteredName().trim();
   }
 
   public JComponent getPreferredFocusedComponent() {
@@ -187,11 +180,7 @@ public class IntroduceParameterDialog extends RefactoringDialog {
     gbConstraints.weightx = 1;
     gbConstraints.fill = GridBagConstraints.BOTH;
     panel.add(myParameterNameField.getComponent(), gbConstraints);
-    myParameterNameChangedListener = new NameSuggestionsField.DataChanged() {
-      public void dataChanged() {
-        validateButtons();
-      }
-    };
+    myParameterNameChangedListener = () -> validateButtons();
     myParameterNameField.addDataChangedListener(myParameterNameChangedListener);
 
     myNameSuggestionsManager =
@@ -288,12 +277,7 @@ public class IntroduceParameterDialog extends RefactoringDialog {
     if (myCbCollapseToLambda.isVisible() && myCbCollapseToLambda.isSelected() && parameterInitializer != null) {
       PsiExpression lambda = AnonymousCanBeLambdaInspection.replaceAnonymousWithLambda(parameterInitializer, selectedType);
       if (lambda != null) {
-        final PsiParameter[] lambdaParameters = ((PsiLambdaExpression)lambda).getParameterList().getParameters();
-        final String methodReferenceText = LambdaCanBeMethodReferenceInspection.convertToMethodReference(((PsiLambdaExpression)lambda).getBody(), lambdaParameters, selectedType, null);
-        if (methodReferenceText != null) {
-          lambda = JavaPsiFacade.getElementFactory(getProject()).createExpressionFromText(methodReferenceText, lambda);
-        }
-
+        lambda = LambdaCanBeMethodReferenceInspection.replaceLambdaWithMethodReference((PsiLambdaExpression)lambda);
         processor.setParameterInitializer(lambda);
       }
     }
@@ -313,8 +297,8 @@ public class IntroduceParameterDialog extends RefactoringDialog {
   @Override
   protected void canRun() throws ConfigurationException {
     String name = getParameterName();
-    if (name == null || !PsiNameHelper.getInstance(myProject).isIdentifier(name)) {
-      throw new ConfigurationException("\'" + (name != null ? name : "") + "\' is invalid parameter name");
+    if (!PsiNameHelper.getInstance(myProject).isIdentifier(name)) {
+      throw new ConfigurationException("\'" + name + "\' is invalid parameter name");
     }
   }
 

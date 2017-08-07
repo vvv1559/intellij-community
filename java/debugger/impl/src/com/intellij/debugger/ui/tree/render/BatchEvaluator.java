@@ -22,6 +22,7 @@ import com.intellij.debugger.engine.evaluation.EvaluateExceptionUtil;
 import com.intellij.debugger.engine.evaluation.EvaluationContext;
 import com.intellij.debugger.engine.jdi.ThreadReferenceProxy;
 import com.intellij.debugger.engine.managerThread.SuspendContextCommand;
+import com.intellij.debugger.impl.DebuggerUtilsImpl;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.registry.Registry;
@@ -33,12 +34,6 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
-
-/**
- * User: lex
- * Date: Jul 7, 2003
- * Time: 11:13:52 PM
- */
 
 public class BatchEvaluator {
   private static final Logger LOG = Logger.getInstance("#com.intellij.debugger.ui.tree.render.BatchEvaluator");
@@ -67,8 +62,7 @@ public class BatchEvaluator {
   @SuppressWarnings({"HardCodedStringLiteral"}) public boolean hasBatchEvaluator(EvaluationContext evaluationContext) {
     if (!myBatchEvaluatorChecked) {
       myBatchEvaluatorChecked = true;
-      final Boolean isRemote = myDebugProcess.getUserData(REMOTE_SESSION_KEY);
-      if (isRemote != null && isRemote.booleanValue()) {
+      if (DebuggerUtilsImpl.isRemote(myDebugProcess)) {
         // optimization: for remote sessions the BatchEvaluator is not there for sure
         return false;
       }
@@ -216,13 +210,7 @@ public class BatchEvaluator {
       }
       return true;
     }
-    catch (ClassNotLoadedException e) {
-    }
-    catch (InvalidTypeException e) {
-    }
-    catch (EvaluateException e) {
-    }
-    catch (ObjectCollectedException e) {
+    catch (ClassNotLoadedException | ObjectCollectedException | EvaluateException | InvalidTypeException e) {
     }
     return false;
   }

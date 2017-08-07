@@ -19,6 +19,7 @@ import com.intellij.execution.ExecutionException;
 import com.intellij.execution.process.OSProcessUtil;
 import com.intellij.execution.process.ProcessInfo;
 import com.intellij.execution.runners.ExecutionUtil;
+import com.intellij.icons.AllIcons;
 import com.intellij.internal.statistic.UsageTrigger;
 import com.intellij.internal.statistic.beans.ConvertUsagesUtil;
 import com.intellij.openapi.actionSystem.AnAction;
@@ -54,17 +55,14 @@ import javax.swing.*;
 import javax.swing.event.ListSelectionEvent;
 import javax.swing.event.ListSelectionListener;
 import java.awt.event.InputEvent;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.List;
+import java.util.*;
 
 public class AttachToLocalProcessAction extends AnAction {
   private static final Key<LinkedHashMap<String, HistoryItem>> HISTORY_KEY = Key.create("AttachToLocalProcessAction.HISTORY_KEY");
 
   public AttachToLocalProcessAction() {
     super(XDebuggerBundle.message("xdebugger.attach.toLocal.action"),
-          XDebuggerBundle.message("xdebugger.attach.toLocal.action.description"), null);
+          XDebuggerBundle.message("xdebugger.attach.toLocal.action.description"), AllIcons.Debugger.AttachToProcess);
   }
 
   @Override
@@ -149,13 +147,13 @@ public class AttachToLocalProcessAction extends AnAction {
     }
 
     ArrayList<XLocalAttachGroup> sortedGroups = new ArrayList<>(groupWithItems.keySet());
-    Collections.sort(sortedGroups, (a, b) -> a.getOrder() - b.getOrder());
+    sortedGroups.sort(Comparator.comparingInt(XLocalAttachGroup::getOrder));
 
     List<AttachItem> currentItems = new ArrayList<>();
     for (final XLocalAttachGroup eachGroup : sortedGroups) {
       List<Pair<ProcessInfo, ArrayList<XLocalAttachDebugger>>> sortedItems
           = new ArrayList<>(groupWithItems.get(eachGroup));
-      Collections.sort(sortedItems, (a, b) -> eachGroup.compare(project, a.first, b.first, dataHolder));
+      sortedItems.sort((a, b) -> eachGroup.compare(project, a.first, b.first, dataHolder));
 
       boolean first = true;
       for (Pair<ProcessInfo, ArrayList<XLocalAttachDebugger>> eachItem : sortedItems) {
@@ -397,8 +395,7 @@ public class AttachToLocalProcessAction extends AnAction {
     @Override
     public PopupStep onChosen(AttachItem selectedValue, boolean finalChoice) {
       addToHistory(myProject, selectedValue);
-      selectedValue.startDebugSession(myProject);
-      return FINAL_CHOICE;
+      return doFinalStep(() -> selectedValue.startDebugSession(myProject));
     }
   }
 

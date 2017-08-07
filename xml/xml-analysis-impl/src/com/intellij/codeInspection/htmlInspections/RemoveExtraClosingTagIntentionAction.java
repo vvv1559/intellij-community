@@ -16,14 +16,11 @@
 
 package com.intellij.codeInspection.htmlInspections;
 
-import com.intellij.codeInsight.FileModificationService;
 import com.intellij.codeInsight.daemon.XmlErrorMessages;
 import com.intellij.codeInsight.intention.IntentionAction;
 import com.intellij.codeInspection.LocalQuickFix;
 import com.intellij.codeInspection.ProblemDescriptor;
 import com.intellij.lang.ASTNode;
-import com.intellij.openapi.application.Result;
-import com.intellij.openapi.command.WriteCommandAction;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.project.Project;
@@ -37,6 +34,8 @@ import com.intellij.psi.xml.XmlToken;
 import com.intellij.util.IncorrectOperationException;
 import org.jetbrains.annotations.NotNull;
 
+import java.util.Objects;
+
 /**
  * @author spleaner
  */
@@ -44,12 +43,6 @@ public class RemoveExtraClosingTagIntentionAction implements LocalQuickFix, Inte
   @Override
   @NotNull
   public String getFamilyName() {
-    return XmlErrorMessages.message("remove.extra.closing.tag.quickfix");
-  }
-
-  @Override
-  @NotNull
-  public String getName() {
     return XmlErrorMessages.message("remove.extra.closing.tag.quickfix");
   }
 
@@ -62,19 +55,14 @@ public class RemoveExtraClosingTagIntentionAction implements LocalQuickFix, Inte
 
   @Override
   public boolean isAvailable(@NotNull final Project project, final Editor editor, final PsiFile file) {
-    return true;
+    PsiElement psiElement = file.findElementAt(editor.getCaretModel().getOffset());
+    return psiElement instanceof XmlToken && 
+           (psiElement.getParent() instanceof XmlTag || psiElement.getParent() instanceof PsiErrorElement);
   }
 
   @Override
   public void invoke(@NotNull final Project project, final Editor editor, final PsiFile file) throws IncorrectOperationException {
-    final int offset = editor.getCaretModel().getOffset();
-    final PsiElement psiElement = file.findElementAt(offset);
-    if (psiElement == null || !psiElement.isValid() || !(psiElement instanceof XmlToken)) {
-      return;
-    }
-
-    if (!FileModificationService.getInstance().prepareFileForWrite(file)) return;
-    doFix(psiElement);
+    doFix(Objects.requireNonNull(file.findElementAt(editor.getCaretModel().getOffset())).getParent());
   }
 
   @Override
@@ -82,11 +70,7 @@ public class RemoveExtraClosingTagIntentionAction implements LocalQuickFix, Inte
     return true;
   }
 
-  private static void doFix(@NotNull final PsiElement element) throws IncorrectOperationException {
-    final XmlToken endNameToken = (XmlToken)element;
-    final PsiElement tagElement = endNameToken.getParent();
-    if (!(tagElement instanceof XmlTag) && !(tagElement instanceof PsiErrorElement)) return;
-
+  private static void doFix(@NotNull PsiElement tagElement) throws IncorrectOperationException {
     if (tagElement instanceof PsiErrorElement) {
       tagElement.delete();
     }
@@ -95,7 +79,7 @@ public class RemoveExtraClosingTagIntentionAction implements LocalQuickFix, Inte
       if (astNode != null) {
         final ASTNode endTagStart = XmlChildRole.CLOSING_TAG_START_FINDER.findChild(astNode);
         if (endTagStart != null) {
-          final Document document = PsiDocumentManager.getInstance(element.getProject()).getDocument(tagElement.getContainingFile());
+          final Document document = PsiDocumentManager.getInstance(tagElement.getProject()).getDocument(tagElement.getContainingFile());
           if (document != null) {
             document.deleteString(endTagStart.getStartOffset(), tagElement.getLastChild().getTextRange().getEndOffset());
           }
@@ -107,14 +91,8 @@ public class RemoveExtraClosingTagIntentionAction implements LocalQuickFix, Inte
   @Override
   public void applyFix(@NotNull final Project project, @NotNull final ProblemDescriptor descriptor) {
     final PsiElement element = descriptor.getPsiElement();
-    if (!element.isValid() || !(element instanceof XmlToken)) return;
-    if (!FileModificationService.getInstance().prepareFileForWrite(element.getContainingFile())) return;
+    if (!(element instanceof XmlToken)) return;
 
-    new WriteCommandAction(project) {
-      @Override
-      protected void run(@NotNull final Result result) throws Throwable {
-        doFix(element);
-      }
-    }.execute();
+    doFix(element.getParent());
   }
 }

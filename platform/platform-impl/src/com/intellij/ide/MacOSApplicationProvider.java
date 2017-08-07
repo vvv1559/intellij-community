@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,13 +26,15 @@ import com.intellij.openapi.actionSystem.CommonDataKeys;
 import com.intellij.openapi.actionSystem.ex.ActionManagerEx;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.TransactionGuard;
-import com.intellij.openapi.components.ApplicationComponent;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.keymap.impl.IdeKeyEventDispatcher;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectManager;
 import com.intellij.openapi.util.SystemInfo;
+import com.intellij.openapi.vfs.LocalFileSystem;
+import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.wm.IdeFocusManager;
+import com.intellij.platform.PlatformProjectOpenProcessor;
 import com.intellij.ui.mac.foundation.Foundation;
 import com.intellij.ui.mac.foundation.ID;
 import com.sun.jna.Callback;
@@ -40,7 +42,7 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
-import java.awt.Component;
+import java.awt.*;
 import java.awt.color.ColorSpace;
 import java.awt.color.ICC_ColorSpace;
 import java.awt.color.ICC_Profile;
@@ -54,7 +56,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /**
  * @author max
  */
-public class MacOSApplicationProvider implements ApplicationComponent {
+public class MacOSApplicationProvider {
   private static final Logger LOG = Logger.getInstance(MacOSApplicationProvider.class);
   private static final AtomicBoolean ENABLED = new AtomicBoolean(true);
   private static final Callback IMPL = new Callback() {
@@ -102,18 +104,6 @@ public class MacOSApplicationProvider implements ApplicationComponent {
     }
   }
 
-  @NotNull
-  @Override
-  public String getComponentName() {
-    return "MACOSApplicationProvider";
-  }
-
-  @Override
-  public void initComponent() { }
-
-  @Override
-  public void disposeComponent() { }
-
   @Nullable
   public ColorSpace getGenericRgbColorSpace() {
     return genericRgbColorSpace;
@@ -139,15 +129,22 @@ public class MacOSApplicationProvider implements ApplicationComponent {
           for (File file : list) {
             if (ProjectUtil.openOrImport(file.getAbsolutePath(), project, true) != null) {
               LOG.debug("MacMenu: load project from ", file);
-              IdeaApplication.getInstance().setPerformProjectLoad(false);
+              IdeaApplication.getInstance().disableProjectLoad();
               return;
             }
           }
-          if (project != null) {
-            for (File file : list) {
-              if (file.exists()) {
-                LOG.debug("MacMenu: open file ", file);
-                OpenFileAction.openFile(file.getAbsolutePath(), project);
+          for (File file : list) {
+            if (file.exists()) {
+              LOG.debug("MacMenu: open file ", file);
+              String path = file.getAbsolutePath();
+              if (project != null) {
+                OpenFileAction.openFile(path, project);
+              } else {
+                PlatformProjectOpenProcessor processor = PlatformProjectOpenProcessor.getInstanceIfItExists();
+                if (processor != null) {
+                  VirtualFile virtualFile = LocalFileSystem.getInstance().refreshAndFindFileByPath(path);
+                  if (virtualFile != null && virtualFile.isValid()) processor.doOpenProject(virtualFile, null, false);
+                }
               }
             }
           }
@@ -204,10 +201,7 @@ public class MacOSApplicationProvider implements ApplicationComponent {
       }
       else {
         Component component = IdeFocusManager.getGlobalInstance().getFocusOwner();
-        if (component == null) {
-          LOG.debug("MacMenu: no focused component");
-        }
-        else if (IdeKeyEventDispatcher.isModalContext(component)) {
+        if (component != null && IdeKeyEventDispatcher.isModalContext(component)) {
           LOG.debug("MacMenu: component in modal context");
         }
         else {

@@ -22,14 +22,13 @@ import com.intellij.ide.util.PackageUtil;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.CustomShortcutSet;
-import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.WriteAction;
 import com.intellij.openapi.command.CommandProcessor;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.roots.JavaProjectRootsUtil;
 import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.openapi.ui.Messages;
-import com.intellij.openapi.util.Computable;
 import com.intellij.openapi.util.Pass;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.PsiDirectory;
@@ -39,6 +38,7 @@ import com.intellij.refactoring.MoveDestination;
 import com.intellij.refactoring.PackageWrapper;
 import com.intellij.refactoring.RefactoringBundle;
 import com.intellij.refactoring.move.moveClassesOrPackages.DestinationFolderComboBox;
+import com.intellij.refactoring.move.moveClassesOrPackages.MultipleRootsMoveDestination;
 import com.intellij.refactoring.ui.PackageNameReferenceEditorCombo;
 import com.intellij.refactoring.util.RefactoringMessageUtil;
 import com.intellij.ui.DocumentAdapter;
@@ -114,7 +114,7 @@ public class CreateClassDialog extends DialogWrapper {
     myDestinationCB.setData(myProject, getBaseDir(targetPackageName), new Pass<String>() {
       @Override
       public void pass(String s) {
-        setErrorText(s);
+        setErrorText(s, myDestinationCB);
       }
     }, myPackageComponent.getChildComponent());
   }
@@ -245,14 +245,15 @@ public class CreateClassDialog extends DialogWrapper {
         final PackageWrapper targetPackage = new PackageWrapper(PsiManager.getInstance(myProject), packageName);
         final MoveDestination destination = myDestinationCB.selectDirectory(targetPackage, false);
         if (destination == null) return;
-        myTargetDirectory = ApplicationManager.getApplication().runWriteAction(new Computable<PsiDirectory>() {
-          @Override
-          public PsiDirectory compute() {
-            return destination.getTargetDirectory(getBaseDir(packageName));
+        myTargetDirectory = WriteAction.compute(() -> {
+          PsiDirectory baseDir = getBaseDir(packageName);
+          if (baseDir == null && destination instanceof MultipleRootsMoveDestination) {
+            errorString[0] = "Destination not found for package '" + packageName + "'";
+            return null;
           }
+          return destination.getTargetDirectory(baseDir);
         });
         if (myTargetDirectory == null) {
-          errorString[0] = ""; // message already reported by PackageUtil
           return;
         }
         errorString[0] = RefactoringMessageUtil.checkCanCreateClass(myTargetDirectory, getClassName());

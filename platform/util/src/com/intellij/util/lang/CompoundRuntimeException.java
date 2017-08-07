@@ -38,6 +38,15 @@ public class CompoundRuntimeException extends RuntimeException {
   }
 
   @Override
+  public synchronized Throwable getCause() {
+    return ContainerUtil.getFirstItem(myExceptions);
+  }
+
+  public List<Throwable> getExceptions() {
+    return myExceptions;
+  }
+
+  @Override
   public String getMessage() {
     return processAll(new Function<Throwable, String>() {
       @Override

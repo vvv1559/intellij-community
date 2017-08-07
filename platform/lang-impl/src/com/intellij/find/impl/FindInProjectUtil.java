@@ -23,7 +23,7 @@ import com.intellij.icons.AllIcons;
 import com.intellij.ide.DataManager;
 import com.intellij.navigation.ItemPresentation;
 import com.intellij.openapi.actionSystem.*;
-import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
@@ -43,7 +43,6 @@ import com.intellij.openapi.roots.OrderEntry;
 import com.intellij.openapi.roots.OrderRootType;
 import com.intellij.openapi.roots.ProjectFileIndex;
 import com.intellij.openapi.roots.libraries.Library;
-import com.intellij.openapi.util.Computable;
 import com.intellij.openapi.util.Condition;
 import com.intellij.openapi.util.Conditions;
 import com.intellij.openapi.util.TextRange;
@@ -100,6 +99,11 @@ public class FindInProjectUtil {
       directoryName = directories.length == 1 ? directories[0].getVirtualFile().getPresentableUrl():null;
     }
 
+    if (directoryName == null) {
+      VirtualFile virtualFile = CommonDataKeys.VIRTUAL_FILE.getData(dataContext);
+      if (virtualFile != null && virtualFile.isDirectory()) directoryName = virtualFile.getPresentableUrl();
+    }
+
     Module module = LangDataKeys.MODULE_CONTEXT.getData(dataContext);
     if (module != null) {
       model.setModuleName(module.getName());
@@ -109,6 +113,9 @@ public class FindInProjectUtil {
     // apply explicit settings from context
     if (module != null) {
       model.setModuleName(module.getName());
+      directoryName = null;// Explicit 'module' scope is more specific than 'module directory' scope
+      model.setCustomScope(false);
+      model.setDirectoryName(null);
     }
 
     Editor editor = CommonDataKeys.EDITOR.getData(dataContext);
@@ -120,7 +127,7 @@ public class FindInProjectUtil {
     }
 
     // set project scope if we have no other settings
-    model.setProjectScope(model.getDirectoryName() == null && model.getModuleName() == null && !model.isCustomScope());
+    model.setProjectScope(directoryName == null && module == null && !model.isCustomScope());
   }
 
   /**
@@ -162,7 +169,7 @@ public class FindInProjectUtil {
 
   /* filter can have form "*.js, !*_min.js", latter means except matched by *_min.js */
   @NotNull
-  public static Condition<String> createFileMaskCondition(@Nullable String filter) throws PatternSyntaxException {
+  public static Condition<CharSequence> createFileMaskCondition(@Nullable String filter) throws PatternSyntaxException {
     if (filter == null) {
       return Conditions.alwaysTrue();
     }
@@ -175,7 +182,8 @@ public class FindInProjectUtil {
       mask = mask.trim();
       if (StringUtil.startsWith(mask, "!")) {
         negativePattern += (negativePattern.isEmpty() ? "" : "|") + "(" + PatternUtil.convertToRegex(mask.substring(1)) + ")";
-      } else {
+      }
+      else {
         pattern += (pattern.isEmpty() ? "" : "|") + "(" + PatternUtil.convertToRegex(mask) + ")";
       }
     }
@@ -184,11 +192,11 @@ public class FindInProjectUtil {
     final String finalPattern = pattern;
     final String finalNegativePattern = negativePattern;
 
-    return new Condition<String>() {
+    return new Condition<CharSequence>() {
       final Pattern regExp = Pattern.compile(finalPattern, Pattern.CASE_INSENSITIVE);
       final Pattern negativeRegExp = StringUtil.isEmpty(finalNegativePattern) ? null : Pattern.compile(finalNegativePattern, Pattern.CASE_INSENSITIVE);
       @Override
-      public boolean value(String input) {
+      public boolean value(CharSequence input) {
         return regExp.matcher(input).matches() && (negativeRegExp == null || !negativeRegExp.matcher(input).matches());
       }
     };
@@ -241,19 +249,17 @@ public class FindInProjectUtil {
 
   // returns number of hits
   static int processUsagesInFile(@NotNull final PsiFile psiFile,
+                                 @NotNull final VirtualFile virtualFile,
                                  @NotNull final FindModel findModel,
                                  @NotNull final Processor<UsageInfo> consumer) {
     if (findModel.getStringToFind().isEmpty()) {
-      if (!ApplicationManager.getApplication().runReadAction((Computable<Boolean>)() -> consumer.process(new UsageInfo(psiFile)))) {
+      if (!ReadAction.compute(() -> consumer.process(new UsageInfo(psiFile)))) {
         throw new ProcessCanceledException();
       }
       return 1;
     }
-    final VirtualFile virtualFile = psiFile.getVirtualFile();
-    if (virtualFile == null) return 0;
     if (virtualFile.getFileType().isBinary()) return 0; // do not decompile .class files
-    final Document document = ApplicationManager.getApplication().runReadAction(
-      (Computable<Document>)() -> virtualFile.isValid() ? FileDocumentManager.getInstance().getDocument(virtualFile) : null);
+    final Document document = ReadAction.compute(() -> virtualFile.isValid() ? FileDocumentManager.getInstance().getDocument(virtualFile) : null);
     if (document == null) return 0;
     final int[] offset = {0};
     int count = 0;
@@ -262,7 +268,7 @@ public class FindInProjectUtil {
     TooManyUsagesStatus tooManyUsagesStatus = TooManyUsagesStatus.getFrom(indicator);
     do {
       tooManyUsagesStatus.pauseProcessingIfTooManyUsages(); // wait for user out of read action
-      found = ApplicationManager.getApplication().runReadAction((Computable<Integer>)() -> {
+      found = ReadAction.compute(() -> {
         if (!psiFile.isValid()) return 0;
         return addToUsages(document, consumer, findModel, psiFile, offset, USAGES_PER_READ_ACTION);
       });
@@ -395,34 +401,39 @@ public class FindInProjectUtil {
         result.add(grandGrandChild);
       }
     }
-    return result != null ? result : Collections.<PsiElement>emptyList();
+    return result != null ? result : Collections.emptyList();
   }
 
   @NotNull
   public static String buildStringToFindForIndicesFromRegExp(@NotNull String stringToFind, @NotNull Project project) {
     if (!Registry.is("idea.regexp.search.uses.indices")) return "";
 
-    return ApplicationManager.getApplication().runReadAction(new Computable<String>() {
-      @Override
-      public String compute() {
-        final List<PsiElement> topLevelRegExpChars = getTopLevelRegExpChars("a", project);
-        if (topLevelRegExpChars.size() != 1) return "";
+    return ReadAction.compute(() -> {
+      final List<PsiElement> topLevelRegExpChars = getTopLevelRegExpChars("a", project);
+      if (topLevelRegExpChars.size() != 1) return "";
 
-        // leave only top level regExpChars
-        return StringUtil.join(getTopLevelRegExpChars(stringToFind, project), new Function<PsiElement, String>() {
-          final Class regExpCharPsiClass = topLevelRegExpChars.get(0).getClass();
+      // leave only top level regExpChars
+      return StringUtil.join(getTopLevelRegExpChars(stringToFind, project), new Function<PsiElement, String>() {
+        final Class regExpCharPsiClass = topLevelRegExpChars.get(0).getClass();
 
-          @Override
-          public String fun(PsiElement element) {
-            if (regExpCharPsiClass.isInstance(element)) {
-              String text = element.getText();
-              if (!text.startsWith("\\")) return text;
-            }
-            return " ";
+        @Override
+        public String fun(PsiElement element) {
+          if (regExpCharPsiClass.isInstance(element)) {
+            String text = element.getText();
+            if (!text.startsWith("\\")) return text;
           }
-        }, "");
-      }
+          return " ";
+        }
+      }, "");
     });
+  }
+
+  public static void initStringToFindFromDataContext(FindModel findModel, @NotNull DataContext dataContext) {
+    Editor editor = CommonDataKeys.EDITOR.getData(dataContext);
+    FindUtil.initStringToFindWithSelection(findModel, editor);
+    if (editor == null || !editor.getSelectionModel().hasSelection()) {
+      FindUtil.useFindStringFromFindInFileModel(findModel, CommonDataKeys.EDITOR_EVEN_IF_INACTIVE.getData(dataContext));
+    }
   }
 
   public static class StringUsageTarget implements ConfigurableUsageTarget, ItemPresentation, TypeSafeDataProvider {

@@ -15,7 +15,6 @@
  */
 package org.jetbrains.plugins.groovy.config;
 
-import com.intellij.openapi.application.AccessToken;
 import com.intellij.openapi.application.PathManager;
 import com.intellij.openapi.application.PluginPathManager;
 import com.intellij.openapi.application.WriteAction;
@@ -35,6 +34,7 @@ import org.jetbrains.plugins.groovy.GroovyBundle;
 import org.jetbrains.plugins.groovy.util.LibrariesUtil;
 
 import java.io.File;
+import java.util.Arrays;
 
 public class GroovyFacetUtil {
   public static final String PLUGIN_MODULE_ID = "PLUGIN_MODULE";
@@ -50,18 +50,13 @@ public class GroovyFacetUtil {
           GroovyBundle.message("groovy.like.library.found.text", module.getName(), library.getName(), utils.getSDKLibVersion(library)),
           GroovyBundle.message("groovy.like.library.found"), JetgroovyIcons.Groovy.Groovy_32x32);
       if (result == Messages.OK) {
-        AccessToken accessToken = WriteAction.start();
-
-        try {
+        WriteAction.run(() -> {
           ModifiableRootModel model = ModuleRootManager.getInstance(module).getModifiableModel();
           LibraryOrderEntry entry = model.addLibraryEntry(libraries[0]);
           LibrariesUtil.placeEntryToCorrectPlace(model, entry);
           model.commit();
-          return true;
-        }
-        finally {
-          accessToken.finish();
-        }
+        });
+        return true;
       }
     }
     return false;
@@ -78,7 +73,7 @@ public class GroovyFacetUtil {
 
   public static File getBundledGroovyJar() {
     final File[] groovyJars = LibrariesUtil.getFilesInDirectoryByPattern(getLibDirectory(), GroovyConfigUtils.GROOVY_ALL_JAR_PATTERN);
-    assert groovyJars.length == 1;
+    assert groovyJars.length == 1 : Arrays.asList(groovyJars);
     return groovyJars[0];
   }
 

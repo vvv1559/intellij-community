@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,7 +27,7 @@ import com.intellij.psi.*;
 import com.intellij.psi.impl.file.impl.JavaFileManager;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.psi.stubs.StubTreeLoader;
-import com.intellij.psi.util.PsiUtilCore;
+import com.intellij.psi.util.PsiClassUtil;
 import com.intellij.util.Processor;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.HashMap;
@@ -68,7 +68,7 @@ public class PsiElementFinderImpl extends PsiElementFinder implements DumbAware 
   @Override
   @NotNull
   public PsiPackage[] getSubPackages(@NotNull PsiPackage psiPackage, @NotNull GlobalSearchScope scope) {
-    final Map<String, PsiPackage> packagesMap = new HashMap<String, PsiPackage>();
+    final Map<String, PsiPackage> packagesMap = new HashMap<>();
     final String qualifiedName = psiPackage.getQualifiedName();
     for (PsiDirectory dir : psiPackage.getDirectories(scope)) {
       PsiDirectory[] subDirs = dir.getSubdirectories();
@@ -101,7 +101,7 @@ public class PsiElementFinderImpl extends PsiElementFinder implements DumbAware 
     for (PsiDirectory dir : psiPackage.getDirectories(scope)) {
       PsiClass[] classes = JavaDirectoryService.getInstance().getClasses(dir);
       if (classes.length == 0) continue;
-      if (list == null) list = new ArrayList<PsiClass>();
+      if (list == null) list = new ArrayList<>();
       for (PsiClass aClass : classes) {
         // class file can be located in wrong place inside file system
         String qualifiedName = aClass.getQualifiedName();
@@ -116,14 +116,7 @@ public class PsiElementFinderImpl extends PsiElementFinder implements DumbAware 
     }
 
     if (list.size() > 1) {
-      ContainerUtil.quickSort(list, new Comparator<PsiClass>() {
-        @Override
-        public int compare(PsiClass o1, PsiClass o2) {
-          VirtualFile file1 = PsiUtilCore.getVirtualFile(o1);
-          VirtualFile file2 = PsiUtilCore.getVirtualFile(o2);
-          return file1 == null ? file2 == null ? 0 : -1 : file2 == null ? 1 : scope.compare(file2, file1);
-        }
-      });
+      ContainerUtil.quickSort(list, PsiClassUtil.createScopeComparator(scope));
     }
 
     return list.toArray(new PsiClass[list.size()]);
@@ -149,13 +142,13 @@ public class PsiElementFinderImpl extends PsiElementFinder implements DumbAware 
             file instanceof PsiClassOwnerEx ? ((PsiClassOwnerEx)file).getClassNames() : getClassNames(((PsiClassOwner)file).getClasses());
 
           if (inFile.isEmpty()) continue;
-          if (names == null) names = new HashSet<String>();
+          if (names == null) names = new HashSet<>();
           names.addAll(inFile);
         }
       }
 
     }
-    return names == null ? Collections.<String>emptySet() : names;
+    return names == null ? Collections.emptySet() : names;
   }
 
   @Override

@@ -15,23 +15,29 @@
  */
 package com.intellij.vcsUtil;
 
+import com.google.common.collect.ArrayListMultimap;
+import com.google.common.collect.Multimap;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.Ref;
 import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.util.ThrowableNotNullFunction;
 import com.intellij.openapi.util.io.FileUtil;
-import com.intellij.openapi.vcs.FilePath;
-import com.intellij.openapi.vcs.VcsException;
+import com.intellij.openapi.vcs.*;
 import com.intellij.openapi.vcs.changes.VcsDirtyScopeManager;
+import com.intellij.openapi.vcs.checkin.CheckinEnvironment;
 import com.intellij.openapi.vfs.VfsUtil;
 import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.util.ThrowableConsumer;
 import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
 
@@ -58,17 +64,53 @@ public class VcsFileUtil {
   public static <T> List<T> foreachChunk(@NotNull List<String> arguments,
                                          @NotNull ThrowableNotNullFunction<List<String>, List<? extends T>, VcsException> processor)
     throws VcsException {
+    return foreachChunk(arguments, 1, processor);
+  }
+
+  /**
+   * Execute function for each chunk of arguments and collect the result. Check for being cancelled in process.
+   *
+   * @param arguments the arguments to chunk
+   * @param groupSize size of argument groups that should be put in the same chunk (like a name and a value)
+   * @param processor function to execute on each chunk
+   * @param <T>       type of result value
+   * @return list of result values
+   * @throws VcsException
+   */
+  @NotNull
+  public static <T> List<T> foreachChunk(@NotNull List<String> arguments,
+                                         int groupSize,
+                                         @NotNull ThrowableNotNullFunction<List<String>, List<? extends T>, VcsException> processor)
+    throws VcsException {
     List<T> result = ContainerUtil.newArrayList();
-    List<List<String>> chunks = chunkArguments(arguments);
+
+    foreachChunk(arguments, groupSize, chunk -> {
+      result.addAll(processor.fun(chunk));
+    });
+
+    return result;
+  }
+
+  /**
+   * Execute function for each chunk of arguments. Check for being cancelled in process.
+   *
+   * @param arguments the arguments to chunk
+   * @param groupSize size of argument groups that should be put in the same chunk (like a name and a value)
+   * @param consumer  consumer to feed each chunk
+   * @throws VcsException
+   */
+  public static void foreachChunk(@NotNull List<String> arguments,
+                                  int groupSize,
+                                  @NotNull ThrowableConsumer<List<String>, VcsException> consumer)
+    throws VcsException {
+    List<List<String>> chunks = chunkArguments(arguments, groupSize);
 
     for (List<String> chunk : chunks) {
       ProgressIndicator indicator = ProgressManager.getInstance().getProgressIndicator();
       if (indicator != null) indicator.checkCanceled();
 
-      result.addAll(processor.fun(chunk));
+      consumer.consume(chunk);
     }
-
-    return result;
   }
 
   /**
@@ -79,16 +121,34 @@ public class VcsFileUtil {
    */
   @NotNull
   public static List<List<String>> chunkArguments(@NotNull List<String> arguments) {
+    return chunkArguments(arguments, 1);
+  }
+
+  /**
+   * Chunk arguments on the command line
+   *
+   * @param arguments the arguments to chunk, number of arguments should be divisible by groupSize
+   * @param groupSize size of argument groups that should be put in the same chunk
+   * @return a list of lists of arguments
+   */
+  @NotNull
+  public static List<List<String>> chunkArguments(@NotNull List<String> arguments, int groupSize) {
+    assert arguments.size() % groupSize == 0 : "Arguments size should be divisible by group size";
+
     ArrayList<List<String>> rc = new ArrayList<>();
     int start = 0;
     int size = 0;
     int i = 0;
-    for (; i < arguments.size(); i++) {
-      String p = arguments.get(i);
-      if (size + p.length() > FILE_PATH_LIMIT) {
+    for (; i < arguments.size(); i += groupSize) {
+      int length = 0;
+      for (int j = 0; j < groupSize; j++) {
+        length += arguments.get(i + j).length();
+      }
+      if (size + length > FILE_PATH_LIMIT) {
         if (start == i) {
-          rc.add(arguments.subList(i, i + 1));
-          start = i + 1;
+          // to avoid empty chunks
+          rc.add(arguments.subList(i, i + groupSize));
+          start = i + groupSize;
         }
         else {
           rc.add(arguments.subList(start, i));
@@ -97,7 +157,7 @@ public class VcsFileUtil {
         size = 0;
       }
       else {
-        size += p.length();
+        size += length;
       }
     }
     if (start != arguments.size()) {
@@ -308,8 +368,9 @@ public class VcsFileUtil {
         if (idx == 0) {
           return current;
         }
-        -- idx;
-      } else if (idx != path.length - 1) {
+        --idx;
+      }
+      else if (idx != path.length - 1) {
         int diff = path.length - 1 - idx - 1;
         for (int i = 0; i < diff; i++) {
           current = backTrace.remove(backTrace.size() - 1);
@@ -322,5 +383,71 @@ public class VcsFileUtil {
     }
 
     return null;
+  }
+
+  public static void addFilesToVcsWithConfirmation(@NotNull Project project, VirtualFile... virtualFiles) {
+    addFilesToVcsWithConfirmation(project, Arrays.asList(virtualFiles));
+  }
+
+  /**
+   * Finds all VCSs related to the passed files, suggests user to add files to the respected VCSs honoring addition and silence settings
+   * and adds them if user or settings confirmed addition. Because of potentially long operation of collecting files it's highly recommended
+   * to invoke it on the pooled thread. Method works synchronously.
+   *
+   * @param project      project we work in
+   * @param virtualFiles collection of virtual files to add; directories being added recursively
+   */
+  public static void addFilesToVcsWithConfirmation(@NotNull Project project,
+                                                   @NotNull Collection<VirtualFile> virtualFiles) {
+    if (virtualFiles.isEmpty()) {
+      return;
+    }
+    ProjectLevelVcsManager vcsManager = ProjectLevelVcsManager.getInstance(project);
+    Multimap<AbstractVcs, VirtualFile> vcsMap = ArrayListMultimap.create();
+    for (VirtualFile createdFile : virtualFiles) {
+      AbstractVcs vcs = vcsManager.getVcsFor(createdFile);
+      if (vcs == null) {
+        continue;
+      }
+      VfsUtil.processFileRecursivelyWithoutIgnored(createdFile, (virtualFile) -> vcsMap.put(vcs, virtualFile));
+    }
+
+    for (AbstractVcs vcs : vcsMap.keySet()) {
+      VcsShowConfirmationOption addOption =
+        vcsManager.getStandardConfirmation(VcsConfiguration.StandardConfirmation.ADD, vcs);
+      if (addOption.getValue() == VcsShowConfirmationOption.Value.DO_NOTHING_SILENTLY) return;
+      List<VirtualFile> filesList = new ArrayList<>(vcsMap.get(vcs));
+      if (addOption.getValue() == VcsShowConfirmationOption.Value.DO_ACTION_SILENTLY) {
+        performAdditions(vcs, filesList);
+      }
+      else {
+        AbstractVcsHelper helper = AbstractVcsHelper.getInstance(project);
+
+        Ref<Collection<VirtualFile>> filesToAdd = Ref.create();
+
+        ApplicationManager.getApplication().invokeAndWait(() -> filesToAdd.set(
+          helper
+            .selectFilesToProcess(
+              new ArrayList<>(filesList),
+              VcsBundle.message("confirmation.title.add.files.to", vcs.getDisplayName()),
+              null,
+              VcsBundle.message("confirmation.title.add.file.to", vcs.getDisplayName()),
+              null,
+              addOption))
+        );
+
+        if (!filesToAdd.isNull()) {
+          performAdditions(vcs, new ArrayList<>(filesToAdd.get()));
+        }
+      }
+    }
+  }
+
+  private static void performAdditions(@NotNull AbstractVcs vcs,
+                                       @NotNull List<VirtualFile> value) {
+    CheckinEnvironment checkinEnvironment = vcs.getCheckinEnvironment();
+    if (checkinEnvironment != null) {
+      checkinEnvironment.scheduleUnversionedFilesForAddition(value);
+    }
   }
 }

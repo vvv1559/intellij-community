@@ -17,8 +17,10 @@ package com.intellij.psi.impl.source.codeStyle;
 
 import com.intellij.application.options.ImportSchemeChooserDialog;
 import com.intellij.openapi.application.ApplicationBundle;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.options.SchemeFactory;
 import com.intellij.openapi.options.SchemeImportException;
+import com.intellij.openapi.options.SchemeImportUtil;
 import com.intellij.openapi.options.SchemeImporter;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Pair;
@@ -48,11 +50,14 @@ public class CodeStyleSchemeXmlImporter extends CodeStyleSettingsLoader implemen
                                       @NotNull VirtualFile selectedFile,
                                       @NotNull CodeStyleScheme currentScheme,
                                       @NotNull SchemeFactory<CodeStyleScheme> schemeFactory) throws SchemeImportException {
-    Element rootElement = loadSchemeDom(selectedFile);
+    Element rootElement = SchemeImportUtil.loadSchemeDom(selectedFile);
+    Element schemeRoot = getSchemeRoot(rootElement);
     final Pair<String, CodeStyleScheme> importPair =
-      ImportSchemeChooserDialog.selectOrCreateTargetScheme(project, currentScheme, schemeFactory, getSchemeName(rootElement));
+      !ApplicationManager.getApplication().isUnitTestMode() ?
+      ImportSchemeChooserDialog.selectOrCreateTargetScheme(project, currentScheme, schemeFactory, getSchemeName(schemeRoot)) :
+      Pair.create(currentScheme.getName(), currentScheme);
     if (importPair != null) {
-      return readSchemeFromDom(rootElement, importPair.second);
+      return readSchemeFromDom(schemeRoot, importPair.second);
     }
     return null;
   }
@@ -60,6 +65,7 @@ public class CodeStyleSchemeXmlImporter extends CodeStyleSettingsLoader implemen
   @NotNull
   private static String getSchemeName(@NotNull Element rootElement) throws SchemeImportException {
     String rootName = rootElement.getName();
+    if ("value".equals(rootElement.getName())) return "Project";
     if (!"code_scheme".equals(rootName)) {
       throw new SchemeImportException(ApplicationBundle.message("settings.code.style.import.xml.error.invalid.file", rootName));
     }
@@ -69,18 +75,27 @@ public class CodeStyleSchemeXmlImporter extends CodeStyleSettingsLoader implemen
     }
     return schemeNameAttr.getValue();
   }
+  
+  private static Element getSchemeRoot(@NotNull Element rootElement) throws SchemeImportException {
+    if ("project".equals(rootElement.getName())) {
+      Element child = rootElement.getChild("component");
+      if (child != null && "ProjectCodeStyleSettingsManager".equals(child.getAttributeValue("name"))) {
+        child = child.getChild("option");
+        if (child != null && "PER_PROJECT_SETTINGS".equals(child.getAttributeValue("name"))) {
+          child = child.getChild("value");
+          if (child != null) return child;
+        }
+      }
+      throw new SchemeImportException("Invalid scheme root: " + rootElement.getName());
+    }
+    return rootElement;
+  }
 
   private CodeStyleScheme readSchemeFromDom(@NotNull Element rootElement, @NotNull CodeStyleScheme scheme)
     throws SchemeImportException {
-    CodeStyleSettings defaultSettings = new CodeStyleSettings();
-    scheme.getCodeStyleSettings().setParentSettings(defaultSettings);
-    loadSettings(rootElement, scheme.getCodeStyleSettings());
+    CodeStyleSettings newSettings = new CodeStyleSettings();
+    loadSettings(rootElement, newSettings);
+    ((CodeStyleSchemeImpl)scheme).setCodeStyleSettings(newSettings);
     return scheme;
-  }
-
-  @Nullable
-  @Override
-  public String getAdditionalImportInfo(@NotNull CodeStyleScheme scheme) {
-    return null;
   }
 }

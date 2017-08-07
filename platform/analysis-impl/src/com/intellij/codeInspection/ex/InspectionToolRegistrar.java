@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,7 +19,7 @@ package com.intellij.codeInspection.ex;
 import com.intellij.codeInspection.*;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.components.ServiceManager;
-import com.intellij.openapi.components.ex.ComponentManagerEx;
+import com.intellij.openapi.components.impl.ComponentManagerImpl;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.util.containers.ContainerUtil;
@@ -35,7 +35,7 @@ import java.util.function.Supplier;
 /**
  * @author max
  */
-public class InspectionToolRegistrar {
+public class InspectionToolRegistrar implements Supplier<List<InspectionToolWrapper>> {
   private static final Logger LOG = Logger.getInstance("#com.intellij.codeInspection.ex.InspectionToolRegistrar");
 
   private final List<Supplier<InspectionToolWrapper>> myInspectionToolFactories = ContainerUtil.createLockFreeCopyOnWriteList();
@@ -50,7 +50,7 @@ public class InspectionToolRegistrar {
     myInspectionComponentsLoaded = true;
     Set<InspectionToolProvider> providers = new THashSet<>();
     //noinspection deprecation
-    providers.addAll((((ComponentManagerEx)ApplicationManager.getApplication()).getComponentInstancesOfType(InspectionToolProvider.class)));
+    providers.addAll((((ComponentManagerImpl)ApplicationManager.getApplication()).getComponentInstancesOfType(InspectionToolProvider.class)));
     ContainerUtil.addAll(providers, InspectionToolProvider.EXTENSION_POINT_NAME.getExtensions());
     List<Supplier<InspectionToolWrapper>> factories = new ArrayList<>();
     registerTools(providers, factories);
@@ -99,6 +99,12 @@ public class InspectionToolRegistrar {
 
   public static InspectionToolRegistrar getInstance() {
     return ServiceManager.getService(InspectionToolRegistrar.class);
+  }
+
+  @Override
+  @NotNull
+  public List<InspectionToolWrapper> get() {
+    return createTools();
   }
 
   @NotNull

@@ -38,8 +38,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class LogStatementGuardedByLogConditionInspectionBase extends BaseInspection {
-  final List<String> logMethodNameList = new ArrayList();
-  final List<String> logConditionMethodNameList = new ArrayList();
+  final List<String> logMethodNameList = new ArrayList<>();
+  final List<String> logConditionMethodNameList = new ArrayList<>();
   @SuppressWarnings({"PublicField"})
   public String loggerClassName = "java.util.logging.Logger";
   @NonNls
@@ -92,15 +92,9 @@ public class LogStatementGuardedByLogConditionInspectionBase extends BaseInspect
 
   private class LogStatementGuardedByLogConditionFix extends InspectionGadgetsFix {
 
-    @NotNull
     @Override
+    @NotNull
     public String getFamilyName() {
-      return getName();
-    }
-
-    @Override
-    @NotNull
-    public String getName() {
       return InspectionGadgetsBundle.message("log.statement.guarded.by.log.condition.quickfix");
     }
 
@@ -112,7 +106,7 @@ public class LogStatementGuardedByLogConditionInspectionBase extends BaseInspect
       if (statement == null) {
         return;
       }
-      final List<PsiStatement> logStatements = new ArrayList();
+      final List<PsiStatement> logStatements = new ArrayList<>();
       logStatements.add(statement);
       final PsiReferenceExpression methodExpression = methodCallExpression.getMethodExpression();
       final String referenceName = methodExpression.getReferenceName();

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -41,7 +41,7 @@ import java.util.List;
  */
 public class GrCreateMissingSwitchBranchesIntention extends Intention {
   @Override
-  protected void processIntention(@NotNull PsiElement element, Project project, Editor editor) throws IncorrectOperationException {
+  protected void processIntention(@NotNull PsiElement element, @NotNull Project project, Editor editor) throws IncorrectOperationException {
     if (!(element instanceof GrSwitchStatement)) return;
 
     final List<PsiEnumConstant> constants = findUnusedConstants((GrSwitchStatement)element);
@@ -76,7 +76,7 @@ public class GrCreateMissingSwitchBranchesIntention extends Intention {
   protected PsiElementPredicate getElementPredicate() {
     return new PsiElementPredicate() {
       @Override
-      public boolean satisfiedBy(PsiElement element) {
+      public boolean satisfiedBy(@NotNull PsiElement element) {
         if (!(element instanceof GrSwitchStatement)) return false;
 
 

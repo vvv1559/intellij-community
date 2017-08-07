@@ -14,20 +14,19 @@
  * limitations under the License.
  */
 
-/*
- * User: anna
- * Date: 20-Dec-2007
- */
 package com.intellij.codeInspection.reference;
 
 import com.intellij.openapi.application.ApplicationManager;
-import com.intellij.openapi.module.Module;
+import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.module.ModuleUtilCore;
+import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiDirectory;
 import com.intellij.psi.PsiElement;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 public class RefDirectoryImpl extends RefElementImpl implements RefDirectory{
+  private RefModule myRefModule;
   protected RefDirectoryImpl(PsiDirectory psiElement, RefManager refManager) {
     super(psiElement.getName(), psiElement, refManager);
     final PsiDirectory parentDirectory = psiElement.getParentDirectory();
@@ -38,13 +37,10 @@ public class RefDirectoryImpl extends RefElementImpl implements RefDirectory{
         return;
       }
     }
-    final Module module = ModuleUtilCore.findModuleForPsiElement(psiElement);
-    if (module != null) {
-      final RefModuleImpl refModule = (RefModuleImpl)refManager.getRefModule(module);
-      if (refModule != null) {
-        refModule.add(this);
-        return;
-      }
+    myRefModule = refManager.getRefModule(ModuleUtilCore.findModuleForPsiElement(psiElement));
+    if (myRefModule != null) {
+      ((RefModuleImpl)myRefModule).add(this);
+      return;
     }
     ((RefProjectImpl)refManager.getRefProject()).add(this);
   }
@@ -52,6 +48,23 @@ public class RefDirectoryImpl extends RefElementImpl implements RefDirectory{
   @Override
   public void accept(@NotNull final RefVisitor visitor) {
     ApplicationManager.getApplication().runReadAction(() -> visitor.visitDirectory(this));
+  }
+
+  @Override
+  public boolean isValid() {
+    if (isDeleted()) return false;
+    return ReadAction.compute(() -> {
+      if (getRefManager().getProject().isDisposed()) return false;
+
+      VirtualFile directory = getVirtualFile();
+      return directory != null && directory.isValid();
+    });
+  }
+
+  @Nullable
+  @Override
+  public RefModule getModule() {
+    return myRefModule;
   }
 
   @Override

@@ -69,7 +69,6 @@ public abstract class CoverageDataManager implements ProjectComponent, JDOMExter
   /**
    * TeamCity 3.1.1 compatibility
    */
-  @SuppressWarnings({"UnusedDeclaration"})
   @Deprecated
   public CoverageSuite addCoverageSuite(String name,
                                         CoverageFileProvider fileProvider,
@@ -83,6 +82,7 @@ public abstract class CoverageDataManager implements ProjectComponent, JDOMExter
   /**
    * @return registered suites
    */
+  @NotNull
   public abstract CoverageSuite[] getSuites();
 
   /**

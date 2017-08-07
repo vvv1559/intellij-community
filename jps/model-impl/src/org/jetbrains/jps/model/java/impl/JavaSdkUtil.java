@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,6 +19,8 @@ import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.util.io.FileFilters;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.io.FileUtilRt;
+import com.intellij.openapi.util.registry.Registry;
+import com.intellij.util.ArrayUtil;
 import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -29,6 +31,8 @@ import java.io.IOException;
 import java.util.List;
 import java.util.Set;
 
+import static com.intellij.util.ObjectUtils.notNull;
+
 /**
  * @author nik
  */
@@ -38,7 +42,7 @@ public class JavaSdkUtil {
     File[] jarDirs;
     if (SystemInfo.isMac && !home.getName().startsWith("mockJDK")) {
       File openJdkRtJar = new File(home, "jre/lib/rt.jar");
-      if (openJdkRtJar.exists() && !openJdkRtJar.isDirectory()) {
+      if (openJdkRtJar.isFile()) {
         File libDir = new File(home, "lib");
         File classesDir = openJdkRtJar.getParentFile();
         File libExtDir = new File(openJdkRtJar.getParentFile(), "ext");
@@ -53,9 +57,8 @@ public class JavaSdkUtil {
         jarDirs = new File[]{libEndorsedDir, libDir, classesDir, libExtDir};
       }
     }
-    else if (new File(home, "lib/modules").exists()) {
-      File libDir = new File(home, "lib");
-      jarDirs = new File[]{libDir};
+    else if (new File(home, "lib/jrt-fs.jar").exists()) {
+      jarDirs = ArrayUtil.EMPTY_FILE_ARRAY;
     }
     else {
       File libDir = new File(home, isJre ? "lib" : "jre/lib");
@@ -67,9 +70,15 @@ public class JavaSdkUtil {
     FileFilter jarFileFilter = FileFilters.filesWithExtension("jar");
     Set<String> pathFilter = ContainerUtil.newTroveSet(FileUtil.PATH_HASHING_STRATEGY);
     List<File> rootFiles = ContainerUtil.newArrayList();
+    if (Registry.is("project.structure.add.tools.jar.to.new.jdk")) {
+      File toolsJar = new File(home, "lib/tools.jar");
+      if (toolsJar.isFile()) {
+        rootFiles.add(toolsJar);
+      }
+    }
     for (File jarDir : jarDirs) {
       if (jarDir != null && jarDir.isDirectory()) {
-        File[] jarFiles = jarDir.listFiles(jarFileFilter);
+        File[] jarFiles = notNull(jarDir.listFiles(jarFileFilter), ArrayUtil.EMPTY_FILE_ARRAY);
         for (File jarFile : jarFiles) {
           String jarFileName = jarFile.getName();
           if (jarFileName.equals("alt-rt.jar") || jarFileName.equals("alt-string.jar")) {
@@ -84,20 +93,15 @@ public class JavaSdkUtil {
       }
     }
 
-    String[] ibmJdkVmJarDirs = {
-      "jre/bin/default",
-      "jre/lib/i386/default",
-      "jre/lib/amd64/default"
-    };
+    String[] ibmJdkVmJarDirs = {"bin/default", "lib/i386/default", "lib/amd64/default"};
     for (String relativePath : ibmJdkVmJarDirs) {
-      File[] vmJarDirs = new File(home, relativePath).listFiles(FileUtilRt.ALL_DIRECTORIES);
-      if (vmJarDirs != null) {
-        for (File dir : vmJarDirs) {
-          if (dir.getName().startsWith("jclSC")) {
-            File vmJar = new File(dir, "vm.jar");
-            if (vmJar.isFile()) {
-              rootFiles.add(vmJar);
-            }
+      File libDir = new File(home, isJre ? relativePath : "jre/" + relativePath);
+      File[] vmJarDirs = notNull(libDir.listFiles(FileUtilRt.ALL_DIRECTORIES), ArrayUtil.EMPTY_FILE_ARRAY);
+      for (File dir : vmJarDirs) {
+        if (dir.getName().startsWith("jclSC")) {
+          File vmJar = new File(dir, "vm.jar");
+          if (vmJar.isFile()) {
+            rootFiles.add(vmJar);
           }
         }
       }
@@ -106,7 +110,6 @@ public class JavaSdkUtil {
     if (classesZip.isFile()) {
       rootFiles.add(classesZip);
     }
-
 
     if (rootFiles.isEmpty()) {
       File classesDir = new File(home, "classes");

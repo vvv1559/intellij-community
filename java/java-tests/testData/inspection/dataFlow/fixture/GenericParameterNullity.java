@@ -8,7 +8,7 @@ class Test {
     String a = notNull(getNullable());
 
     @NotNull
-    String b = notNull(null);
+    String b = <warning descr="The call to 'notNull' always fails, according to its method contracts">notNull</warning>(null);
   }
 
   @Nullable
@@ -17,7 +17,7 @@ class Test {
   }
 
   @NotNull
-  private static <T> T notNull(@Nullable T <warning descr="Method fails when parameter 'value' is 'null'">value</warning>) {
+  private static <T> T notNull(@Nullable T value) {
 
     if (value == null) {
       throw new RuntimeException("null");

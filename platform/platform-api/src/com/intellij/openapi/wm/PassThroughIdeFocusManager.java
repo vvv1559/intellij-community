@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@
 package com.intellij.openapi.wm;
 
 import com.intellij.openapi.actionSystem.DataContext;
+import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.util.ActionCallback;
 import com.intellij.openapi.util.Expirable;
 import com.intellij.openapi.util.ExpirableRunnable;
@@ -53,6 +54,11 @@ public class PassThroughIdeFocusManager extends IdeFocusManager {
   }
 
   @Override
+  public void doWhenFocusSettlesDown(@NotNull Runnable runnable, @NotNull ModalityState modality) {
+    runnable.run();
+  }
+
+  @Override
   public void doWhenFocusSettlesDown(@NotNull ExpirableRunnable runnable) {
     if (!runnable.isExpired()) {
       runnable.run();
@@ -70,10 +76,6 @@ public class PassThroughIdeFocusManager extends IdeFocusManager {
 
   public boolean dispatch(@NotNull KeyEvent e) {
     return false;
-  }
-
-  @Override
-  public void typeAheadUntil(ActionCallback done) {
   }
 
   @NotNull

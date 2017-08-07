@@ -15,15 +15,15 @@
  */
 package com.intellij.openapi.vcs.history;
 
-import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
-import com.intellij.openapi.util.Computable;
 import com.intellij.openapi.vcs.RepositoryLocation;
 import com.intellij.openapi.vcs.VcsBundle;
 import com.intellij.openapi.vcs.VcsException;
 import com.intellij.openapi.vfs.VirtualFile;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
@@ -36,7 +36,7 @@ public class CurrentRevision implements VcsFileRevision {
   public static final String CURRENT = VcsBundle.message("vcs.revision.name.current");
   private final VcsRevisionNumber myRevisionNumber;
 
-  public CurrentRevision(VirtualFile file, VcsRevisionNumber revision) {
+  public CurrentRevision(@NotNull VirtualFile file, @NotNull VcsRevisionNumber revision) {
     myFile = file;
     myRevisionNumber = revision;
   }
@@ -55,11 +55,7 @@ public class CurrentRevision implements VcsFileRevision {
 
   public byte[] getContent() throws IOException, VcsException {
     try {
-      Document document = ApplicationManager.getApplication().runReadAction(new Computable<Document>() {
-        public Document compute() {
-          return FileDocumentManager.getInstance().getDocument(myFile);
-        }
-      });
+      Document document = ReadAction.compute(() -> FileDocumentManager.getInstance().getDocument(myFile));
       if (document != null) {
         return document.getText().getBytes(myFile.getCharset().name());
       }
@@ -77,6 +73,7 @@ public class CurrentRevision implements VcsFileRevision {
     return "";
   }
 
+  @NotNull
   public VcsRevisionNumber getRevisionNumber() {
     return myRevisionNumber;
   }

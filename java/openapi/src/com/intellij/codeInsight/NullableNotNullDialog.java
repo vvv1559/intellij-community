@@ -15,18 +15,23 @@
  */
 package com.intellij.codeInsight;
 
+import com.intellij.codeInspection.InspectionsBundle;
 import com.intellij.icons.AllIcons;
+import com.intellij.ide.DataManager;
 import com.intellij.ide.util.ClassFilter;
 import com.intellij.ide.util.TreeClassChooser;
 import com.intellij.ide.util.TreeClassChooserFactory;
 import com.intellij.openapi.actionSystem.AnActionEvent;
+import com.intellij.openapi.actionSystem.CommonDataKeys;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.project.ProjectManager;
 import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.openapi.ui.Splitter;
 import com.intellij.psi.PsiClass;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.ui.*;
 import com.intellij.ui.components.JBList;
+import com.intellij.util.ArrayUtil;
 import com.intellij.util.ui.EmptyIcon;
 import com.intellij.util.ui.JBUI;
 import org.jetbrains.annotations.NotNull;
@@ -35,15 +40,13 @@ import javax.swing.*;
 import javax.swing.event.ListSelectionEvent;
 import javax.swing.event.ListSelectionListener;
 import java.awt.*;
+import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.Set;
 
-/**
- * User: anna
- * Date: 1/25/11
- */
 public class NullableNotNullDialog extends DialogWrapper {
   private final Project myProject;
   private AnnotationsPanel myNullablePanel;
@@ -56,6 +59,28 @@ public class NullableNotNullDialog extends DialogWrapper {
     setTitle("Nullable/NotNull configuration");
   }
 
+  public static JButton createConfigureAnnotationsButton(Component context) {
+    final JButton button = new JButton(InspectionsBundle.message("configure.annotations.option"));
+    button.addActionListener(createActionListener(context));
+    return button;
+  }
+
+  /**
+   * Creates an action listener showing this dialog.
+   * @param context  component where project context will be retrieved from
+   * @return the action listener
+   */
+  public static ActionListener createActionListener(Component context) {
+    return new ActionListener() {
+      @Override
+      public void actionPerformed(ActionEvent e) {
+        Project project = CommonDataKeys.PROJECT.getData(DataManager.getInstance().getDataContext(context));
+        if (project == null) project = ProjectManager.getInstance().getDefaultProject();
+        new NullableNotNullDialog(project).show();
+      }
+    };
+  }
+
   @Override
   protected JComponent createCenterPanel() {
     final NullableNotNullManager manager = NullableNotNullManager.getInstance(myProject);
@@ -64,7 +89,7 @@ public class NullableNotNullDialog extends DialogWrapper {
       new AnnotationsPanel("Nullable", manager.getDefaultNullable(), manager.getNullables(), NullableNotNullManager.DEFAULT_NULLABLES);
     splitter.setFirstComponent(myNullablePanel.getComponent());
     myNotNullPanel =
-      new AnnotationsPanel("NotNull", manager.getDefaultNotNull(), manager.getNotNulls(), NullableNotNullManager.DEFAULT_NOT_NULLS);
+      new AnnotationsPanel("NotNull", manager.getDefaultNotNull(), manager.getNotNulls(), ArrayUtil.toStringArray(manager.getPredefinedNotNulls()));
     splitter.setSecondComponent(myNotNullPanel.getComponent());
     splitter.setHonorComponentsMinimumSize(true);
     splitter.setPreferredSize(JBUI.size(300, 400));

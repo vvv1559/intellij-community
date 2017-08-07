@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -46,19 +46,14 @@ public abstract class AbstractProjectNode extends ProjectViewNode<Project> {
       final String[] path = ModuleManager.getInstance(getProject()).getModuleGroupPath(module);
       if (path != null) {
         final String topLevelGroupName = path[0];
-        List<Module> moduleList = groups.get(topLevelGroupName);
-        if (moduleList == null) {
-          moduleList = new ArrayList<>();
-          groups.put(topLevelGroupName, moduleList);
-        }
-        moduleList.add(module);
+        groups.computeIfAbsent(topLevelGroupName, k -> new ArrayList<>()).add(module);
         nonGroupedModules.remove(module);
       }
     }
     List<AbstractTreeNode> result = new ArrayList<>();
     try {
       for (String groupPath : groups.keySet()) {
-        result.add(createModuleGroupNode(new ModuleGroup(new String[]{groupPath})));
+        result.add(createModuleGroupNode(new ModuleGroup(Collections.singletonList(groupPath))));
       }
       for (Module module : nonGroupedModules) {
         result.add(createModuleGroup(module));

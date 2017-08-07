@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,8 +17,7 @@ package com.intellij.xdebugger.impl.breakpoints;
 
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.application.ApplicationManager;
-import com.intellij.openapi.application.ReadAction;
-import com.intellij.openapi.application.Result;
+import com.intellij.openapi.application.WriteAction;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.colors.EditorColorsManager;
 import com.intellij.openapi.editor.colors.EditorColorsScheme;
@@ -36,8 +35,10 @@ import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.VirtualFileManager;
 import com.intellij.util.DocumentUtil;
 import com.intellij.xdebugger.XDebugSession;
+import com.intellij.xdebugger.XDebuggerManager;
 import com.intellij.xdebugger.XDebuggerUtil;
 import com.intellij.xdebugger.XSourcePosition;
+import com.intellij.xdebugger.breakpoints.XBreakpointManager;
 import com.intellij.xdebugger.breakpoints.XBreakpointProperties;
 import com.intellij.xdebugger.breakpoints.XLineBreakpoint;
 import com.intellij.xdebugger.breakpoints.XLineBreakpointType;
@@ -47,6 +48,7 @@ import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
 import java.awt.*;
+import java.awt.dnd.DnDConstants;
 import java.awt.dnd.DragSource;
 import java.io.File;
 import java.util.List;
@@ -59,7 +61,6 @@ public class XLineBreakpointImpl<P extends XBreakpointProperties> extends XBreak
   @Nullable private RangeHighlighter myHighlighter;
   private final XLineBreakpointType<P> myType;
   private XSourcePosition mySourcePosition;
-  private boolean myDisposed;
 
   public XLineBreakpointImpl(final XLineBreakpointType<P> type,
                              XBreakpointManagerImpl breakpointManager,
@@ -76,7 +77,7 @@ public class XLineBreakpointImpl<P extends XBreakpointProperties> extends XBreak
   }
 
   public void updateUI() {
-    if (myDisposed || ApplicationManager.getApplication().isUnitTestMode()) {
+    if (isDisposed() || ApplicationManager.getApplication().isUnitTestMode()) {
       return;
     }
 
@@ -147,7 +148,7 @@ public class XLineBreakpointImpl<P extends XBreakpointProperties> extends XBreak
   }
 
   @Nullable
-  private VirtualFile getFile() {
+  public VirtualFile getFile() {
     return VirtualFileManager.getInstance().findFileByUrl(getFileUrl());
   }
 
@@ -190,13 +191,12 @@ public class XLineBreakpointImpl<P extends XBreakpointProperties> extends XBreak
 
   @Override
   public XSourcePosition getSourcePosition() {
+    if (mySourcePosition != null) {
+      return mySourcePosition;
+    }
+    mySourcePosition = super.getSourcePosition();
     if (mySourcePosition == null) {
-      new ReadAction() {
-        @Override
-        protected void run(@NotNull Result result) {
-          mySourcePosition = XDebuggerUtil.getInstance().createPosition(getFile(), getLine());
-        }
-      }.execute();
+      mySourcePosition = XDebuggerUtil.getInstance().createPosition(getFile(), getLine());
     }
     return mySourcePosition;
   }
@@ -207,9 +207,8 @@ public class XLineBreakpointImpl<P extends XBreakpointProperties> extends XBreak
   }
 
   @Override
-  public void dispose() {
+  protected void doDispose() {
     removeHighlighter();
-    myDisposed = true;
   }
 
   private void removeHighlighter() {
@@ -223,18 +222,38 @@ public class XLineBreakpointImpl<P extends XBreakpointProperties> extends XBreak
   protected GutterDraggableObject createBreakpointDraggableObject() {
     return new GutterDraggableObject() {
       @Override
-      public boolean copy(int line, VirtualFile file) {
+      public boolean copy(int line, VirtualFile file, int actionId) {
         if (canMoveTo(line, file)) {
-          setFileUrl(file.getUrl());
-          setLine(line, true);
+          final XBreakpointManager breakpointManager = XDebuggerManager.getInstance(getProject()).getBreakpointManager();
+          if (isCopyAction(actionId)) {
+            WriteAction
+              .run(() -> ((XBreakpointManagerImpl)breakpointManager).copyLineBreakpoint(XLineBreakpointImpl.this, file.getUrl(), line));
+          }
+          else {
+            setFileUrl(file.getUrl());
+            setLine(line, true);
+          }
           return true;
         }
         return false;
       }
 
+      public void remove() {
+        XBreakpointManager breakpointManager = XDebuggerManager.getInstance(getProject()).getBreakpointManager();
+        WriteAction.run(() -> breakpointManager.removeBreakpoint(XLineBreakpointImpl.this));
+      }
+
       @Override
-      public Cursor getCursor(int line) {
-        return canMoveTo(line, getFile()) ? DragSource.DefaultMoveDrop : DragSource.DefaultMoveNoDrop;
+      public Cursor getCursor(int line, int actionId) {
+        if (canMoveTo(line, getFile())) {
+          return isCopyAction(actionId) ? DragSource.DefaultCopyDrop : DragSource.DefaultMoveDrop;
+        }
+
+        return DragSource.DefaultMoveNoDrop;
+      }
+
+      private boolean isCopyAction(int actionId) {
+        return (actionId & DnDConstants.ACTION_COPY) == DnDConstants.ACTION_COPY;
       }
     };
   }
@@ -293,12 +312,11 @@ public class XLineBreakpointImpl<P extends XBreakpointProperties> extends XBreak
 
   @Override
   protected void updateIcon() {
-    final Icon icon = calculateSpecialIcon();
-    if (icon != null) {
-      setIcon(icon);
-      return;
+    Icon icon = calculateSpecialIcon();
+    if (icon == null) {
+      icon = isTemporary() ? myType.getTemporaryIcon() : myType.getEnabledIcon();
     }
-    setIcon(isTemporary() ? myType.getTemporaryIcon() : myType.getEnabledIcon());
+    setIcon(icon);
   }
 
   @Override

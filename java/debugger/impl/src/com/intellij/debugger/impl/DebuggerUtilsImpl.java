@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -33,12 +33,13 @@ import com.intellij.execution.ExecutionException;
 import com.intellij.ide.util.TreeClassChooser;
 import com.intellij.ide.util.TreeClassChooserFactory;
 import com.intellij.openapi.actionSystem.DataContext;
+import com.intellij.openapi.application.ex.ApplicationManagerEx;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.progress.ProcessCanceledException;
+import com.intellij.openapi.progress.util.ProgressIndicatorUtils;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.util.JDOMExternalizerUtil;
-import com.intellij.openapi.util.Key;
-import com.intellij.openapi.util.Pair;
+import com.intellij.openapi.util.*;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.*;
 import com.intellij.psi.impl.PsiJavaParserFacadeImpl;
 import com.intellij.psi.search.GlobalSearchScope;
@@ -54,6 +55,7 @@ import com.sun.jdi.Value;
 import com.sun.jdi.connect.spi.TransportService;
 import org.jdom.Element;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
 
@@ -147,26 +149,28 @@ public class DebuggerUtilsImpl extends DebuggerUtilsEx{
   }
 
   @NotNull
-  public static Pair<PsiClass, PsiType> getPsiClassAndType(String className, Project project) {
-    PsiClass contextClass;
-    PsiType contextType;
-    PsiPrimitiveType primitiveType = PsiJavaParserFacadeImpl.getPrimitiveType(className);
-    if (primitiveType != null) {
-      contextClass = JavaPsiFacade.getInstance(project).findClass(primitiveType.getBoxedTypeName(), GlobalSearchScope.allScope(project));
-      contextType = primitiveType;
-    }
-    else {
-      contextClass = findClass(className, project, GlobalSearchScope.allScope(project));
+  public static Pair<PsiElement, PsiType> getPsiClassAndType(@Nullable String className, Project project) {
+    PsiElement contextClass = null;
+    PsiType contextType = null;
+    if (!StringUtil.isEmpty(className)) {
+      PsiPrimitiveType primitiveType = PsiJavaParserFacadeImpl.getPrimitiveType(className);
+      if (primitiveType != null) {
+        contextClass = JavaPsiFacade.getInstance(project).findClass(primitiveType.getBoxedTypeName(), GlobalSearchScope.allScope(project));
+        contextType = primitiveType;
+      }
+      else {
+        contextClass = findClass(className, project, GlobalSearchScope.allScope(project));
+        if (contextClass != null) {
+          contextClass = contextClass.getNavigationElement();
+        }
+        if (contextClass instanceof PsiCompiledElement) {
+          contextClass = ((PsiCompiledElement)contextClass).getMirror();
+        }
+        contextType = getType(className, project);
+      }
       if (contextClass != null) {
-        contextClass = (PsiClass)contextClass.getNavigationElement();
+        contextClass.putUserData(PSI_TYPE_KEY, contextType);
       }
-      if (contextClass instanceof PsiCompiledElement) {
-        contextClass = (PsiClass)((PsiCompiledElement)contextClass).getMirror();
-      }
-      contextType = getType(className, project);
-    }
-    if (contextClass != null) {
-      contextClass.putUserData(PSI_TYPE_KEY, contextType);
     }
     return Pair.create(contextClass, contextType);
   }
@@ -222,21 +226,22 @@ public class DebuggerUtilsImpl extends DebuggerUtilsEx{
     return Boolean.TRUE.equals(debugProcess.getUserData(BatchEvaluator.REMOTE_SESSION_KEY));
   }
 
-  public interface SupplierThrowing<T, E extends Throwable> {
-    T get() throws E;
+  public static <T, E extends Exception> T suppressExceptions(ThrowableComputable<T, E> supplier, T defaultValue) throws E {
+    return suppressExceptions(supplier, defaultValue, true, null);
   }
 
-  public static <T, E extends Exception> T suppressExceptions(SupplierThrowing<T, E> supplier, T defaultValue) throws E {
-    return suppressExceptions(supplier, defaultValue, null);
-  }
-
-  public static <T, E extends Exception> T suppressExceptions(SupplierThrowing<T, E> supplier,
+  public static <T, E extends Exception> T suppressExceptions(ThrowableComputable<T, E> supplier,
                                                               T defaultValue,
+                                                              boolean ignorePCE,
                                                               Class<E> rethrow) throws E {
     try {
-      return supplier.get();
+      return supplier.compute();
     }
-    catch (ProcessCanceledException ignored) {}
+    catch (ProcessCanceledException e) {
+      if (!ignorePCE) {
+        throw e;
+      }
+    }
     catch (VMDisconnectedException | ObjectCollectedException e) {throw e;}
     catch (InternalException e) {LOG.info(e);}
     catch (Exception | AssertionError e) {
@@ -250,4 +255,16 @@ public class DebuggerUtilsImpl extends DebuggerUtilsEx{
     return defaultValue;
   }
 
+  public static <T> T runInReadActionWithWriteActionPriorityWithRetries(@NotNull Computable<T> action) {
+    if (ApplicationManagerEx.getApplicationEx().holdsReadLock()) {
+      return action.compute();
+    }
+    Ref<T> res = Ref.create();
+    while (true) {
+      if (ProgressIndicatorUtils.runInReadActionWithWriteActionPriority(() -> res.set(action.compute()))) {
+        return res.get();
+      }
+      ProgressIndicatorUtils.yieldToPendingWriteActions();
+    }
+  }
 }

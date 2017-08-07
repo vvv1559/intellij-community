@@ -1,6 +1,7 @@
 package com.jetbrains.python.debugger;
 
 import com.google.common.base.Strings;
+import com.google.common.collect.ImmutableMap;
 import com.intellij.icons.AllIcons;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
@@ -10,6 +11,7 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
+import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -17,6 +19,9 @@ import java.util.regex.Pattern;
 // todo: null modifier for modify modules, class objects etc.
 public class PyDebugValue extends XNamedValue {
   private static final Logger LOG = Logger.getInstance("#com.jetbrains.python.pydev.PyDebugValue");
+  private static final String DATA_FRAME = "DataFrame";
+  private static final String SERIES = "Series";
+  private static final Map<String, String> EVALUATOR_POSTFIXES = ImmutableMap.of("ndarray", "Array", DATA_FRAME, DATA_FRAME, SERIES, SERIES);
   public static final int MAX_VALUE = 256;
 
   public static final String RETURN_VALUES_PREFIX = "__pydevd_ret_val_dict";
@@ -27,6 +32,7 @@ public class PyDebugValue extends XNamedValue {
   private final String myValue;
   private final boolean myContainer;
   private final boolean myIsReturnedVal;
+  private final boolean myIsIPythonHidden;
   private final PyDebugValue myParent;
   private String myId = null;
 
@@ -37,18 +43,20 @@ public class PyDebugValue extends XNamedValue {
   private final boolean myErrorOnEval;
 
   public PyDebugValue(@NotNull final String name, final String type, String typeQualifier, final String value, final boolean container,
-                      boolean isReturnedVal, boolean errorOnEval, final PyFrameAccessor frameAccessor) {
-    this(name, type, typeQualifier, value, container, isReturnedVal, errorOnEval, null, frameAccessor);
+                      boolean isReturnedVal, boolean isIPythonHidden, boolean errorOnEval, final PyFrameAccessor frameAccessor) {
+    this(name, type, typeQualifier, value, container, isReturnedVal, isIPythonHidden, errorOnEval, null, frameAccessor);
   }
 
   public PyDebugValue(@NotNull final String name, final String type, String typeQualifier, final String value, final boolean container,
-                      boolean isReturnedVal, boolean errorOnEval, final PyDebugValue parent, final PyFrameAccessor frameAccessor) {
+                      boolean isReturnedVal, boolean isIPythonHidden, boolean errorOnEval, final PyDebugValue parent,
+                      final PyFrameAccessor frameAccessor) {
     super(name);
     myType = type;
     myTypeQualifier = Strings.isNullOrEmpty(typeQualifier) ? null : typeQualifier;
     myValue = value;
     myContainer = container;
     myIsReturnedVal = isReturnedVal;
+    myIsIPythonHidden = isIPythonHidden;
     myErrorOnEval = errorOnEval;
     myParent = parent;
     myFrameAccessor = frameAccessor;
@@ -78,12 +86,17 @@ public class PyDebugValue extends XNamedValue {
     return myIsReturnedVal;
   }
 
+  public boolean isIPythonHidden() {
+    return myIsIPythonHidden;
+  }
+
   public boolean isErrorOnEval() {
     return myErrorOnEval;
   }
-  
+
   public PyDebugValue setParent(@Nullable PyDebugValue parent) {
-    return new PyDebugValue(myName, myType, myTypeQualifier, myValue, myContainer, myIsReturnedVal, myErrorOnEval, parent, myFrameAccessor);
+    return new PyDebugValue(myName, myType, myTypeQualifier, myValue, myContainer, myIsReturnedVal, myIsIPythonHidden, myErrorOnEval,
+                            parent, myFrameAccessor);
   }
 
   public PyDebugValue getParent() {
@@ -189,13 +202,24 @@ public class PyDebugValue extends XNamedValue {
   @Override
   public void computePresentation(@NotNull XValueNode node, @NotNull XValuePlace place) {
     String value = PyTypeHandler.format(this);
-
+    setFullValueEvaluator(node, value);
     if (value.length() >= MAX_VALUE) {
-      node.setFullValueEvaluator(new PyFullValueEvaluator(myFrameAccessor, getFullTreeName()));
       value = value.substring(0, MAX_VALUE);
     }
-
     node.setPresentation(getValueIcon(), myType, value, myContainer);
+  }
+
+  private void setFullValueEvaluator(XValueNode node, String value) {
+    String treeName = getFullTreeName();
+    String postfix = EVALUATOR_POSTFIXES.get(myType);
+    if (postfix == null) {
+      if (value.length() >= MAX_VALUE) {
+        node.setFullValueEvaluator(new PyFullValueEvaluator(myFrameAccessor, treeName));
+      }
+      return;
+    }
+    String linkText = "...View as " + postfix;
+    node.setFullValueEvaluator(new PyNumericContainerValueEvaluator(linkText, myFrameAccessor, treeName));
   }
 
   @Override
@@ -235,10 +259,10 @@ public class PyDebugValue extends XNamedValue {
       return AllIcons.Debugger.Value;
     }
   }
-  
+
   public PyDebugValue setName(String newName) {
-    PyDebugValue value = new PyDebugValue(newName, myType, myTypeQualifier, myValue, myContainer, myIsReturnedVal, myErrorOnEval, myParent,
-                       myFrameAccessor);
+    PyDebugValue value = new PyDebugValue(newName, myType, myTypeQualifier, myValue, myContainer, myIsReturnedVal, myIsIPythonHidden,
+                                          myErrorOnEval, myParent, myFrameAccessor);
     value.setTempName(myTempName);
     return value;
   }
@@ -328,5 +352,9 @@ public class PyDebugValue extends XNamedValue {
 
   public String getTypeQualifier() {
     return myTypeQualifier;
+  }
+
+  public boolean isTemporary() {
+    return myTempName != null;
   }
 }

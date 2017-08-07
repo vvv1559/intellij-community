@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
  */
 package org.jetbrains.idea.devkit.actions;
 
+import com.intellij.codeInsight.actions.CodeInsightEditorAction;
 import com.intellij.openapi.actionSystem.*;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.command.CommandProcessor;
@@ -28,6 +29,7 @@ import com.intellij.psi.codeStyle.JavaCodeStyleManager;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.util.IncorrectOperationException;
 import org.jetbrains.annotations.NonNls;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.idea.devkit.DevKitBundle;
 
@@ -41,6 +43,12 @@ public class GenerateComponentExternalizationAction extends AnAction {
   @NonNls private final static String PERSISTENCE_STATE_COMPONENT = "com.intellij.openapi.components.PersistentStateComponent";
   @NonNls private final static String STATE = "com.intellij.openapi.components.State";
   @NonNls private final static String STORAGE = "com.intellij.openapi.components.Storage";
+
+  @Override
+  public void beforeActionPerformedUpdate(@NotNull AnActionEvent e) {
+    CodeInsightEditorAction.beforeActionPerformedUpdate(e);
+    super.beforeActionPerformedUpdate(e);
+  }
 
   public void actionPerformed(AnActionEvent e) {
     final PsiClass target = getComponentInContext(e.getDataContext());
@@ -95,12 +103,10 @@ public class GenerateComponentExternalizationAction extends AnAction {
   }
 
   @Nullable
-  private PsiClass getComponentInContext(DataContext context) {
+  private static PsiClass getComponentInContext(DataContext context) {
     Editor editor = CommonDataKeys.EDITOR.getData(context);
     Project project = CommonDataKeys.PROJECT.getData(context);
     if (editor == null || project == null) return null;
-
-    PsiDocumentManager.getInstance(project).commitDocument(editor.getDocument());
 
     PsiFile file = CommonDataKeys.PSI_FILE.getData(context);
     if (file == null) return null;
@@ -110,12 +116,12 @@ public class GenerateComponentExternalizationAction extends AnAction {
       return null;
     }
 
-    PsiClass componentClass = JavaPsiFacade.getInstance(file.getProject()).findClass(BASE_COMPONENT, file.getResolveScope());
+    final JavaPsiFacade javaPsiFacade = JavaPsiFacade.getInstance(file.getProject());
+    PsiClass componentClass = javaPsiFacade.findClass(BASE_COMPONENT, file.getResolveScope());
     if (componentClass == null || !contextClass.isInheritor(componentClass, true)) return null;
 
-    PsiClass externClass = JavaPsiFacade.getInstance(file.getProject()).findClass(PERSISTENCE_STATE_COMPONENT, file.getResolveScope());
-    if (externClass == null || contextClass.isInheritor(externClass, true)) return null;
-
+    PsiClass persistenceStateComponentClass = javaPsiFacade.findClass(PERSISTENCE_STATE_COMPONENT, file.getResolveScope());
+    if (persistenceStateComponentClass == null || contextClass.isInheritor(persistenceStateComponentClass, true)) return null;
 
     return contextClass;
   }
@@ -125,8 +131,7 @@ public class GenerateComponentExternalizationAction extends AnAction {
     final PsiClass target = getComponentInContext(e.getDataContext());
 
     final Presentation presentation = e.getPresentation();
-    presentation.setEnabled(target != null);
-    presentation.setVisible(target != null);
+    presentation.setEnabledAndVisible(target != null);
   }
 }
 

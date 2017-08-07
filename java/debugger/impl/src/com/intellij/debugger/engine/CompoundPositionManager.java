@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,11 +27,14 @@ import com.intellij.debugger.requests.ClassPrepareRequestor;
 import com.intellij.execution.filters.LineNumbersMapping;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.fileTypes.FileType;
+import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiFile;
 import com.intellij.util.ThreeState;
 import com.intellij.xdebugger.frame.XStackFrame;
-import com.sun.jdi.*;
+import com.sun.jdi.Location;
+import com.sun.jdi.ReferenceType;
+import com.sun.jdi.VMDisconnectedException;
 import com.sun.jdi.request.ClassPrepareRequest;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -40,6 +43,8 @@ import java.util.*;
 
 public class CompoundPositionManager extends PositionManagerEx implements MultiRequestPositionManager{
   private static final Logger LOG = Logger.getInstance(CompoundPositionManager.class);
+
+  public static final CompoundPositionManager EMPTY = new CompoundPositionManager();
 
   private final ArrayList<PositionManager> myPositionManagers = new ArrayList<>();
 
@@ -68,6 +73,10 @@ public class CompoundPositionManager extends PositionManagerEx implements MultiR
   }
 
   private <T> T iterate(Processor<T> processor, T defaultValue, SourcePosition position) {
+    return iterate(processor, defaultValue, position, true);
+  }
+
+  private <T> T iterate(Processor<T> processor, T defaultValue, SourcePosition position, boolean ignorePCE) {
     for (PositionManager positionManager : myPositionManagers) {
       if (position != null) {
         Set<? extends FileType> types = positionManager.getAcceptedFileTypes();
@@ -76,7 +85,10 @@ public class CompoundPositionManager extends PositionManagerEx implements MultiR
         }
       }
       try {
-        return DebuggerUtilsImpl.suppressExceptions(() -> processor.process(positionManager), defaultValue, NoDataException.class);
+        if (!ignorePCE) {
+          ProgressManager.checkCanceled();
+        }
+        return DebuggerUtilsImpl.suppressExceptions(() -> processor.process(positionManager), defaultValue, ignorePCE, NoDataException.class);
       }
       catch (NoDataException ignored) {
       }
@@ -88,17 +100,22 @@ public class CompoundPositionManager extends PositionManagerEx implements MultiR
   @Override
   public SourcePosition getSourcePosition(final Location location) {
     if (location == null) return null;
-    SourcePosition res = mySourcePositionCache.get(location);
+    SourcePosition res = null;
+    try {
+      res = mySourcePositionCache.get(location);
+    } catch (IllegalArgumentException ignored) { // Invalid method id
+    }
     if (checkCacheEntry(res, location)) return res;
 
-    return iterate(positionManager -> {
-      SourcePosition res1 = positionManager.getSourcePosition(location);
-      mySourcePositionCache.put(location, res1);
-      return res1;
-    }, null, null);
+    return DebuggerUtilsImpl.runInReadActionWithWriteActionPriorityWithRetries(
+      () -> iterate(positionManager -> {
+        SourcePosition res1 = positionManager.getSourcePosition(location);
+        mySourcePositionCache.put(location, res1);
+        return res1;
+      }, null, null, false));
   }
 
-  private static boolean checkCacheEntry(SourcePosition position, Location location) {
+  private static boolean checkCacheEntry(@Nullable SourcePosition position, @NotNull Location location) {
     if (position == null) return false;
     PsiFile psiFile = position.getFile();
     if (!psiFile.isValid()) return false;

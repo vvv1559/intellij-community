@@ -14,12 +14,6 @@
  * limitations under the License.
  */
 
-/*
- * Created by IntelliJ IDEA.
- * User: yole
- * Date: 24.11.2006
- * Time: 15:29:45
- */
 package com.intellij.openapi.diff.impl.patch;
 
 import com.intellij.openapi.extensions.Extensions;
@@ -54,8 +48,13 @@ public class UnifiedDiffWriter {
 
   public static void write(@Nullable Project project, Collection<FilePatch> patches, Writer writer, final String lineSeparator,
                            @Nullable final CommitContext commitContext) throws IOException {
-    final PatchEP[] extensions = project == null ? new PatchEP[0] : Extensions.getExtensions(PatchEP.EP_NAME, project);
+    final PatchEP[] extensions = getPatchExtensions(project);
     write(project, patches, writer, lineSeparator, extensions, commitContext);
+  }
+
+  @NotNull
+  public static PatchEP[] getPatchExtensions(@Nullable Project project) {
+    return project == null ? new PatchEP[0] : Extensions.getExtensions(PatchEP.EP_NAME, project);
   }
 
   public static void write(@Nullable Project project, Collection<FilePatch> patches, Writer writer, final String lineSeparator,
@@ -83,6 +82,7 @@ public class UnifiedDiffWriter {
           additionalMap.put(extension.getName(), charSequence);
         }
       }
+      String fileContentLineSeparator = ObjectUtils.coalesce(patch.getLineSeparator(), lineSeparator, "\n");
       writeFileHeading(patch, writer, lineSeparator, additionalMap);
       for(PatchHunk hunk: patch.getHunks()) {
         writeHunkStart(writer, hunk.getStartLineBefore(), hunk.getEndLineBefore(), hunk.getStartLineAfter(), hunk.getEndLineAfter(),
@@ -107,7 +107,7 @@ public class UnifiedDiffWriter {
             writer.write(lineSeparator + NO_NEWLINE_SIGNATURE + lineSeparator);
           }
           else {
-            writer.write(lineSeparator);
+            writer.write(fileContentLineSeparator);
           }
         }
       }

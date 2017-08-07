@@ -19,6 +19,8 @@ import com.intellij.application.options.colors.FontEditorPreview;
 import com.intellij.application.options.colors.InspectionColorSettingsPage;
 import com.intellij.codeInsight.daemon.impl.HighlightInfoType;
 import com.intellij.codeInsight.daemon.impl.SeveritiesProvider;
+import com.intellij.codeInsight.documentation.DocumentationComponent;
+import com.intellij.codeInsight.hint.HintUtil;
 import com.intellij.codeInsight.template.impl.TemplateColors;
 import com.intellij.openapi.editor.HighlighterColors;
 import com.intellij.openapi.editor.colors.CodeInsightColors;
@@ -97,7 +99,12 @@ public class GeneralColorsPage implements ColorSettingsPage, InspectionColorSett
     new AttributesDescriptor(OptionsBundle.message("options.java.color.descriptor.full.coverage"), CodeInsightColors.LINE_FULL_COVERAGE),
     new AttributesDescriptor(OptionsBundle.message("options.java.color.descriptor.partial.coverage"),
                                                  CodeInsightColors.LINE_PARTIAL_COVERAGE),
-    new AttributesDescriptor(OptionsBundle.message("options.java.color.descriptor.none.coverage"), CodeInsightColors.LINE_NONE_COVERAGE)
+    new AttributesDescriptor(OptionsBundle.message("options.java.color.descriptor.none.coverage"), CodeInsightColors.LINE_NONE_COVERAGE),
+    
+    new AttributesDescriptor(OptionsBundle.message("options.general.color.descriptor.breadcrumbs.default"), EditorColors.BREADCRUMBS_DEFAULT),
+    new AttributesDescriptor(OptionsBundle.message("options.general.color.descriptor.breadcrumbs.hovered"), EditorColors.BREADCRUMBS_HOVERED),
+    new AttributesDescriptor(OptionsBundle.message("options.general.color.descriptor.breadcrumbs.current"), EditorColors.BREADCRUMBS_CURRENT),
+    new AttributesDescriptor(OptionsBundle.message("options.general.color.descriptor.breadcrumbs.inactive"), EditorColors.BREADCRUMBS_INACTIVE)
   };
 
   private static final ColorDescriptor[] COLOR_DESCRIPTORS = {
@@ -117,8 +124,15 @@ public class GeneralColorsPage implements ColorSettingsPage, InspectionColorSett
     new ColorDescriptor(OptionsBundle.message("options.general.color.descriptor.line.number"), EditorColors.LINE_NUMBERS_COLOR, ColorDescriptor.Kind.FOREGROUND),
     new ColorDescriptor(OptionsBundle.message("options.general.color.descriptor.tearline"), EditorColors.TEARLINE_COLOR, ColorDescriptor.Kind.FOREGROUND),
     new ColorDescriptor(OptionsBundle.message("options.general.color.descriptor.tearline.selected"), EditorColors.SELECTED_TEARLINE_COLOR, ColorDescriptor.Kind.FOREGROUND),
+    new ColorDescriptor(OptionsBundle.message("options.general.color.descriptor.separator.above"), EditorColors.SEPARATOR_ABOVE_COLOR, ColorDescriptor.Kind.FOREGROUND),
+    new ColorDescriptor(OptionsBundle.message("options.general.color.descriptor.separator.below"), EditorColors.SEPARATOR_BELOW_COLOR, ColorDescriptor.Kind.FOREGROUND),
     new ColorDescriptor(OptionsBundle.message("options.java.color.descriptor.method.separator.color"), CodeInsightColors.METHOD_SEPARATORS_COLOR, ColorDescriptor.Kind.FOREGROUND),
     new ColorDescriptor(OptionsBundle.message("options.general.color.soft.wrap.sign"), EditorColors.SOFT_WRAP_SIGN_COLOR, ColorDescriptor.Kind.FOREGROUND),
+
+    new ColorDescriptor(OptionsBundle.message("options.general.color.descriptor.popups.documentation"), DocumentationComponent.COLOR_KEY, ColorDescriptor.Kind.BACKGROUND),
+    new ColorDescriptor(OptionsBundle.message("options.general.color.descriptor.popups.information"), HintUtil.INFORMATION_COLOR_KEY, ColorDescriptor.Kind.BACKGROUND),
+    new ColorDescriptor(OptionsBundle.message("options.general.color.descriptor.popups.question"), HintUtil.QUESTION_COLOR_KEY, ColorDescriptor.Kind.BACKGROUND),
+    new ColorDescriptor(OptionsBundle.message("options.general.color.descriptor.popups.error"), HintUtil.ERROR_COLOR_KEY, ColorDescriptor.Kind.BACKGROUND),
   };
 
   private static final Map<String, TextAttributesKey> ADDITIONAL_HIGHLIGHT_DESCRIPTORS = new HashMap<>();

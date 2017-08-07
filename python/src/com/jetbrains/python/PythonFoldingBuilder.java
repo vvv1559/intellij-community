@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -223,7 +223,7 @@ public class PythonFoldingBuilder extends CustomFoldingBuilder implements DumbAw
 
   private static String getLanguagePlaceholderForString(PyStringLiteralExpression stringLiteralExpression) {
     String stringText = stringLiteralExpression.getText();
-    Pair<String, String> quotes = PythonStringUtil.getQuotes(stringText);
+    Pair<String, String> quotes = PyStringLiteralUtil.getQuotes(stringText);
     if (quotes != null) {
       return quotes.second + "..." + quotes.second;
     }

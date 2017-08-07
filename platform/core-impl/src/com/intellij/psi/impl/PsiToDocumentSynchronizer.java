@@ -22,13 +22,14 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.ex.DocumentEx;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.util.Condition;
 import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.*;
 import com.intellij.psi.impl.source.tree.ForeignLeafPsiElement;
+import com.intellij.psi.util.PsiUtilCore;
+import com.intellij.util.ExceptionUtil;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.messages.MessageBus;
 import com.intellij.util.text.CharArrayUtil;
@@ -38,6 +39,7 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.TestOnly;
 
 import java.util.*;
+import java.util.concurrent.ConcurrentMap;
 
 public class PsiToDocumentSynchronizer extends PsiTreeChangeAdapter {
   private static final Logger LOG = Logger.getInstance("#com.intellij.psi.impl.PsiToDocumentSynchronizer");
@@ -45,7 +47,7 @@ public class PsiToDocumentSynchronizer extends PsiTreeChangeAdapter {
 
   private final PsiDocumentManagerBase myPsiDocumentManager;
   private final MessageBus myBus;
-  private final Map<Document, Pair<DocumentChangeTransaction, Integer>> myTransactionsMap = new HashMap<Document, Pair<DocumentChangeTransaction, Integer>>();
+  private final ConcurrentMap<Document, Pair<DocumentChangeTransaction, Integer>> myTransactionsMap = ContainerUtil.newConcurrentMap();
 
   private volatile Document mySyncDocument;
 
@@ -101,12 +103,7 @@ public class PsiToDocumentSynchronizer extends PsiTreeChangeAdapter {
     final DocumentEx document = getCachedDocument(psiFile, force);
     if (document == null) return;
 
-    performAtomically(psiFile, new Runnable() {
-      @Override
-      public void run() {
-        syncAction.syncDocument(document, (PsiTreeChangeEventImpl)event);
-      }
-    });
+    performAtomically(psiFile, () -> syncAction.syncDocument(document, (PsiTreeChangeEventImpl)event));
 
     final boolean insideTransaction = myTransactionsMap.containsKey(document);
     if (!insideTransaction) {
@@ -118,7 +115,8 @@ public class PsiToDocumentSynchronizer extends PsiTreeChangeAdapter {
     return file.getUserData(PSI_DOCUMENT_ATOMIC_ACTION) == Boolean.TRUE;
   }
 
-  static void performAtomically(@NotNull PsiFile file, @NotNull Runnable runnable) {
+  public static void performAtomically(@NotNull PsiFile file, @NotNull Runnable runnable) {
+    PsiUtilCore.ensureValid(file);
     assert !isInsideAtomicChange(file);
     file.putUserData(PSI_DOCUMENT_ATOMIC_ACTION, Boolean.TRUE);
 
@@ -237,28 +235,29 @@ public class PsiToDocumentSynchronizer extends PsiTreeChangeAdapter {
   public void startTransaction(@NotNull Project project, @NotNull Document doc, @NotNull PsiElement scope) {
     LOG.assertTrue(!project.isDisposed());
     Pair<DocumentChangeTransaction, Integer> pair = myTransactionsMap.get(doc);
+    Pair<DocumentChangeTransaction, Integer> prev = pair;
     if (pair == null) {
       final PsiFile psiFile = scope.getContainingFile();
-      pair = new Pair<DocumentChangeTransaction, Integer>(new DocumentChangeTransaction(doc, psiFile), 0);
+      pair = new Pair<>(new DocumentChangeTransaction(doc, psiFile), 0);
       myBus.syncPublisher(PsiDocumentTransactionListener.TOPIC).transactionStarted(doc, psiFile);
     }
     else {
-      pair = new Pair<DocumentChangeTransaction, Integer>(pair.getFirst(), pair.getSecond().intValue() + 1);
+      pair = new Pair<>(pair.getFirst(), pair.getSecond().intValue() + 1);
     }
-    myTransactionsMap.put(doc, pair);
+    LOG.assertTrue(myTransactionsMap.put(doc, pair) == prev);
   }
 
   public boolean commitTransaction(final Document document){
     ApplicationManager.getApplication().assertIsDispatchThread();
     final DocumentChangeTransaction documentChangeTransaction = removeTransaction(document);
     if(documentChangeTransaction == null) return false;
-    final PsiElement changeScope = documentChangeTransaction.myChangeScope;
+    final PsiFile changeScope = documentChangeTransaction.myChangeScope;
     try {
       mySyncDocument = document;
 
       final PsiTreeChangeEventImpl fakeEvent = new PsiTreeChangeEventImpl(changeScope.getManager());
       fakeEvent.setParent(changeScope);
-      fakeEvent.setFile(changeScope.getContainingFile());
+      fakeEvent.setFile(changeScope);
       checkPsiModificationAllowed(fakeEvent);
       doSync(fakeEvent, true, new DocSyncAction() {
         @Override
@@ -266,7 +265,11 @@ public class PsiToDocumentSynchronizer extends PsiTreeChangeAdapter {
           doCommitTransaction(document, documentChangeTransaction);
         }
       });
-      myBus.syncPublisher(PsiDocumentTransactionListener.TOPIC).transactionCompleted(document, (PsiFile)changeScope);
+      myBus.syncPublisher(PsiDocumentTransactionListener.TOPIC).transactionCompleted(document, changeScope);
+    }
+    catch (Throwable e) {
+      myPsiDocumentManager.forceReload(changeScope.getViewProvider().getVirtualFile(), changeScope.getViewProvider());
+      ExceptionUtil.rethrowAllAsUnchecked(e);
     }
     finally {
       mySyncDocument = null;
@@ -311,12 +314,8 @@ public class PsiToDocumentSynchronizer extends PsiTreeChangeAdapter {
   }
 
   public static class DocumentChangeTransaction{
-    private final TreeMap<TextRange, CharSequence> myAffectedFragments = new TreeMap<TextRange, CharSequence>(new Comparator<TextRange>() {
-      @Override
-      public int compare(TextRange o1, TextRange o2) {
-        return o1.getStartOffset() - o2.getStartOffset();
-      }
-    });
+    private final TreeMap<TextRange, CharSequence> myAffectedFragments = new TreeMap<>(
+      Comparator.comparingInt(TextRange::getStartOffset));
     private final PsiFile myChangeScope;
     private ImmutableCharSequence myPsiText;
 
@@ -423,12 +422,7 @@ public class PsiToDocumentSynchronizer extends PsiTreeChangeAdapter {
     }
 
     private TextRange findFragment(final int docOffset) {
-      return ContainerUtil.find(myAffectedFragments.keySet(), new Condition<TextRange>() {
-        @Override
-        public boolean value(TextRange range) {
-          return range.containsOffset(docOffset);
-        }
-      });
+      return ContainerUtil.find(myAffectedFragments.keySet(), range -> range.containsOffset(docOffset));
     }
 
     private int psiToDocumentOffset(int offset) {

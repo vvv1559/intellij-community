@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,7 +18,6 @@ package com.intellij.codeInsight.intention.impl;
 import com.intellij.codeInsight.CodeInsightBundle;
 import com.intellij.codeInsight.CodeInsightUtil;
 import com.intellij.codeInsight.CodeInsightUtilCore;
-import com.intellij.codeInsight.FileModificationService;
 import com.intellij.codeInsight.intention.PsiElementBaseIntentionAction;
 import com.intellij.codeInsight.lookup.LookupElement;
 import com.intellij.codeInsight.lookup.LookupElementBuilder;
@@ -73,10 +72,6 @@ public class SurroundAutoCloseableAction extends PsiElementBaseIntentionAction {
 
   @Override
   public void invoke(@NotNull Project project, Editor editor, @NotNull PsiElement element) throws IncorrectOperationException {
-    if (!FileModificationService.getInstance().preparePsiElementForWrite(element)) {
-      return;
-    }
-
     PsiLocalVariable variable = findVariable(element);
     if (variable != null) {
       processVariable(project, editor, variable);
@@ -103,7 +98,7 @@ public class SurroundAutoCloseableAction extends PsiElementBaseIntentionAction {
       PsiElement sibling = element.getPrevSibling();
       if (sibling instanceof PsiDeclarationStatement) {
         PsiElement lastVar = ArrayUtil.getLastElement(((PsiDeclarationStatement)sibling).getDeclaredElements());
-        if (lastVar instanceof PsiLocalVariable) {
+        if (lastVar instanceof PsiLocalVariable && ((PsiLocalVariable)lastVar).getInitializer() != null) {
           return (PsiLocalVariable)lastVar;
         }
       }
@@ -189,7 +184,7 @@ public class SurroundAutoCloseableAction extends PsiElementBaseIntentionAction {
     PsiElement i = statement.getNextSibling();
     while (i != null && i != stopAt) {
       PsiElement child = i;
-      i = PsiTreeUtil.skipSiblingsForward(i, PsiWhiteSpace.class, PsiComment.class);
+      i = PsiTreeUtil.skipWhitespacesAndCommentsForward(i);
 
       if (!(child instanceof PsiDeclarationStatement)) continue;
 

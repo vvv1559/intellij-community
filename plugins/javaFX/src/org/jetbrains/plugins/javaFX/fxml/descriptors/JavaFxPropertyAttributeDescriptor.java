@@ -6,6 +6,7 @@ import com.intellij.psi.util.InheritanceUtil;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.psi.xml.*;
 import com.intellij.util.ArrayUtil;
+import com.intellij.xml.XmlAttributeDescriptor;
 import com.intellij.xml.impl.BasicXmlAttributeDescriptor;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -20,10 +21,6 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
-/**
- * User: anna
- * Date: 1/10/13
- */
 public class JavaFxPropertyAttributeDescriptor extends BasicXmlAttributeDescriptor {
   private final String myName;
   private final PsiClass myPsiClass;
@@ -104,6 +101,7 @@ public class JavaFxPropertyAttributeDescriptor extends BasicXmlAttributeDescript
 
   @Override
   public PsiElement getEnumeratedValueDeclaration(XmlElement xmlElement, String value) {
+    if (value != null && value.startsWith("%")) return xmlElement;
     final PsiClass aClass = getEnum();
     if (aClass != null) {
       final PsiField fieldByName = aClass.findFieldByName(value, true);
@@ -132,6 +130,9 @@ public class JavaFxPropertyAttributeDescriptor extends BasicXmlAttributeDescript
     }
     else if (StringUtil.trimLeading(value).startsWith("$")) {
       return "Spaces aren't allowed before property or expression";
+    }
+    else if (value.startsWith("%")) {
+      return null;
     }
     else {
       return validateLiteral(xmlAttributeValue, value);
@@ -185,7 +186,7 @@ public class JavaFxPropertyAttributeDescriptor extends BasicXmlAttributeDescript
       final List<String> remainingPropertyNames = propertyNames.subList(1, propertyNames.size());
       for (String propertyName : remainingPropertyNames) {
         if (aClass == null) break;
-        final PsiMember member = JavaFxPsiUtil.collectReadableProperties(aClass).get(propertyName);
+        final PsiMember member = JavaFxPsiUtil.getReadableProperties(aClass).get(propertyName);
         aClass = JavaFxPsiUtil.getPropertyClass(JavaFxPsiUtil.getReadablePropertyType(member), xmlAttributeValue);
       }
       if (aClass != null && !InheritanceUtil.isInheritorOrSelf(aClass, targetPropertyClass, true)) {
@@ -243,13 +244,32 @@ public class JavaFxPropertyAttributeDescriptor extends BasicXmlAttributeDescript
     return null;
   }
 
+  @Nullable
+  public static String validateLiteralOrEnumConstant(@NotNull XmlAttributeValue xmlAttributeValue, @NotNull String value) {
+    final PsiElement parent = xmlAttributeValue.getParent();
+    if (parent instanceof XmlAttribute) {
+      final XmlAttributeDescriptor descriptor = ((XmlAttribute)parent).getDescriptor();
+      if (descriptor instanceof JavaFxPropertyAttributeDescriptor) {
+        final PsiClass aClass = ((JavaFxPropertyAttributeDescriptor)descriptor).getEnum();
+        if (aClass != null) {
+          final PsiField field = aClass.findFieldByName(value, true);
+          if (field == null || !((JavaFxPropertyAttributeDescriptor)descriptor).isConstant(field)) {
+            return "Invalid enumerated value";
+          }
+          return null;
+        }
+      }
+    }
+    return validateLiteral(xmlAttributeValue, value);
+  }
+
   @Override
   public PsiElement getDeclaration() {
     return getDeclarationMember();
   }
 
   private PsiMember getDeclarationMember() {
-    return JavaFxPsiUtil.collectWritableProperties(myPsiClass).get(myName);
+    return JavaFxPsiUtil.getWritableProperties(myPsiClass).get(myName);
   }
 
   @Override
@@ -271,6 +291,7 @@ public class JavaFxPropertyAttributeDescriptor extends BasicXmlAttributeDescript
   public void init(PsiElement element) {
   }
 
+  @NotNull
   @Override
   public Object[] getDependences() {
     return ArrayUtil.EMPTY_OBJECT_ARRAY;

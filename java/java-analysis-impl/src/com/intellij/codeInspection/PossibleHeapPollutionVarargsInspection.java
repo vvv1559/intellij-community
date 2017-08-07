@@ -16,11 +16,11 @@
 package com.intellij.codeInspection;
 
 import com.intellij.codeInsight.AnnotationUtil;
-import com.intellij.codeInsight.FileModificationService;
 import com.intellij.codeInsight.daemon.GroupNames;
 import com.intellij.codeInsight.daemon.impl.analysis.GenericsHighlightUtil;
 import com.intellij.codeInsight.daemon.impl.analysis.JavaGenericsUtil;
 import com.intellij.codeInsight.intention.AddAnnotationPsiFix;
+import com.intellij.openapi.application.WriteAction;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.intellij.pom.java.LanguageLevel;
@@ -30,13 +30,10 @@ import com.intellij.psi.search.searches.ReferencesSearch;
 import com.intellij.psi.util.PsiUtil;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
-/**
- * User: anna
- * Date: 1/28/11
- */
 public class PossibleHeapPollutionVarargsInspection extends BaseJavaBatchLocalInspectionTool {
-  public static final Logger LOG = Logger.getInstance("#" + PossibleHeapPollutionVarargsInspection.class.getName());
+  public static final Logger LOG = Logger.getInstance(PossibleHeapPollutionVarargsInspection.class);
   @Nls
   @NotNull
   @Override
@@ -94,14 +91,13 @@ public class PossibleHeapPollutionVarargsInspection extends BaseJavaBatchLocalIn
   private static class AnnotateAsSafeVarargsQuickFix implements LocalQuickFix {
     @NotNull
     @Override
-    public String getName() {
+    public String getFamilyName() {
       return "Annotate as @SafeVarargs";
     }
 
-    @NotNull
     @Override
-    public String getFamilyName() {
-      return getName();
+    public boolean startInWriteAction() {
+      return false;
     }
 
     @Override
@@ -119,23 +115,27 @@ public class PossibleHeapPollutionVarargsInspection extends BaseJavaBatchLocalIn
   private static class MakeFinalAndAnnotateQuickFix implements LocalQuickFix {
     @NotNull
     @Override
-    public String getName() {
+    public String getFamilyName() {
       return "Make final and annotate as @SafeVarargs";
     }
 
-    @NotNull
+    @Nullable
     @Override
-    public String getFamilyName() {
-      return getName();
+    public PsiElement getElementToMakeWritable(@NotNull PsiFile currentFile) {
+      return currentFile;
+    }
+
+    @Override
+    public boolean startInWriteAction() {
+      return false;
     }
 
     @Override
     public void applyFix(@NotNull Project project, @NotNull ProblemDescriptor descriptor) {
       final PsiElement psiElement = descriptor.getPsiElement();
       if (psiElement instanceof PsiIdentifier) {
-        if (!FileModificationService.getInstance().preparePsiElementForWrite(psiElement)) return;
         final PsiMethod psiMethod = (PsiMethod)psiElement.getParent();
-        psiMethod.getModifierList().setModifierProperty(PsiModifier.FINAL, true);
+        WriteAction.run(() -> psiMethod.getModifierList().setModifierProperty(PsiModifier.FINAL, true));
         new AddAnnotationPsiFix("java.lang.SafeVarargs", psiMethod, PsiNameValuePair.EMPTY_ARRAY).applyFix(project, descriptor);
       }
     }

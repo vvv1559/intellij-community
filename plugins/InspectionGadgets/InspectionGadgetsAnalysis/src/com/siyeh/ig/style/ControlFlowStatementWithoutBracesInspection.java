@@ -1,5 +1,5 @@
 /*
- * Copyright 2003-2010 Dave Griffith, Bas Leijdekkers
+ * Copyright 2003-2017 Dave Griffith, Bas Leijdekkers
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Pair;
 import com.intellij.psi.*;
 import com.intellij.psi.util.PsiTreeUtil;
+import com.intellij.psi.util.PsiUtil;
 import com.intellij.util.IncorrectOperationException;
 import com.siyeh.InspectionGadgetsBundle;
 import com.siyeh.ig.BaseInspection;
@@ -129,17 +130,23 @@ public class ControlFlowStatementWithoutBracesInspection
 
   @Override
   public BaseInspectionVisitor buildVisitor() {
-    return new ControlFlowStatementVisitor(this);
+    return new ControlFlowStatementVisitor();
   }
 
   private static class ControlFlowStatementVisitor extends ControlFlowStatementVisitorBase {
-    private ControlFlowStatementVisitor(BaseInspection inspection) {
-      super(inspection);
-    }
 
     @Contract("null->false")
     @Override
     protected boolean isApplicable(PsiStatement body) {
+      if (body instanceof PsiIfStatement && isVisibleHighlight(body)) {
+        final PsiElement parent = body.getParent();
+        if (parent instanceof PsiIfStatement) {
+          final PsiIfStatement ifStatement = (PsiIfStatement)parent;
+          if (ifStatement.getElseBranch() == body) {
+            return false;
+          }
+        }
+      }
       return body != null && !(body instanceof PsiBlockStatement);
     }
 
@@ -148,10 +155,8 @@ public class ControlFlowStatementWithoutBracesInspection
     protected Pair<PsiElement, PsiElement> getOmittedBodyBounds(PsiStatement body) {
       if (body instanceof PsiLoopStatement || body instanceof PsiIfStatement) {
         final PsiElement lastChild = body.getLastChild();
-        return Pair.create(PsiTreeUtil.skipSiblingsBackward(body, PsiWhiteSpace.class, PsiComment.class),
-                           lastChild instanceof PsiJavaToken && ((PsiJavaToken)lastChild).getTokenType() == JavaTokenType.SEMICOLON
-                           ? lastChild
-                           : null);
+        return Pair.create(PsiTreeUtil.skipWhitespacesAndCommentsBackward(body),
+                           PsiUtil.isJavaToken(lastChild, JavaTokenType.SEMICOLON) ? lastChild : null);
       }
       return null;
     }

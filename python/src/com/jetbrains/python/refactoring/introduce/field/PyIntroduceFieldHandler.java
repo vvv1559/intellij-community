@@ -17,8 +17,7 @@ package com.jetbrains.python.refactoring.introduce.field;
 
 import com.intellij.lang.ASTNode;
 import com.intellij.openapi.actionSystem.DataContext;
-import com.intellij.openapi.application.AccessToken;
-import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.WriteAction;
 import com.intellij.openapi.editor.CaretModel;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.Editor;
@@ -35,6 +34,7 @@ import com.intellij.refactoring.introduce.inplace.InplaceVariableIntroducer;
 import com.intellij.refactoring.util.CommonRefactoringUtil;
 import com.intellij.util.Function;
 import com.intellij.util.FunctionUtil;
+import com.intellij.util.ThreeState;
 import com.jetbrains.python.PyNames;
 import com.jetbrains.python.codeInsight.controlflow.ScopeOwner;
 import com.jetbrains.python.codeInsight.dataflow.scope.ScopeUtil;
@@ -89,7 +89,7 @@ public class PyIntroduceFieldHandler extends IntroduceHandler {
     }
     if (element1 != null) {
       final PyClass clazz = PyUtil.getContainingClassOrSelf(element1);
-      if (clazz != null && PythonUnitTestUtil.isTestCaseClass(clazz, null)) return true;
+      if (clazz != null && PythonUnitTestUtil.isTestClass(clazz, ThreeState.UNSURE, null)) return true;
     }
     return false;
   }
@@ -182,7 +182,7 @@ public class PyIntroduceFieldHandler extends IntroduceHandler {
     return false;
   }
 
-  @Nullable
+  @NotNull
   private static PsiElement addFieldToSetUp(PyClass clazz, final Function<String, PyStatement> callback) {
     final PyFunction init = clazz.findMethodByName(PythonUnitTestUtil.TESTCASE_SETUP_NAME, false, null);
     if (init != null) {
@@ -359,11 +359,10 @@ public class PyIntroduceFieldHandler extends IntroduceHandler {
     @Override
     protected void moveOffsetAfter(boolean success) {
       if (success && (myPanel != null && myPanel.getInitPlace() != InitPlace.SAME_METHOD) || myOperation.getInplaceInitPlace() != InitPlace.SAME_METHOD) {
-        final AccessToken accessToken = ApplicationManager.getApplication().acquireWriteActionLock(getClass());
-        try {
+        WriteAction.run(() -> {
           final PyAssignmentStatement initializer = PsiTreeUtil.getParentOfType(myTarget, PyAssignmentStatement.class);
           assert initializer != null;
-          final Function<String, PyStatement> callback = FunctionUtil.<String, PyStatement>constant(initializer);
+          final Function<String, PyStatement> callback = FunctionUtil.constant(initializer);
           final PyClass pyClass = PyUtil.getContainingClassOrSelf(initializer);
           InitPlace initPlace = myPanel != null ? myPanel.getInitPlace() : myOperation.getInplaceInitPlace();
           if (initPlace == InitPlace.CONSTRUCTOR) {
@@ -381,10 +380,7 @@ public class PyIntroduceFieldHandler extends IntroduceHandler {
             initializer.replace(copy);
           }
           initializer.delete();
-        }
-        finally {
-          accessToken.finish();
-        }
+        });
       }
     }
   }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,15 +17,7 @@ package com.intellij.openapi.editor.impl;
 
 import com.intellij.codeInsight.folding.CodeFoldingManager;
 import com.intellij.openapi.actionSystem.IdeActions;
-import com.intellij.openapi.command.WriteCommandAction;
-import com.intellij.openapi.editor.Document;
-import com.intellij.openapi.editor.FoldRegion;
-import com.intellij.openapi.editor.LogicalPosition;
-import com.intellij.openapi.editor.VisualPosition;
-import com.intellij.openapi.editor.event.CaretAdapter;
-import com.intellij.openapi.editor.event.CaretEvent;
-import com.intellij.openapi.editor.event.SelectionEvent;
-import com.intellij.openapi.editor.event.SelectionListener;
+import com.intellij.openapi.editor.*;
 import com.intellij.openapi.editor.ex.DocumentBulkUpdateListener;
 import com.intellij.openapi.editor.ex.DocumentEx;
 import com.intellij.openapi.editor.ex.EditorEx;
@@ -34,11 +26,16 @@ import com.intellij.openapi.editor.ex.util.EditorUtil;
 import com.intellij.openapi.editor.markup.HighlighterTargetArea;
 import com.intellij.openapi.editor.markup.RangeHighlighter;
 import com.intellij.openapi.editor.markup.TextAttributes;
+import com.intellij.openapi.ide.CopyPasteManager;
+import com.intellij.openapi.util.Ref;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.testFramework.EditorTestUtil;
+import com.intellij.util.DocumentUtil;
 import org.jetbrains.annotations.NotNull;
 
 import javax.swing.*;
 import java.awt.*;
+import java.awt.datatransfer.StringSelection;
 
 public class EditorImplTest extends AbstractEditorTest {
   public void testPositionCalculationForZeroWidthChars() throws Exception {
@@ -81,15 +78,12 @@ public class EditorImplTest extends AbstractEditorTest {
     assertEquals("[FoldRegion +(59:64), placeholder=' { ', FoldRegion +(85:88), placeholder=' }']", myEditor.getFoldingModel().toString());
     verifySoftWrapPositions(52, 85);
 
-    new WriteCommandAction.Simple(getProject()) {
-      @Override
-      protected void run() throws Throwable {
-        Document document = myEditor.getDocument();
-        for (int i = document.getLineCount() - 1; i >= 0; i--) {
-          document.insertString(document.getLineStartOffset(i), "//");
-        }
+    runWriteCommand(() -> {
+      Document document = myEditor.getDocument();
+      for (int i = document.getLineCount() - 1; i >= 0; i--) {
+        document.insertString(document.getLineStartOffset(i), "//");
       }
-    }.execute().throwException();
+    });
 
 
     verifySoftWrapPositions(58, 93);
@@ -121,20 +115,29 @@ public class EditorImplTest extends AbstractEditorTest {
   public void testNoExceptionDuringBulkModeDocumentUpdate() throws Exception {
     initText("something");
     DocumentEx document = (DocumentEx)myEditor.getDocument();
-    new WriteCommandAction.Simple(getProject()) {
-      @Override
-      protected void run() throws Throwable {
-        document.setInBulkUpdate(true);
-        try {
-          document.setText("something\telse");
-        }
-        finally {
-          document.setInBulkUpdate(false);
-        }
-      }
-    }.execute().throwException();
+    runWriteCommand(() -> {
+      DocumentUtil.executeInBulk(document, true, ()-> {
+        document.setText("something\telse");
+      });
+    });
 
     checkResultByText("something\telse");
+  }
+
+  public void testCaretMergeDuringBulkModeDocumentUpdate() throws Exception {
+    initText("a<selection>bcdef<caret></selection>g\n" +
+             "a<selection>bcdef<caret></selection>g");
+    runWriteCommand(() -> {
+      DocumentEx document = (DocumentEx)myEditor.getDocument();
+      DocumentUtil.executeInBulk(document, true, ()-> {
+        // delete selected text
+        document.deleteString(1, 6);
+        document.deleteString(4, 9);
+      });
+    });
+
+    checkResultByText("a<caret>g\n" +
+                      "a<caret>g");
   }
 
   public void testPositionCalculationForOneCharacterFolds() throws Exception {
@@ -169,13 +172,7 @@ public class EditorImplTest extends AbstractEditorTest {
   public void testNavigationInsideNonNormalizedLineTerminator() throws Exception {
     initText("");
     ((DocumentImpl)myEditor.getDocument()).setAcceptSlashR(true);
-    new WriteCommandAction.Simple(getProject()) {
-      @Override
-      protected void run() throws Throwable {
-        myEditor.getDocument().insertString(0, "abc\r\ndef");
-      }
-    }.execute().throwException();
-
+    runWriteCommand(() -> myEditor.getDocument().insertString(0, "abc\r\ndef"));
 
     myEditor.getCaretModel().moveToOffset(4);
     
@@ -187,14 +184,11 @@ public class EditorImplTest extends AbstractEditorTest {
     initText("long long line<caret>");
     configureSoftWraps(12);
     DocumentEx document = (DocumentEx)myEditor.getDocument();
-    new WriteCommandAction.Simple(getProject()) {
-      @Override
-      protected void run() throws Throwable {
-        document.setInBulkUpdate(true);
+    runWriteCommand(() -> {
+      DocumentUtil.executeInBulk(document, true, ()-> {
         document.replaceString(4, 5, "-");
-        document.setInBulkUpdate(false);
-      }
-    }.execute().throwException();
+      });
+    });
 
     assertEquals(new VisualPosition(1, 5), myEditor.getCaretModel().getVisualPosition());
   }
@@ -203,20 +197,17 @@ public class EditorImplTest extends AbstractEditorTest {
     initText("some text");
     DocumentEx document = (DocumentEx)myEditor.getDocument();
 
-    new WriteCommandAction.Simple(getProject()) {
-      @Override
-      protected void run() throws Throwable {
-        document.setInBulkUpdate(true);
+    runWriteCommand(() -> {
+      DocumentUtil.executeInBulk(document, true, ()-> {
         document.replaceString(4, 5, "-");
-        document.setInBulkUpdate(false);
+      });
 
-        myEditor.getCaretModel().moveToOffset(9);
+      myEditor.getCaretModel().moveToOffset(9);
 
-        document.setInBulkUpdate(true);
+      DocumentUtil.executeInBulk(document, true, ()-> {
         document.replaceString(4, 5, "+");
-        document.setInBulkUpdate(false);
-      }
-    }.execute().throwException();
+      });
+    });
 
 
     checkResultByText("some+text<caret>");
@@ -227,7 +218,7 @@ public class EditorImplTest extends AbstractEditorTest {
     final FoldRegion innerRegion = addCollapsedFoldRegion(0, 4, "...");
     final FoldRegion outerRegion = addCollapsedFoldRegion(0, 9, "...");
 
-    myEditor.getFoldingModel().runBatchFoldingOperation(() -> {
+    runFoldingOperation(() -> {
       myEditor.getFoldingModel().removeFoldRegion(outerRegion);
       myEditor.getFoldingModel().removeFoldRegion(innerRegion);
     });
@@ -260,15 +251,12 @@ public class EditorImplTest extends AbstractEditorTest {
   
   public void testUpdatingCaretPositionAfterBulkMode() throws Exception {
     initText("a<caret>bc");
-    new WriteCommandAction.Simple(getProject()) {
-      @Override
-      protected void run() throws Throwable {
-        DocumentEx document = (DocumentEx)myEditor.getDocument();
-        document.setInBulkUpdate(true);
+    runWriteCommand(() -> {
+      DocumentEx document = (DocumentEx)myEditor.getDocument();
+      DocumentUtil.executeInBulk(document, true, ()-> {
         document.insertString(0, "\n "); // we're changing number of visual lines, and invalidating text layout for caret line
-        document.setInBulkUpdate(false);
-      }
-    }.execute().throwException();
+      });
+    });
 
     checkResultByText("\n a<caret>bc");
   }
@@ -301,12 +289,7 @@ public class EditorImplTest extends AbstractEditorTest {
     JViewport viewport = ((EditorEx)myEditor).getScrollPane().getViewport();
     Dimension normalSize = viewport.getExtentSize();
     viewport.setExtentSize(new Dimension(0, 0));
-    new WriteCommandAction.Simple(getProject()) {
-      @Override
-      protected void run() throws Throwable {
-        myEditor.getDocument().deleteString(5, 14);
-      }
-    }.execute().throwException();
+    runWriteCommand(() -> myEditor.getDocument().deleteString(5, 14));
 
     viewport.setExtentSize(normalSize);
     
@@ -339,33 +322,6 @@ public class EditorImplTest extends AbstractEditorTest {
     assertTrue(visibleArea.contains(caretPoint));
   }
 
-  public void testCaretAndSelectionEventsInBulkMode() throws Exception {
-    initText("abc<selection>def<caret></selection>");
-    StringBuilder output = new StringBuilder();
-    CaretAdapter caretListener = new CaretAdapter() {
-      @Override
-      public void caretPositionChanged(CaretEvent e) {
-        output.append("caret:").append(e.getNewPosition());
-      }
-    };
-    SelectionListener selectionListener = new SelectionListener() {
-      @Override
-      public void selectionChanged(SelectionEvent e) {
-        output.append("selection:").append(e.getNewRange());
-      }
-    };
-    myEditor.getCaretModel().addCaretListener(caretListener);
-    myEditor.getSelectionModel().addSelectionListener(selectionListener);
-    ((DocumentEx)myEditor.getDocument()).setInBulkUpdate(true);
-    WriteCommandAction.runWriteCommandAction(ourProject, () -> myEditor.getDocument().insertString(0, " "));
-    assertEquals("", output.toString());
-    ((DocumentEx)myEditor.getDocument()).setInBulkUpdate(false);
-    myEditor.getSelectionModel().removeSelectionListener(selectionListener);
-    myEditor.getCaretModel().removeCaretListener(caretListener);
-    assertEquals("caret:LogicalPosition: (0, 7)selection:(4,7)", output.toString());
-    checkResultByText(" abc<selection>def<caret></selection>");
-  }
-
   public void testChangingHighlightersInBulkModeListener() throws Exception {
     DocumentBulkUpdateListener.Adapter listener = new DocumentBulkUpdateListener.Adapter() {
       @Override
@@ -378,14 +334,11 @@ public class EditorImplTest extends AbstractEditorTest {
     getProject().getMessageBus().connect(getTestRootDisposable()).subscribe(DocumentBulkUpdateListener.TOPIC, listener);
     initText("abcdef");
     DocumentEx document = (DocumentEx)myEditor.getDocument();
-    new WriteCommandAction.Simple(getProject()) {
-      @Override
-      protected void run() throws Throwable {
-        document.setInBulkUpdate(true);
+    runWriteCommand(() -> {
+      DocumentUtil.executeInBulk(document, true, ()-> {
         document.insertString(3, "\n\n");
-        document.setInBulkUpdate(false);
-      }
-    }.execute();
+      });
+    });
     RangeHighlighter[] highlighters = myEditor.getMarkupModel().getAllHighlighters();
     assertEquals(1, highlighters.length);
     assertEquals(7, highlighters[0].getStartOffset());
@@ -395,7 +348,7 @@ public class EditorImplTest extends AbstractEditorTest {
   public void testChangingHighlightersAfterClearingFoldingsDuringFoldingBatchUpdate() throws Exception {
     initText("abc\n\ndef");
     addCollapsedFoldRegion(2, 6, "...");
-    myEditor.getFoldingModel().runBatchFoldingOperation(() -> {
+    runFoldingOperation(() -> {
       ((FoldingModelEx)myEditor.getFoldingModel()).clearFoldRegions();
       myEditor.getMarkupModel().addRangeHighlighter(7, 8, 0, new TextAttributes(null, null, null, null, Font.BOLD),
                                                     HighlighterTargetArea.EXACT_RANGE);
@@ -424,5 +377,141 @@ public class EditorImplTest extends AbstractEditorTest {
     assertEquals(heightInPixels - myEditor.getLineHeight(), myEditor.getScrollingModel().getVerticalScrollOffset());
     type('b');
     assertEquals(heightInPixels - myEditor.getLineHeight(), myEditor.getScrollingModel().getVerticalScrollOffset());
+  }
+
+  public void testEditorWithSoftWrapsBecomesVisibleAfterDocumentTextRemoval() throws Exception {
+    initText("abc def ghi");
+    configureSoftWraps(3);
+    JViewport viewport = ((EditorEx)myEditor).getScrollPane().getViewport();
+    viewport.setExtentSize(new Dimension()); // emulate editor becoming invisible
+    runWriteCommand(() -> {
+        Document document = myEditor.getDocument();
+        document.deleteString(0, document.getTextLength());
+    });
+    viewport.setExtentSize(new Dimension(1000, 1000)); // editor becomes visible
+    verifySoftWrapPositions();
+  }
+
+  public void testDocumentChangeAfterEditorDisposal() throws Exception {
+    EditorFactory editorFactory = EditorFactory.getInstance();
+
+    Document document = editorFactory.createDocument("ab");
+    Editor editor = editorFactory.createEditor(document);
+    try {
+      editor.getCaretModel().moveToOffset(1);
+    }
+    finally {
+      editorFactory.releaseEditor(editor);
+    }
+
+    runWriteCommand(() -> document.setText("cd")); // should run without throwing an exception
+  }
+
+  public void testLineLengthMatchingLogicalPositionCacheFrequency() throws Exception {
+    initText("\t" + StringUtil.repeat(" ", 1023));
+    assertEquals(new LogicalPosition(0, 1027), myEditor.offsetToLogicalPosition(1024));
+  }
+
+  public void testSpecialCaseOfCaretPositionUpdateOnFolding() throws Exception {
+    initText("abc\ndef\ngh<caret>i");
+    FoldRegion region = addCollapsedFoldRegion(1, 11, "...");
+    runWriteCommand(()-> myEditor.getDocument().deleteString(7, 8));
+    runFoldingOperation(()-> region.setExpanded(true));
+    runFoldingOperation(()-> region.setExpanded(false));
+    assertFalse(region.isExpanded());
+  }
+
+  public void testEditingNearInlayInBulkMode() throws Exception {
+    initText("a<caret>bc");
+    addInlay(1);
+    runWriteCommand(()-> DocumentUtil.executeInBulk(myEditor.getDocument(), true,
+                                                    ()-> myEditor.getDocument().insertString(1, " ")));
+    checkResultByText("a<caret> bc");
+    assertTrue(myEditor.getInlayModel().hasInlineElementAt(1));
+  }
+
+  public void testCoordinateConversionsAroundSurrogatePair() throws Exception {
+    initText("a" + SURROGATE_PAIR + "b");
+    assertEquals(new LogicalPosition(0, 2), myEditor.offsetToLogicalPosition(3));
+    assertEquals(3, myEditor.logicalPositionToOffset(new LogicalPosition(0, 2)));
+    assertEquals(new VisualPosition(0, 2), myEditor.logicalToVisualPosition(new LogicalPosition(0, 2)));
+    assertEquals(new LogicalPosition(0, 2), myEditor.visualToLogicalPosition(new VisualPosition(0, 2)));
+  }
+
+  public void testCreationOfSurrogatePairByMergingDividedParts() throws Exception {
+    initText(""); // Cannot set up text with singular surrogate characters directly
+    runWriteCommand(() -> {
+      myEditor.getDocument().setText(HIGH_SURROGATE + " " + LOW_SURROGATE);
+      myEditor.getDocument().deleteString(1, 2);
+    });
+    checkResultByText(SURROGATE_PAIR);
+    assertEquals(new LogicalPosition(0, 1), myEditor.offsetToLogicalPosition(2));
+  }
+
+  public void testCaretDoesntGetInsideSurrogatePair() throws Exception {
+    initText(""); // Cannot set up text with singular surrogate characters directly
+    runWriteCommand(() -> myEditor.getDocument().setText(HIGH_SURROGATE + LOW_SURROGATE + LOW_SURROGATE));
+    myEditor.getCaretModel().moveToOffset(2);
+    runWriteCommand(() -> ((DocumentEx)myEditor.getDocument()).moveText(2, 3, 1));
+    assertFalse(DocumentUtil.isInsideSurrogatePair(myEditor.getDocument(), myEditor.getCaretModel().getOffset()));
+  }
+
+  public void testFoldingBoundaryDoesntGetInsideSurrogatePair() throws Exception {
+    initText(""); // Cannot set up text with singular surrogate characters directly
+    runWriteCommand(() -> myEditor.getDocument().setText(HIGH_SURROGATE + LOW_SURROGATE + LOW_SURROGATE));
+    addFoldRegion(2, 3, "...");
+    runWriteCommand(() -> ((DocumentEx)myEditor.getDocument()).moveText(2, 3, 1));
+    FoldRegion[] foldRegions = myEditor.getFoldingModel().getAllFoldRegions();
+    assertFalse(foldRegions.length > 0 && DocumentUtil.isInsideSurrogatePair(myEditor.getDocument(), foldRegions[0].getStartOffset()));
+  }
+
+  public void testRemovalOfNonExpandingFoldingRegion() throws Exception {
+    initText("a\nb");
+    FoldingModelEx model = (FoldingModelEx)myEditor.getFoldingModel();
+    Ref<FoldRegion> regionRef = new Ref<>();
+    runFoldingOperation(() -> {
+      FoldRegion region = model.createFoldRegion(0, 3, "...", null, true);
+      assertNotNull(region);
+      assertTrue(region.isValid());
+      region.setExpanded(false);
+      regionRef.set(region);
+    });
+    runFoldingOperation(() -> model.removeFoldRegion(regionRef.get()));
+    assertEquals(new VisualPosition(1, 1), myEditor.offsetToVisualPosition(3));
+  }
+  
+  public void testPasteWithStickySelection() throws Exception {
+    initText("<selection>abc<caret></selection>\ndef");
+    copy();
+    down();
+    home();
+    ((EditorEx)myEditor).setStickySelection(true);
+    right();
+    right();
+    right();
+    paste();
+    checkResultByText("abc\nabc<caret>");
+  }
+  
+  public void testPasteInVirtualSpaceWhenSelectionExists() throws Exception {
+    initText("foo");
+    myEditor.getSettings().setVirtualSpace(true);
+    mouse().clickAt(0, 10);
+    executeAction(IdeActions.ACTION_SELECT_ALL);
+    CopyPasteManager.getInstance().setContents(new StringSelection("bar"));
+    paste();
+    checkResultByText("bar<caret>");
+  }
+
+  public void testMoveTextNearInlayAtBrokenSurrogates() throws Exception {
+    initText(""); // Cannot set up text with singular surrogate characters directly
+    runWriteCommand(() -> myEditor.getDocument().setText(LOW_SURROGATE + HIGH_SURROGATE));
+    Inlay inlay = addInlay(2);
+    FoldRegion region = addCollapsedFoldRegion(1, 2, "...");
+    
+    runWriteCommand(() -> ((DocumentEx)myEditor.getDocument()).moveText(1, 2, 0));
+    
+    assertFalse(inlay.isValid() && inlay.getOffset() == 1);
+    assertFalse(region.isValid() && (region.getStartOffset() == 1 || region.getEndOffset() == 1));
   }
 }

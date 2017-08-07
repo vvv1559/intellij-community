@@ -43,10 +43,11 @@ import java.util.List;
 import static com.intellij.diff.util.DiffUtil.getLineCount;
 
 public class DiffDrawUtil {
-  private static final int STRIPE_LAYER = HighlighterLayer.ERROR - 1;
-  private static final int DEFAULT_LAYER = HighlighterLayer.SELECTION - 3;
-  private static final int INLINE_LAYER = HighlighterLayer.SELECTION - 2;
-  private static final int LINE_MARKER_LAYER = HighlighterLayer.SELECTION - 1;
+  public static final int STRIPE_LAYER = HighlighterLayer.ERROR - 1;
+  public static final int DEFAULT_LAYER = HighlighterLayer.SELECTION - 3;
+  public static final int INLINE_LAYER = HighlighterLayer.SELECTION - 2;
+  public static final int LINE_MARKER_LAYER = HighlighterLayer.SELECTION - 1;
+  public static final int LST_LINE_MARKER_LAYER = HighlighterLayer.SELECTION - 1;
 
   private static final double CTRL_PROXIMITY_X = 0.3;
 
@@ -80,13 +81,6 @@ public class DiffDrawUtil {
       gutterBackground = EditorColors.GUTTER_BACKGROUND.getDefaultColor();
     }
     return gutterBackground;
-  }
-
-  public static void drawConnectorLineSeparator(@NotNull Graphics2D g,
-                                                int x1, int x2,
-                                                int start1, int end1,
-                                                int start2, int end2) {
-    drawConnectorLineSeparator(g, x1, x2, start1, end1, start2, end2, null);
   }
 
   public static void drawConnectorLineSeparator(@NotNull Graphics2D g,
@@ -404,6 +398,7 @@ public class DiffDrawUtil {
       List<RangeHighlighter> highlighters = new ArrayList<>();
 
       boolean isEmptyRange = startLine == endLine;
+      boolean isFirstLine = startLine == 0;
       boolean isLastLine = endLine == getLineCount(editor.getDocument());
 
       TextRange offsets = DiffUtil.getLinesRange(editor.getDocument(), startLine, endLine);
@@ -418,10 +413,10 @@ public class DiffDrawUtil {
       highlighters.add(highlighter);
 
       highlighter.setLineMarkerRenderer(new DiffLineMarkerRenderer(highlighter, type, ignored, resolved,
-                                                                   hideWithoutLineNumbers, isEmptyRange, isLastLine));
+                                                                   hideWithoutLineNumbers, isEmptyRange, isFirstLine, isLastLine));
 
       if (isEmptyRange) {
-        if (startLine == 0) {
+        if (isFirstLine) {
           highlighters.addAll(createLineMarker(editor, 0, type, SeparatorPlacement.TOP, true, resolved, false));
         }
         else {

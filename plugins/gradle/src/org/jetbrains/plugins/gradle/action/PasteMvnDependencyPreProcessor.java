@@ -20,18 +20,19 @@ import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.RawText;
 import com.intellij.openapi.project.Project;
 import com.intellij.psi.PsiFile;
-import org.apache.tools.ant.filters.StringInputStream;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.w3c.dom.Document;
 import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
+import org.xml.sax.InputSource;
 import org.xml.sax.SAXException;
 
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.parsers.ParserConfigurationException;
 import java.io.IOException;
+import java.io.StringReader;
 
 public class PasteMvnDependencyPreProcessor implements CopyPastePreProcessor {
 
@@ -57,7 +58,7 @@ public class PasteMvnDependencyPreProcessor implements CopyPastePreProcessor {
     try {
       DocumentBuilder builder = factory.newDocumentBuilder();
       try {
-        Document document = builder.parse(new StringInputStream(mavenDependency));
+        Document document = builder.parse(new InputSource(new StringReader(mavenDependency)));
         String gradleDependency = extractGradleDependency(document);
         return gradleDependency != null ? gradleDependency : mavenDependency;
       }
@@ -76,12 +77,14 @@ public class PasteMvnDependencyPreProcessor implements CopyPastePreProcessor {
     String artifactId = getArtifactId(document);
     String version = getVersion(document);
     String scope = getScope(document);
+    String classifier = getClassifier(document);
 
     if (groupId.isEmpty() || artifactId.isEmpty() || version.isEmpty()) {
       return null;
     }
+    String gradleClassifier = classifier.isEmpty() ? "" : ":" + classifier;
 
-    return scope + "'" + groupId + ":" + artifactId + ":" + version + "'";
+    return scope + "'" + groupId + ":" + artifactId + ":" + version + gradleClassifier + "'";
   }
 
   private static String getScope(@NotNull Document document) {
@@ -110,6 +113,10 @@ public class PasteMvnDependencyPreProcessor implements CopyPastePreProcessor {
 
   private static String getGroupId(@NotNull Document document) {
     return firstOrEmpty(document.getElementsByTagName("groupId"));
+  }
+
+  private static String getClassifier(@NotNull Document document) {
+    return firstOrEmpty(document.getElementsByTagName("classifier"));
   }
 
   private static String firstOrEmpty(@NotNull NodeList list) {

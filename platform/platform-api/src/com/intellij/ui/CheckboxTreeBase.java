@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -30,7 +30,7 @@ import java.awt.*;
 
 public class CheckboxTreeBase extends Tree {
   private final CheckboxTreeHelper myHelper;
-  private final EventDispatcher<CheckboxTreeListener> myEventDispatcher = EventDispatcher.create(CheckboxTreeListener.class);;
+  private final EventDispatcher<CheckboxTreeListener> myEventDispatcher = EventDispatcher.create(CheckboxTreeListener.class);
 
   public CheckboxTreeBase() {
     this(new CheckboxTreeCellRendererBase(), null);
@@ -132,6 +132,7 @@ public class CheckboxTreeBase extends Tree {
     private final ColoredTreeCellRenderer myTextRenderer;
     public final ThreeStateCheckBox myCheckbox;
     private final boolean myUsePartialStatusForParentNodes;
+    protected boolean myIgnoreInheritance;
 
     public CheckboxTreeCellRendererBase(boolean opaque) {
       this(opaque, true);
@@ -144,7 +145,7 @@ public class CheckboxTreeBase extends Tree {
       myCheckbox.setSelected(false);
       myCheckbox.setThirdStateEnabled(false);
       myTextRenderer = new ColoredTreeCellRenderer() {
-        public void customizeCellRenderer(JTree tree, Object value, boolean selected, boolean expanded, boolean leaf, int row, boolean hasFocus) { }
+        public void customizeCellRenderer(@NotNull JTree tree, Object value, boolean selected, boolean expanded, boolean leaf, int row, boolean hasFocus) { }
       };
       myTextRenderer.setOpaque(opaque);
       add(myCheckbox, BorderLayout.WEST);
@@ -167,6 +168,14 @@ public class CheckboxTreeBase extends Tree {
         myCheckbox.setOpaque(false);
         myCheckbox.setBackground(null);
         setBackground(null);
+
+        if (UIUtil.isUnderWin10LookAndFeel()) {
+          Object hoverValue = getClientProperty(UIUtil.CHECKBOX_ROLLOVER_PROPERTY);
+          myCheckbox.getModel().setRollover(hoverValue == value);
+
+          Object pressedValue = getClientProperty(UIUtil.CHECKBOX_PRESSED_PROPERTY);
+          myCheckbox.getModel().setPressed(pressedValue == value);
+        }
       }
       else {
         myCheckbox.setVisible(false);
@@ -187,6 +196,7 @@ public class CheckboxTreeBase extends Tree {
     }
 
     private NodeState getNodeStatus(final CheckedTreeNode node) {
+      if (myIgnoreInheritance) return node.isChecked() ? NodeState.FULL : NodeState.CLEAR;
       final boolean checked = node.isChecked();
       if (node.getChildCount() == 0 || !myUsePartialStatusForParentNodes) return checked ? NodeState.FULL : NodeState.CLEAR;
 
@@ -212,7 +222,7 @@ public class CheckboxTreeBase extends Tree {
      * Should be implemented by concrete implementations.
      * This method is invoked only for customization of component.
      * All component attributes are cleared when this method is being invoked.
-     * Note that in general case <code>value</code> is not an instance of CheckedTreeNode.
+     * Note that in general case {@code value} is not an instance of CheckedTreeNode.
      */
     public void customizeRenderer(JTree tree,
                                   Object value,
@@ -227,7 +237,7 @@ public class CheckboxTreeBase extends Tree {
     }
 
     /**
-     * @see CheckboxTreeCellRendererBase#customizeRenderer(javax.swing.JTree, Object, boolean, boolean, boolean, int, boolean)
+     * @see CheckboxTreeCellRendererBase#customizeRenderer(JTree, Object, boolean, boolean, boolean, int, boolean)
      * @deprecated
      */
     @Deprecated

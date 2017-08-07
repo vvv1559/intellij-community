@@ -25,14 +25,13 @@ import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.ex.EditorEx;
 import com.intellij.openapi.fileEditor.FileEditor;
 import com.intellij.openapi.fileEditor.TextEditor;
-import com.intellij.openapi.fileTypes.FileType;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiCompiledFile;
 import com.intellij.psi.PsiDocumentManager;
 import com.intellij.psi.PsiFile;
 import com.intellij.testFramework.LightVirtualFile;
-import com.intellij.util.concurrency.AppExecutorUtil;
+import com.intellij.util.concurrency.SequentialTaskExecutor;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.WeakList;
 import org.jetbrains.annotations.NotNull;
@@ -43,14 +42,14 @@ import java.util.List;
 import java.util.concurrent.ExecutorService;
 
 import static com.intellij.psi.codeStyle.CommonCodeStyleSettings.IndentOptions;
+import static com.intellij.psi.codeStyle.DetectAndAdjustIndentOptionsTask.getDefaultIndentOptions;
 import static com.intellij.psi.codeStyle.EditorNotificationInfo.ActionLabelData;
 
 /**
  * @author Rustam Vishnyakov
  */
 public class DetectableIndentOptionsProvider extends FileIndentOptionsProvider {
-  
-  private static final ExecutorService BOUNDED_EXECUTOR = AppExecutorUtil.createBoundedApplicationPoolExecutor("DetectableIndentOptionsProvider pool",1);
+  private static final ExecutorService BOUNDED_EXECUTOR = SequentialTaskExecutor.createSequentialApplicationPoolExecutor("DetectableIndentOptionsProvider pool");
   
   private boolean myIsEnabledInTest;
   private final List<VirtualFile> myAcceptedFiles = new WeakList<>();
@@ -70,24 +69,30 @@ public class DetectableIndentOptionsProvider extends FileIndentOptionsProvider {
       return null;
     }
 
-    IndentOptions options = getValidCachedIndentOptions(file, document);
-    if (options != null) {
-      return options;
+    TimeStampedIndentOptions options;
+    //noinspection SynchronizationOnLocalVariableOrMethodParameter
+    synchronized (document) {
+      options = getValidCachedIndentOptions(file, document);
+
+      if (options != null) {
+        return options;
+      }
+
+      options = getDefaultIndentOptions(file, document);
+      options.associateWithDocument(document);
     }
 
-    TimeStampedIndentOptions indentOptions = getDefault(file.getFileType(), project, document.getModificationStamp());
-    indentOptions.associateWithDocument(document);
+    scheduleDetectionInBackground(project, document, options);
 
-    DetectAndAdjustIndentOptionsTask task = new DetectAndAdjustIndentOptionsTask(project, document, indentOptions, BOUNDED_EXECUTOR);
-    task.scheduleInBackgroundForCommittedDocument();
-
-    return indentOptions;
+    return options;
   }
-  
-  @NotNull
-  private static TimeStampedIndentOptions getDefault(@NotNull FileType fileType, Project project, long timeStamp) {
-    CodeStyleSettings manager = CodeStyleSettingsManager.getSettings(project);
-    return new TimeStampedIndentOptions(manager.getIndentOptions(fileType), timeStamp);
+
+  protected void scheduleDetectionInBackground(@NotNull Project project,
+                                               @NotNull Document document,
+                                               @NotNull TimeStampedIndentOptions options)
+  {
+    DetectAndAdjustIndentOptionsTask task = new DetectAndAdjustIndentOptionsTask(project, document, options, BOUNDED_EXECUTOR);
+    task.scheduleInBackgroundForCommittedDocument();
   }
 
   @Override
@@ -201,13 +206,13 @@ public class DetectableIndentOptionsProvider extends FileIndentOptionsProvider {
     return !FileIndentOptionsProvider.isShowNotification() || myAcceptedFiles.contains(file);
   }
 
-  public IndentOptions getValidCachedIndentOptions(PsiFile file, Document document) {
+  public TimeStampedIndentOptions getValidCachedIndentOptions(PsiFile file, Document document) {
     IndentOptions options = IndentOptions.retrieveFromAssociatedDocument(file);
-    long documentStamp = document.getModificationStamp();
     if (options instanceof TimeStampedIndentOptions) {
-      long optionsStamp = ((TimeStampedIndentOptions)options).getTimeStamp();
-      if (optionsStamp == documentStamp) {
-        return options;
+      final IndentOptions defaultIndentOptions = getDefaultIndentOptions(file, document);
+      final TimeStampedIndentOptions cachedInDocument = (TimeStampedIndentOptions)options;
+      if (!cachedInDocument.isOutdated(document, defaultIndentOptions)) {
+        return cachedInDocument;
       }
     }
     return null;

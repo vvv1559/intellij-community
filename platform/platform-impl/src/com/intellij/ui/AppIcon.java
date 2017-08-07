@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,6 +26,9 @@ import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.wm.AppIconScheme;
 import com.intellij.openapi.wm.IdeFrame;
 import com.intellij.openapi.wm.WindowManager;
+import com.intellij.util.IconUtil;
+import com.intellij.util.containers.HashMap;
+import com.intellij.util.ui.ImageUtil;
 import com.intellij.util.ui.UIUtil;
 import org.apache.sanselan.ImageWriteException;
 import org.apache.sanselan.common.BinaryConstants;
@@ -44,6 +47,7 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.util.Map;
 
 public abstract class AppIcon {
   private static final Logger LOG = Logger.getInstance(AppIcon.class);
@@ -144,7 +148,7 @@ public abstract class AppIcon {
       Application app = ApplicationManager.getApplication();
 
       if (app != null && myAppListener == null) {
-        myAppListener = new ApplicationActivationListener.Adapter() {
+        myAppListener = new ApplicationActivationListener() {
           @Override
           public void applicationActivated(IdeFrame ideFrame) {
             hideProgress(ideFrame.getProject(), myCurrentProcessId);
@@ -161,8 +165,9 @@ public abstract class AppIcon {
 
 
   @SuppressWarnings("UseJBColor")
-  private static class MacAppIcon extends BaseIcon {
+  static class MacAppIcon extends BaseIcon {
     private BufferedImage myAppImage;
+    private Map<Object, AppImage> myProgressImagesCache = new HashMap<>();
 
     private BufferedImage getAppImage() {
       assertIsDispatchThread();
@@ -174,13 +179,7 @@ public abstract class AppIcon {
         Image appImage = (Image)getAppMethod("getDockIconImage").invoke(app);
 
         if (appImage == null) return null;
-
-        int width = appImage.getWidth(null);
-        int height = appImage.getHeight(null);
-        BufferedImage img = UIUtil.createImage(width, height, BufferedImage.TYPE_INT_ARGB);
-        Graphics2D g2d = img.createGraphics();
-        g2d.drawImage(appImage, null, null);
-        myAppImage = img;
+        myAppImage = ImageUtil.toBufferedImage(appImage);
       }
       catch (NoSuchMethodException e) {
         return null;
@@ -244,6 +243,7 @@ public abstract class AppIcon {
       if (myCurrentProcessId != null && !myCurrentProcessId.equals(processId)) return false;
 
       setDockIcon(getAppImage());
+      myProgressImagesCache.remove(myCurrentProcessId);
       myCurrentProcessId = null;
       myLastValue = 0;
 
@@ -261,7 +261,12 @@ public abstract class AppIcon {
       if (visible) {
         Icon okIcon = AllIcons.Mac.AppIconOk512;
 
-        int x = img.myImg.getWidth() - okIcon.getIconWidth();
+        int myImgWidth = img.myImg.getWidth();
+        if (myImgWidth != 128) {
+          okIcon = IconUtil.scale(okIcon, myImgWidth / 128);
+        }
+
+        int x = myImgWidth - okIcon.getIconWidth();
         int y = 0;
 
         okIcon.paintIcon(JOptionPane.getRootFrame(), img.myG2d, x, y);
@@ -307,7 +312,8 @@ public abstract class AppIcon {
 
         progressArea.intersect(borderArea);
 
-        AppImage appImg = createAppImage();
+        AppImage appImg = myProgressImagesCache.get(myCurrentProcessId);
+        if (appImg == null) myProgressImagesCache.put(myCurrentProcessId, appImg = createAppImage());
 
         appImg.myG2d.setColor(PROGRESS_BACKGROUND_COLOR);
         appImg.myG2d.fill(backgroundArea);
@@ -335,10 +341,11 @@ public abstract class AppIcon {
     private AppImage createAppImage() {
       BufferedImage appImage = getAppImage();
       assert appImage != null;
-      BufferedImage current = UIUtil.createImage(appImage.getWidth(), appImage.getHeight(), BufferedImage.TYPE_INT_ARGB);
+      @SuppressWarnings("UndesirableClassUsage")
+      BufferedImage current = new BufferedImage(appImage.getWidth(), appImage.getHeight(), BufferedImage.TYPE_INT_ARGB);
       Graphics2D g = current.createGraphics();
       g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-      g.drawImage(appImage, null, null);
+      UIUtil.drawImage(g, appImage, 0, 0, null);
       return new AppImage(current, g);
     }
 
@@ -352,7 +359,7 @@ public abstract class AppIcon {
       }
     }
 
-    private static void setDockIcon(BufferedImage image) {
+    static void setDockIcon(BufferedImage image) {
       try {
         getAppMethod("setDockIconImage", Image.class).invoke(getApp(), image);
       }
@@ -537,7 +544,7 @@ public abstract class AppIcon {
       if (text != null) {
         try {
           int size = 16;
-          BufferedImage image = UIUtil.createImage(size, size, BufferedImage.TYPE_INT_ARGB);
+          BufferedImage image = UIUtil.createImage(frame.getComponent(), size, size, BufferedImage.TYPE_INT_ARGB);
           Graphics2D g = image.createGraphics();
 
           int shadowRadius = 16;

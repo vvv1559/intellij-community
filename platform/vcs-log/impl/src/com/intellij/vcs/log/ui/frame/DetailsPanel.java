@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,9 +23,9 @@ import com.intellij.openapi.editor.colors.EditorColorsScheme;
 import com.intellij.openapi.progress.util.ProgressWindow;
 import com.intellij.openapi.roots.ui.componentsList.components.ScrollablePanel;
 import com.intellij.openapi.ui.OnePixelDivider;
+import com.intellij.openapi.ui.VerticalFlowLayout;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vcs.history.VcsHistoryUtil;
-import com.intellij.ui.IdeBorderFactory;
 import com.intellij.ui.SeparatorComponent;
 import com.intellij.ui.components.JBLabel;
 import com.intellij.ui.components.JBLoadingPanel;
@@ -33,11 +33,13 @@ import com.intellij.ui.components.JBScrollPane;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.StatusText;
+import com.intellij.util.ui.UIUtil;
 import com.intellij.vcs.log.VcsFullCommitDetails;
 import com.intellij.vcs.log.VcsRef;
 import com.intellij.vcs.log.data.VcsLogData;
-import com.intellij.vcs.log.data.VisiblePack;
 import com.intellij.vcs.log.ui.VcsLogColorManager;
+import com.intellij.vcs.log.ui.table.CommitSelectionListener;
+import com.intellij.vcs.log.ui.table.VcsLogGraphTable;
 import org.jetbrains.annotations.NotNull;
 
 import javax.swing.*;
@@ -48,8 +50,9 @@ import java.util.List;
 /**
  * @author Kirill Likhodedov
  */
-class DetailsPanel extends JPanel implements EditorColorsListener {
+public class DetailsPanel extends JPanel implements EditorColorsListener {
   private static final int MAX_ROWS = 50;
+  private static final int MIN_SIZE = 20;
 
   @NotNull private final VcsLogData myLogData;
 
@@ -60,21 +63,16 @@ class DetailsPanel extends JPanel implements EditorColorsListener {
   @NotNull private final JBLoadingPanel myLoadingPanel;
   @NotNull private final VcsLogColorManager myColorManager;
 
-  @NotNull private VisiblePack myDataPack;
   @NotNull private List<Integer> mySelection = ContainerUtil.emptyList();
   @NotNull private Set<VcsFullCommitDetails> myCommitDetails = Collections.emptySet();
 
-  DetailsPanel(@NotNull VcsLogData logData,
-               @NotNull VcsLogColorManager colorManager,
-               @NotNull VisiblePack initialDataPack,
-               @NotNull Disposable parent) {
+  public DetailsPanel(@NotNull VcsLogData logData,
+                      @NotNull VcsLogColorManager colorManager,
+                      @NotNull Disposable parent) {
     myLogData = logData;
     myColorManager = colorManager;
-    myDataPack = initialDataPack;
 
     myScrollPane = new JBScrollPane(ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED, ScrollPaneConstants.HORIZONTAL_SCROLLBAR_AS_NEEDED);
-    myScrollPane.getVerticalScrollBar().setUnitIncrement(JBUI.scale(10));
-    myScrollPane.getHorizontalScrollBar().setUnitIncrement(JBUI.scale(10));
     myMainContentPanel = new ScrollablePanel() {
       @Override
       public boolean getScrollableTracksViewportWidth() {
@@ -91,7 +89,14 @@ class DetailsPanel extends JPanel implements EditorColorsListener {
       @Override
       public Dimension getPreferredSize() {
         Dimension preferredSize = super.getPreferredSize();
-        return new Dimension(preferredSize.width, Math.max(preferredSize.height, myScrollPane.getViewport().getHeight()));
+        int height = Math.max(preferredSize.height, myScrollPane.getViewport().getHeight());
+        JBScrollPane scrollPane = UIUtil.getParentOfType(JBScrollPane.class, this);
+        if (scrollPane == null || getScrollableTracksViewportWidth()) {
+          return new Dimension(preferredSize.width, height);
+        }
+        else {
+          return new Dimension(Math.max(preferredSize.width, scrollPane.getViewport().getWidth()), height);
+        }
       }
 
       @Override
@@ -115,12 +120,12 @@ class DetailsPanel extends JPanel implements EditorColorsListener {
         return StringUtil.isNotEmpty(getText());
       }
     };
-    myMainContentPanel.setLayout(new BoxLayout(myMainContentPanel, BoxLayout.Y_AXIS));
+    myMainContentPanel.setLayout(new VerticalFlowLayout(VerticalFlowLayout.TOP, 0, 0, true, false));
 
     myMainContentPanel.setOpaque(false);
     myScrollPane.setViewportView(myMainContentPanel);
-    myScrollPane.setBorder(IdeBorderFactory.createEmptyBorder());
-    myScrollPane.setViewportBorder(IdeBorderFactory.createEmptyBorder());
+    myScrollPane.setBorder(JBUI.Borders.empty());
+    myScrollPane.setViewportBorder(JBUI.Borders.empty());
 
     myLoadingPanel = new JBLoadingPanel(new BorderLayout(), parent, ProgressWindow.DEFAULT_PROGRESS_DIALOG_POSTPONE_TIME_MILLIS) {
       @Override
@@ -153,15 +158,6 @@ class DetailsPanel extends JPanel implements EditorColorsListener {
     graphTable.getSelectionModel().addListSelectionListener(new CommitSelectionListenerForDetails(graphTable));
   }
 
-  void updateDataPack(@NotNull VisiblePack dataPack) {
-    myDataPack = dataPack;
-
-    for (int i = 0; i < mySelection.size(); i++) {
-      CommitPanel commitPanel = getCommitPanel(i);
-      commitPanel.setDataPack(dataPack);
-    }
-  }
-
   public void branchesChanged() {
     for (int i = 0; i < mySelection.size(); i++) {
       CommitPanel commitPanel = getCommitPanel(i);
@@ -181,7 +177,7 @@ class DetailsPanel extends JPanel implements EditorColorsListener {
       if (i > 0) {
         myMainContentPanel.add(new SeparatorComponent(0, OnePixelDivider.BACKGROUND, null));
       }
-      myMainContentPanel.add(new CommitPanel(myLogData, myColorManager, myDataPack));
+      myMainContentPanel.add(new CommitPanel(myLogData, myColorManager));
     }
 
     // clear superfluous items
@@ -193,11 +189,7 @@ class DetailsPanel extends JPanel implements EditorColorsListener {
       myMainContentPanel.add(new SeparatorComponent(0, OnePixelDivider.BACKGROUND, null));
       JBLabel label = new JBLabel("(showing " + MAX_ROWS + " of " + selectionLength + " selected commits)");
       label.setFont(VcsHistoryUtil.getCommitDetailsFont());
-      label.setBorder(JBUI.Borders.empty(VcsLogGraphTable.ROOT_INDICATOR_WHITE_WIDTH / 2,
-                                         myColorManager.isMultipleRoots()
-                                         ? VcsLogGraphTable.ROOT_INDICATOR_WHITE_WIDTH +
-                                           VcsLogGraphTable.ROOT_INDICATOR_COLORED_WIDTH
-                                         : VcsLogGraphTable.ROOT_INDICATOR_WHITE_WIDTH / 2, CommitPanel.BOTTOM_BORDER, 0));
+      label.setBorder(CommitPanel.getDetailsBorder());
       myMainContentPanel.add(label);
     }
 
@@ -211,9 +203,15 @@ class DetailsPanel extends JPanel implements EditorColorsListener {
     return (CommitPanel)myMainContentPanel.getComponent(2 * index);
   }
 
+  @Override
+  public Dimension getMinimumSize() {
+    Dimension minimumSize = super.getMinimumSize();
+    return new Dimension(Math.max(minimumSize.width, JBUI.scale(MIN_SIZE)), Math.max(minimumSize.height, JBUI.scale(MIN_SIZE)));
+  }
+
   private class CommitSelectionListenerForDetails extends CommitSelectionListener {
     public CommitSelectionListenerForDetails(VcsLogGraphTable graphTable) {
-      super(DetailsPanel.this.myLogData, graphTable, DetailsPanel.this.myLoadingPanel);
+      super(DetailsPanel.this.myLogData, graphTable);
     }
 
     @Override
@@ -262,6 +260,16 @@ class DetailsPanel extends JPanel implements EditorColorsListener {
     @Override
     protected List<Integer> getSelectionToLoad() {
       return mySelection;
+    }
+
+    @Override
+    protected void startLoading() {
+      myLoadingPanel.startLoading();
+    }
+
+    @Override
+    protected void stopLoading() {
+      myLoadingPanel.stopLoading();
     }
   }
 }

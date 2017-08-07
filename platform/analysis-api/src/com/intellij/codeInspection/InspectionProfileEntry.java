@@ -21,6 +21,7 @@ import com.intellij.lang.Language;
 import com.intellij.lang.injection.InjectedLanguageManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.DefaultJDOMExternalizer;
 import com.intellij.openapi.util.InvalidDataException;
 import com.intellij.openapi.util.WriteExternalException;
 import com.intellij.openapi.util.text.StringUtil;
@@ -48,10 +49,7 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.net.URL;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.LinkedHashSet;
-import java.util.Set;
+import java.util.*;
 
 /**
  * @author anna
@@ -176,26 +174,32 @@ public abstract class InspectionProfileEntry implements BatchSuppressableTool {
   @NotNull
   public static Set<InspectionSuppressor> getSuppressors(@NotNull PsiElement element) {
     FileViewProvider viewProvider = element.getContainingFile().getViewProvider();
-    final InspectionSuppressor elementLanguageSuppressor = LanguageInspectionSuppressors.INSTANCE.forLanguage(element.getLanguage());
+    final List<InspectionSuppressor> elementLanguageSuppressor = LanguageInspectionSuppressors.INSTANCE.allForLanguage(element.getLanguage());
     if (viewProvider instanceof TemplateLanguageFileViewProvider) {
       Set<InspectionSuppressor> suppressors = new LinkedHashSet<>();
-      ContainerUtil.addIfNotNull(suppressors, LanguageInspectionSuppressors.INSTANCE.forLanguage(viewProvider.getBaseLanguage()));
+      ContainerUtil.addAllNotNull(suppressors, LanguageInspectionSuppressors.INSTANCE.allForLanguage(viewProvider.getBaseLanguage()));
       for (Language language : viewProvider.getLanguages()) {
-        ContainerUtil.addIfNotNull(suppressors, LanguageInspectionSuppressors.INSTANCE.forLanguage(language));
+        ContainerUtil.addAllNotNull(suppressors, LanguageInspectionSuppressors.INSTANCE.allForLanguage(language));
       }
-      ContainerUtil.addIfNotNull(suppressors, elementLanguageSuppressor);
+      ContainerUtil.addAllNotNull(suppressors, elementLanguageSuppressor);
       return suppressors;
     }
     if (!element.getLanguage().isKindOf(viewProvider.getBaseLanguage())) {
       // handling embedding elements {@link EmbeddingElementType
       Set<InspectionSuppressor> suppressors = new LinkedHashSet<>();
-      ContainerUtil.addIfNotNull(suppressors, LanguageInspectionSuppressors.INSTANCE.forLanguage(viewProvider.getBaseLanguage()));
-      ContainerUtil.addIfNotNull(suppressors, elementLanguageSuppressor);
+      ContainerUtil.addAllNotNull(suppressors, LanguageInspectionSuppressors.INSTANCE.allForLanguage(viewProvider.getBaseLanguage()));
+      ContainerUtil.addAllNotNull(suppressors, elementLanguageSuppressor);
       return suppressors;
     }
-    return elementLanguageSuppressor != null
-           ? Collections.singleton(elementLanguageSuppressor)
-           : Collections.emptySet();
+    int size = elementLanguageSuppressor.size();
+    switch (size) {
+      case 0:
+        return Collections.emptySet();
+      case 1:
+        return Collections.singleton(elementLanguageSuppressor.get(0));
+      default:
+        return new java.util.HashSet<>(elementLanguageSuppressor);
+    }
   }
 
   public void cleanup(@NotNull Project project) {
@@ -310,14 +314,14 @@ public abstract class InspectionProfileEntry implements BatchSuppressableTool {
 
   /**
    * Read in settings from XML config.
-   * Default implementation uses XmlSerializer so you may use public fields (like <code>int TOOL_OPTION</code>)
-   * and bean-style getters/setters (like <code>int getToolOption(), void setToolOption(int)</code>) to store your options.
+   * Default implementation uses XmlSerializer so you may use public fields (like {@code int TOOL_OPTION})
+   * and bean-style getters/setters (like {@code int getToolOption(), void setToolOption(int)}) to store your options.
    *
    * @param node to read settings from.
    * @throws InvalidDataException if the loaded data was not valid.
    */
   @SuppressWarnings("deprecation")
-  public void readSettings(@NotNull Element node) throws InvalidDataException {
+  public void readSettings(@NotNull Element node) {
     if (useNewSerializer()) {
       try {
         XmlSerializer.deserializeInto(this, node);
@@ -327,27 +331,25 @@ public abstract class InspectionProfileEntry implements BatchSuppressableTool {
       }
     }
     else {
-      //noinspection UnnecessaryFullyQualifiedName
-      com.intellij.openapi.util.DefaultJDOMExternalizer.readExternal(this, node);
+      DefaultJDOMExternalizer.readExternal(this, node);
     }
   }
 
   /**
    * Store current settings in XML config.
-   * Default implementation uses XmlSerializer so you may use public fields (like <code>int TOOL_OPTION</code>)
-   * and bean-style getters/setters (like <code>int getToolOption(), void setToolOption(int)</code>) to store your options.
+   * Default implementation uses XmlSerializer so you may use public fields (like {@code int TOOL_OPTION})
+   * and bean-style getters/setters (like {@code int getToolOption(), void setToolOption(int)}) to store your options.
    *
    * @param node to store settings to.
    * @throws WriteExternalException if no data should be saved for this component.
    */
-  @SuppressWarnings("deprecation")
-  public void writeSettings(@NotNull Element node) throws WriteExternalException {
+  public void writeSettings(@NotNull Element node) {
     if (useNewSerializer()) {
       XmlSerializer.serializeInto(this, node, getSerializationFilter());
     }
     else {
-      //noinspection UnnecessaryFullyQualifiedName
-      com.intellij.openapi.util.DefaultJDOMExternalizer.writeExternal(this, node);
+      //noinspection deprecation
+      DefaultJDOMExternalizer.writeExternal(this, node);
     }
   }
 
@@ -367,17 +369,11 @@ public abstract class InspectionProfileEntry implements BatchSuppressableTool {
       return;
     }
 
-    try {
-      final BufferedReader reader = new BufferedReader(new InputStreamReader(url.openStream()));
-      try {
-        String line;
-        while ((line = reader.readLine()) != null) {
-          line = line.trim();
-          if (!line.isEmpty()) ourBlackList.add(line);
-        }
-      }
-      finally {
-        reader.close();
+    try (BufferedReader reader = new BufferedReader(new InputStreamReader(url.openStream()))) {
+      String line;
+      while ((line = reader.readLine()) != null) {
+        line = line.trim();
+        if (!line.isEmpty()) ourBlackList.add(line);
       }
     }
     catch (IOException e) {

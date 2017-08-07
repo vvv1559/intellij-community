@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
  */
 package com.intellij.psi;
 
+import com.intellij.lang.jvm.types.JvmType;
 import com.intellij.openapi.project.Project;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.psi.util.TypeConversionUtil;
@@ -25,7 +26,7 @@ import org.jetbrains.annotations.Nullable;
 /**
  * Representation of Java type (primitive type, array or class type).
  */
-public abstract class PsiType implements PsiAnnotationOwner, Cloneable {
+public abstract class PsiType implements PsiAnnotationOwner, Cloneable, JvmType {
   @SuppressWarnings("StaticInitializerReferencesSubClass") public static final PsiPrimitiveType BYTE = new PsiPrimitiveType("byte", "java.lang.Byte");
   @SuppressWarnings("StaticInitializerReferencesSubClass") public static final PsiPrimitiveType CHAR = new PsiPrimitiveType("char", "java.lang.Character");
   @SuppressWarnings("StaticInitializerReferencesSubClass") public static final PsiPrimitiveType DOUBLE = new PsiPrimitiveType("double", "java.lang.Double");
@@ -38,13 +39,7 @@ public abstract class PsiType implements PsiAnnotationOwner, Cloneable {
   @SuppressWarnings("StaticInitializerReferencesSubClass") public static final PsiPrimitiveType NULL = new PsiPrimitiveType("null", (String)null);
 
   public static final PsiType[] EMPTY_ARRAY = new PsiType[0];
-  public static final ArrayFactory<PsiType> ARRAY_FACTORY = new ArrayFactory<PsiType>() {
-    @NotNull
-    @Override
-    public PsiType[] create(int count) {
-      return count == 0 ? EMPTY_ARRAY : new PsiType[count];
-    }
-  };
+  public static final ArrayFactory<PsiType> ARRAY_FACTORY = count -> count == 0 ? EMPTY_ARRAY : new PsiType[count];
 
   @NotNull
   public static PsiType[] createArray(int count) {
@@ -90,7 +85,6 @@ public abstract class PsiType implements PsiAnnotationOwner, Cloneable {
   }
 
   /** @deprecated use {@link #annotate(TypeAnnotationProvider)} (to be removed in IDEA 18) */
-  @SuppressWarnings("unused")
   public PsiArrayType createArrayType(@NotNull PsiAnnotation... annotations) {
     return new PsiArrayType(this, annotations);
   }
@@ -128,7 +122,9 @@ public abstract class PsiType implements PsiAnnotationOwner, Cloneable {
    * todo[r.sh] merge with getPresentableText()
    */
   @NotNull
-  public abstract String getInternalCanonicalText();
+  public String getInternalCanonicalText() {
+    return getCanonicalText();
+  }
 
   /**
    * Checks if the type is currently valid.
@@ -139,14 +135,14 @@ public abstract class PsiType implements PsiAnnotationOwner, Cloneable {
   public abstract boolean isValid();
 
   /**
-   * @return true if values of type <code>type</code> can be assigned to rvalues of this type.
+   * @return true if values of type {@code type} can be assigned to rvalues of this type.
    */
   public boolean isAssignableFrom(@NotNull PsiType type) {
     return TypeConversionUtil.isAssignable(this, type);
   }
 
   /**
-   * Checks whether values of type <code>type</code> can be casted to this type.
+   * Checks whether values of type {@code type} can be casted to this type.
    */
   public boolean isConvertibleFrom(@NotNull PsiType type) {
     return TypeConversionUtil.areTypesConvertible(type, this);
@@ -271,7 +267,7 @@ public abstract class PsiType implements PsiAnnotationOwner, Cloneable {
   /**
    * Returns the innermost component type for an array type.
    *
-   * @return the innermost (non-array) component of the type, or <code>this</code> if the type is not
+   * @return the innermost (non-array) component of the type, or {@code this} if the type is not
    *         an array type.
    */
   @NotNull

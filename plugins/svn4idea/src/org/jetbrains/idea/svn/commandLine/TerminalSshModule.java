@@ -30,14 +30,13 @@ import org.tmatesoft.svn.core.auth.ISVNAuthenticationProvider;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import static com.intellij.ssh.SSHUtil.PASSPHRASE_PROMPT;
+import static com.intellij.ssh.SSHUtil.PASSWORD_PROMPT;
+
 /**
  * @author Konstantin Kolosovsky.
  */
 public class TerminalSshModule extends BaseTerminalModule {
-
-  private static final Pattern PASSPHRASE_PROMPT = Pattern.compile("Enter passphrase for key \\'(.*)\\':\\s?");
-  private static final Pattern PASSWORD_PROMPT = Pattern.compile("(.*)\\'s password:\\s?");
-
   private static final Pattern UNKNOWN_HOST_MESSAGE =
     Pattern.compile("The authenticity of host \\'((.*) \\((.*)\\))\\' can\\'t be established\\.\\s?");
   private static final Pattern HOST_FINGERPRINT_MESSAGE = Pattern.compile("(\\w+) key fingerprint is (.*)\\.\\s?");
@@ -91,13 +90,10 @@ public class TerminalSshModule extends BaseTerminalModule {
     final Project project = myRuntime.getVcs().getProject();
     final Ref<Integer> answer = new Ref<>();
 
-    Runnable command = new Runnable() {
-      @Override
-      public void run() {
-        final ServerSSHDialog dialog = new ServerSSHDialog(project, true, unknownHost, fingerprintAlgorithm, hostFingerprint);
-        dialog.show();
-        answer.set(dialog.getResult());
-      }
+    Runnable command = () -> {
+      final ServerSSHDialog dialog = new ServerSSHDialog(project, true, unknownHost, fingerprintAlgorithm, hostFingerprint);
+      dialog.show();
+      answer.set(dialog.getResult());
     };
 
     // Use ModalityState.any() as currently ssh credentials in terminal mode are requested in the thread that reads output and not in

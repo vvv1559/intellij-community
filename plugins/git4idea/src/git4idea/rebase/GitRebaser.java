@@ -24,6 +24,7 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.vcs.ProjectLevelVcsManager;
 import com.intellij.openapi.vcs.VcsException;
+import com.intellij.openapi.vcs.VcsNotifier;
 import com.intellij.openapi.vfs.CharsetToolkit;
 import com.intellij.openapi.vfs.VirtualFile;
 import git4idea.GitUtil;
@@ -93,7 +94,7 @@ public class GitRebaser {
       myProgressIndicator.setText(oldText);
       return result.success() ?
              GitUpdateResult.SUCCESS :
-             handleRebaseFailure(rebaseHandler, root, rebaseConflictDetector, untrackedFilesDetector, localChangesDetector);
+             handleRebaseFailure(rebaseHandler, root, result, rebaseConflictDetector, untrackedFilesDetector, localChangesDetector);
     }
     catch (ProcessCanceledException pce) {
       if (onCancel != null) {
@@ -102,7 +103,7 @@ public class GitRebaser {
       return GitUpdateResult.CANCEL;
     }
     finally {
-      DvcsUtil.workingTreeChangeFinished(myProject, token);
+      token.finish();
     }
   }
 
@@ -138,7 +139,7 @@ public class GitRebaser {
       return success;
     }
     finally {
-      DvcsUtil.workingTreeChangeFinished(myProject, token);
+      token.finish();
     }
   }
 
@@ -162,8 +163,8 @@ public class GitRebaser {
   protected void makeContinueRebaseInteractiveEditor(VirtualFile root, GitLineHandler rh) {
     GitRebaseEditorService rebaseEditorService = GitRebaseEditorService.getInstance();
     // TODO If interactive rebase with commit rewording was invoked, this should take the reworded message
-    GitRebaser.TrivialEditor editor = new GitRebaser.TrivialEditor(rebaseEditorService, myProject, root, rh);
-    Integer rebaseEditorNo = editor.getHandlerNo();
+    GitRebaser.TrivialEditor editor = new GitRebaser.TrivialEditor(rebaseEditorService, myProject, root);
+    UUID rebaseEditorNo = editor.getHandlerNo();
     rebaseEditorService.configureHandler(rh, rebaseEditorNo);
   }
 
@@ -196,7 +197,7 @@ public class GitRebaser {
 
     final GitLineHandler h = new GitLineHandler(myProject, root, GitCommand.REBASE);
     h.setStdoutSuppressed(false);
-    Integer rebaseEditorNo = null;
+    UUID rebaseEditorNo = null;
     GitRebaseEditorService rebaseEditorService = GitRebaseEditorService.getInstance();
     try {
       h.addParameters("-i", "-m", "-v");
@@ -205,7 +206,7 @@ public class GitRebaser {
       final GitRebaseProblemDetector rebaseConflictDetector = new GitRebaseProblemDetector();
       h.addLineListener(rebaseConflictDetector);
 
-      final PushRebaseEditor pushRebaseEditor = new PushRebaseEditor(rebaseEditorService, root, olderCommits, false, h);
+      final PushRebaseEditor pushRebaseEditor = new PushRebaseEditor(rebaseEditorService, root, olderCommits, false);
       rebaseEditorNo = pushRebaseEditor.getHandlerNo();
       rebaseEditorService.configureHandler(h, rebaseEditorNo);
 
@@ -310,13 +311,12 @@ public class GitRebaser {
   public static class TrivialEditor extends GitInteractiveRebaseEditorHandler{
     public TrivialEditor(@NotNull GitRebaseEditorService service,
                          @NotNull Project project,
-                         @NotNull VirtualFile root,
-                         @NotNull GitHandler handler) {
-      super(service, project, root, handler);
+                         @NotNull VirtualFile root) {
+      super(service, project, root);
     }
 
     @Override
-    public int editCommits(String path) {
+    public int editCommits(@NotNull String path) {
       return 0;
     }
   }
@@ -324,6 +324,7 @@ public class GitRebaser {
   @NotNull
   public GitUpdateResult handleRebaseFailure(@NotNull GitLineHandler handler,
                                              @NotNull VirtualFile root,
+                                             @NotNull GitCommandResult result,
                                              @NotNull GitRebaseProblemDetector rebaseConflictDetector,
                                              @NotNull GitMessageWithFilesDetector untrackedWouldBeOverwrittenDetector,
                                              @NotNull GitLocalChangesWouldBeOverwrittenDetector localChangesDetector) {
@@ -344,7 +345,7 @@ public class GitRebaser {
     }
     else {
       LOG.info("handleRebaseFailure error " + handler.errors());
-      GitUIUtil.notifyImportantError(myProject, "Rebase error", GitUIUtil.stringifyErrors(handler.errors()));
+      VcsNotifier.getInstance(myProject).notifyError("Rebase error", result.getErrorOutputAsHtmlString());
       return GitUpdateResult.ERROR;
     }
   }
@@ -397,14 +398,13 @@ public class GitRebaser {
     public PushRebaseEditor(GitRebaseEditorService rebaseEditorService,
                             final VirtualFile root,
                             List<String> commits,
-                            boolean hasMerges,
-                            GitHandler h) {
-      super(rebaseEditorService, myProject, root, h);
+                            boolean hasMerges) {
+      super(rebaseEditorService, myProject, root);
       myCommits = commits;
       myHasMerges = hasMerges;
     }
 
-    public int editCommits(String path) {
+    public int editCommits(@NotNull String path) {
       if (!myRebaseEditorShown) {
         myRebaseEditorShown = true;
         if (myHasMerges) {

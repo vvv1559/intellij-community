@@ -6,7 +6,7 @@ import javax.swing.*;
 
 /**
  * NOTE THIS FILE IS AUTO-GENERATED
- * DO NOT EDIT IT BY HAND, run build/scripts/icons.gant instead
+ * DO NOT EDIT IT BY HAND, run "Generate icon classes" configuration instead
  */
 public class VcsLogIcons {
   private static Icon load(String path) {
@@ -18,6 +18,7 @@ public class VcsLogIcons {
   public static final Icon CollapseMerges = load("/icons/CollapseMerges.png"); // 16x16
   public static final Icon ExpandBranches = load("/icons/ExpandBranches.png"); // 16x16
   public static final Icon ExpandMerges = load("/icons/ExpandMerges.png"); // 16x16
+  public static final Icon GearWithDropDown = load("/icons/GearWithDropDown.png"); // 21x21
   public static final Icon IntelliSort = load("/icons/IntelliSort.png"); // 16x16
   
   public static class Process {
@@ -29,4 +30,5 @@ public class VcsLogIcons {
 
   }
   public static final Icon ShowHideLongEdges = load("/icons/ShowHideLongEdges.png"); // 16x16
+  public static final Icon ShowOtherBranches = load("/icons/ShowOtherBranches.png"); // 16x16
 }

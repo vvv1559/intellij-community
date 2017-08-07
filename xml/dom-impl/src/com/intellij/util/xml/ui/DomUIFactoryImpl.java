@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,8 +21,8 @@ import com.intellij.codeInsight.daemon.impl.DefaultHighlightInfoProcessor;
 import com.intellij.codeInsight.daemon.impl.GeneralHighlightingPass;
 import com.intellij.codeInsight.daemon.impl.LocalInspectionsPass;
 import com.intellij.openapi.editor.Document;
-import com.intellij.openapi.editor.event.DocumentAdapter;
 import com.intellij.openapi.editor.event.DocumentEvent;
+import com.intellij.openapi.editor.event.DocumentListener;
 import com.intellij.openapi.editor.impl.EditorComponentImpl;
 import com.intellij.openapi.extensions.Extensions;
 import com.intellij.openapi.project.Project;
@@ -71,6 +71,7 @@ public class DomUIFactoryImpl extends DomUIFactory {
   @Override
   protected TableCellEditor createCellEditor(DomElement element, Class type) {
     if (Enum.class.isAssignableFrom(type)) {
+      //noinspection unchecked
       return new ComboTableCellEditor((Class<? extends Enum>)type, false);
     }
 
@@ -82,7 +83,7 @@ public class DomUIFactoryImpl extends DomUIFactory {
   @Override
   public final UserActivityWatcher createEditorAwareUserActivityWatcher() {
     return new UserActivityWatcher() {
-      private final DocumentAdapter myListener = new DocumentAdapter() {
+      private final DocumentListener myListener = new DocumentListener() {
         @Override
         public void documentChanged(DocumentEvent e) {
           fireUIChanged();
@@ -159,8 +160,6 @@ public class DomUIFactoryImpl extends DomUIFactory {
         if (document == null) return HighlightingPass.EMPTY_ARRAY;
 
         editor.commit();
-
-        psiDocumentManager.commitAllDocuments();
 
         GeneralHighlightingPass ghp = new GeneralHighlightingPass(project, psiFile, document, 0, document.getTextLength(),
                                                                   true, new ProperTextRange(0, document.getTextLength()), null, new DefaultHighlightInfoProcessor());

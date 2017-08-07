@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -31,14 +31,13 @@ import com.intellij.openapi.extensions.Extensions;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiManager;
 import com.intellij.psi.SmartPsiElementPointer;
 import com.intellij.psi.impl.PsiManagerImpl;
 import com.intellij.psi.impl.file.PsiDirectoryImpl;
-import com.intellij.psi.util.PsiUtilCore;
 import com.intellij.util.ArrayUtil;
 import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -173,22 +172,23 @@ public class FavoritesTreeStructure extends ProjectTreeStructure {
         if (virtualFile == null) return children;
         VirtualFile[] virtualFiles = virtualFile.getChildren();
         List<AbstractTreeNode> result = new ArrayList<>();
+        PsiManagerImpl psiManager = (PsiManagerImpl)PsiManager.getInstance(myProject);
         for (VirtualFile file : virtualFiles) {
           AbstractTreeNode child;
-          if (file.isDirectory()) child = new PsiDirectoryNode(myProject, new PsiDirectoryImpl((PsiManagerImpl)PsiManager.getInstance(myProject), file), settings);
-          else child = new PsiFileNode(myProject, PsiUtilCore.getPsiFile(myProject, file), settings);
+          if (file.isDirectory()) {
+            child = new PsiDirectoryNode(myProject, new PsiDirectoryImpl(psiManager, file), settings);
+          }
+          else {
+            PsiFile psiFile = psiManager.findFile(file);
+            if (psiFile == null) continue;
+            child = new PsiFileNode(myProject, psiFile, settings);
+          }
           child.setParent(parent);
           result.add(child);
         }
         return result;
       }
       return children;
-    }
-
-    @Nullable
-    @Override
-    public Object getData(Collection<AbstractTreeNode> selected, String dataName) {
-      return null;
     }
   }
 }

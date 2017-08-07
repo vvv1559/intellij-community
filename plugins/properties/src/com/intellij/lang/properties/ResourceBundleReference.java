@@ -21,7 +21,6 @@ import com.intellij.codeInsight.lookup.LookupElementBuilder;
 import com.intellij.icons.AllIcons;
 import com.intellij.lang.properties.psi.PropertiesFile;
 import com.intellij.openapi.roots.ProjectFileIndex;
-import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.*;
 import com.intellij.util.Function;
 import com.intellij.util.IncorrectOperationException;
@@ -50,7 +49,7 @@ public class ResourceBundleReference extends PsiReferenceBase<PsiElement>
 
   public ResourceBundleReference(final PsiElement element, boolean soft) {
     super(element, soft);
-    myBundleName = StringUtil.replaceChar(getValue(), '/', '.');
+    myBundleName = getValue().replace('/', '.');
   }
 
   @Override
@@ -58,12 +57,14 @@ public class ResourceBundleReference extends PsiReferenceBase<PsiElement>
     return ReflectionUtil.isAssignable(PsiFile.class, elementClass);
   }
 
+  @Override
   @Nullable
   public PsiElement resolve() {
     ResolveResult[] resolveResults = multiResolve(false);
     return resolveResults.length == 1 ? resolveResults[0].getElement() : null;
   }
 
+  @Override
   @NotNull
   public ResolveResult[] multiResolve(final boolean incompleteCode) {
     PropertiesReferenceManager referenceManager = PropertiesReferenceManager.getInstance(myElement.getProject());
@@ -71,11 +72,13 @@ public class ResourceBundleReference extends PsiReferenceBase<PsiElement>
     return PsiElementResolveResult.createResults(ContainerUtil.map(propertiesFiles, PROPERTIES_FILE_PSI_ELEMENT_FUNCTION));
   }
 
+  @Override
   @NotNull
   public String getCanonicalText() {
     return myBundleName;
   }
 
+  @Override
   public PsiElement handleElementRename(String newElementName) throws IncorrectOperationException {
     if (newElementName.endsWith(PropertiesFileType.DOT_DEFAULT_EXTENSION)) {
       newElementName = newElementName.substring(0, newElementName.lastIndexOf(PropertiesFileType.DOT_DEFAULT_EXTENSION));
@@ -92,9 +95,10 @@ public class ResourceBundleReference extends PsiReferenceBase<PsiElement>
   }
 
   private char getPackageDelimiter() {
-    return StringUtil.indexOf(getValue(), '/') != -1 ? '/' : '.';
+    return getValue().indexOf('/') != -1 ? '/' : '.';
   }
 
+  @Override
   public PsiElement bindToElement(@NotNull final PsiElement element) throws IncorrectOperationException {
     if (!(element instanceof PropertiesFile)) {
       throw new IncorrectOperationException();
@@ -104,6 +108,7 @@ public class ResourceBundleReference extends PsiReferenceBase<PsiElement>
   }
 
 
+  @Override
   public boolean isReferenceTo(PsiElement element) {
     if (element instanceof PropertiesFile) {
       final String name = ResourceBundleManager.getInstance(element.getProject()).getFullName((PropertiesFile)element);
@@ -114,6 +119,7 @@ public class ResourceBundleReference extends PsiReferenceBase<PsiElement>
     return false;
   }
 
+  @Override
   @NotNull
   public Object[] getVariants() {
     final ProjectFileIndex projectFileIndex = ProjectFileIndex.SERVICE.getInstance(getElement().getProject());
@@ -139,6 +145,7 @@ public class ResourceBundleReference extends PsiReferenceBase<PsiElement>
     return variants.toArray(new LookupElement[variants.size()]);
   }
 
+  @Override
   public String evaluateBundleName(final PsiFile psiFile) {
     return BundleNameEvaluator.DEFAULT.evaluateBundleName(psiFile);
   }

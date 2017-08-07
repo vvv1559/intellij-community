@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,10 +18,9 @@ package com.intellij.lang.ant.config.impl;
 import com.intellij.lang.ant.AntSupport;
 import com.intellij.lang.ant.config.*;
 import com.intellij.lang.ant.dom.*;
-import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Comparing;
-import com.intellij.openapi.util.Computable;
 import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiFile;
@@ -34,6 +33,7 @@ import com.intellij.psi.util.PsiModificationTracker;
 import com.intellij.psi.xml.XmlFile;
 import com.intellij.util.ArrayUtil;
 import com.intellij.util.containers.ContainerUtil;
+import one.util.streamex.StreamEx;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.*;
@@ -103,12 +103,7 @@ public class AntBuildModelImpl implements AntBuildModelBase {
 
   @Nullable
   public AntBuildTargetBase findTarget(final String name) {
-    return ApplicationManager.getApplication().runReadAction(new Computable<AntBuildTargetBase>() {
-      @Nullable
-      public AntBuildTargetBase compute() {
-        return findTargetImpl(name, AntBuildModelImpl.this);
-      }
-    });
+    return ReadAction.compute(() -> findTargetImpl(name, AntBuildModelImpl.this));
   }
 
   @Nullable
@@ -122,19 +117,11 @@ public class AntBuildModelImpl implements AntBuildModelBase {
   }
 
   public boolean hasTargetWithActionId(final String id) {
-    final List<AntBuildTargetBase> targetsList = getTargetsList();
-    for (AntBuildTargetBase buildTarget : targetsList) {
-      if (id.equals(buildTarget.getActionId())) return true;
-    }
-    return false;
+    return StreamEx.of(getTargetsList()).map(AntBuildTargetBase::getActionId).has(id);
   }
 
   private List<AntBuildTargetBase> getTargetsList() {
-    return ApplicationManager.getApplication().runReadAction(new Computable<List<AntBuildTargetBase>>() {
-      public List<AntBuildTargetBase> compute() {
-        return myTargets.getValue();
-      }
-    });
+    return ReadAction.compute(() -> myTargets.getValue());
   }
 
   @Nullable

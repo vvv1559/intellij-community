@@ -15,7 +15,6 @@
  */
 package com.intellij.codeInspection;
 
-import com.intellij.codeInsight.FileModificationService;
 import com.intellij.ide.SelectInEditorManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.pom.Navigatable;
@@ -23,6 +22,7 @@ import com.intellij.psi.*;
 import com.intellij.psi.codeStyle.CodeStyleManager;
 import com.intellij.psi.util.PsiTypesUtil;
 import com.intellij.psi.util.PsiUtil;
+import com.siyeh.ig.psiutils.ParenthesesUtils;
 import org.jetbrains.annotations.NotNull;
 
 /**
@@ -38,7 +38,7 @@ public class ReplaceWithTernaryOperatorFix implements LocalQuickFix {
   }
 
   public ReplaceWithTernaryOperatorFix(@NotNull PsiExpression expressionToAssert) {
-    myText = expressionToAssert.getText();
+    myText = ParenthesesUtils.getText(expressionToAssert, ParenthesesUtils.BINARY_AND_PRECEDENCE);
   }
 
   @NotNull
@@ -64,7 +64,6 @@ public class ReplaceWithTernaryOperatorFix implements LocalQuickFix {
     final PsiExpression expression = (PsiExpression)element;
 
     final PsiFile file = expression.getContainingFile();
-    if (!FileModificationService.getInstance().prepareFileForWrite(file)) return;
     PsiConditionalExpression conditionalExpression = replaceWthConditionalExpression(project, myText + "!=null", expression, suggestDefaultValue(expression));
 
     PsiExpression elseExpression = conditionalExpression.getElseExpression();

@@ -16,14 +16,15 @@
 package com.intellij.openapi.diff.impl.dir;
 
 import com.intellij.CommonBundle;
+import com.intellij.diff.DiffRequestFactory;
 import com.intellij.ide.IdeBundle;
 import com.intellij.ide.diff.*;
 import com.intellij.internal.statistic.UsageTrigger;
 import com.intellij.openapi.Disposable;
-import com.intellij.openapi.application.AccessToken;
 import com.intellij.openapi.application.Application;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ModalityState;
+import com.intellij.openapi.application.WriteAction;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.diff.impl.dir.actions.popup.WarnOnDeletion;
 import com.intellij.openapi.progress.EmptyProgressIndicator;
@@ -35,11 +36,11 @@ import com.intellij.openapi.ui.MessageType;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.ui.popup.Balloon;
 import com.intellij.openapi.ui.popup.JBPopupFactory;
-import com.intellij.openapi.util.Condition;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.Ref;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vcs.VcsBundle;
+import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.ui.TableUtil;
 import com.intellij.ui.awt.RelativePoint;
 import com.intellij.ui.components.JBLoadingPanel;
@@ -64,7 +65,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * @author Konstantin Bulenkov
  */
 public class DirDiffTableModel extends AbstractTableModel implements DirDiffModel, Disposable {
-  private static final Logger LOG = Logger.getInstance("#"+DirDiffTableModel.class.getName());
+  private static final Logger LOG = Logger.getInstance(DirDiffTableModel.class);
   public static final String COLUMN_NAME = "Name";
   public static final String COLUMN_SIZE = "Size";
   public static final String COLUMN_DATE = "Date";
@@ -405,7 +406,13 @@ public class DirDiffTableModel extends AbstractTableModel implements DirDiffMode
   }
 
   public String getTitle() {
-    if (myDisposed) return "";
+    if (myDisposed) return "Diff";
+    if (mySrc instanceof VirtualFileDiffElement &&
+        myTrg instanceof VirtualFileDiffElement) {
+      VirtualFile srcFile = ((VirtualFileDiffElement)mySrc).getValue();
+      VirtualFile trgFile = ((VirtualFileDiffElement)myTrg).getValue();
+      return DiffRequestFactory.getInstance().getTitle(srcFile, trgFile);
+    }
     return IdeBundle.message("diff.dialog.title", mySrc.getPresentablePath(), myTrg.getPresentablePath());
   }
 
@@ -598,14 +605,10 @@ public class DirDiffTableModel extends AbstractTableModel implements DirDiffMode
         ((BackgroundOperatingDiffElement)source).copyTo(myTrg, errorMessage, diff, onFinish, element.getTarget(), path);
       }
       else {
-        final AccessToken token = ApplicationManager.getApplication().acquireWriteActionLock(getClass());
-        try {
+        WriteAction.run(() -> {
           final DiffElement<?> diffElement = source.copyTo(myTrg, path);
           refreshElementAfterCopyTo(diffElement, element);
-        }
-        finally {
-          token.finish();
-        }
+        });
       }
     }
   }
@@ -647,14 +650,10 @@ public class DirDiffTableModel extends AbstractTableModel implements DirDiffMode
         ((BackgroundOperatingDiffElement)target).copyTo(mySrc, errorMessage, diff, onFinish, element.getSource(), path);
       }
       else {
-        final AccessToken token = ApplicationManager.getApplication().acquireWriteActionLock(getClass());
-        try {
+        WriteAction.run(() -> {
           final DiffElement<?> diffElement = target.copyTo(mySrc, path);
           refreshElementAfterCopyFrom(element, diffElement);
-        }
-        finally {
-          token.finish();
-        }
+        });
       }
     }
   }
@@ -736,18 +735,14 @@ public class DirDiffTableModel extends AbstractTableModel implements DirDiffMode
       if (myElements.indexOf(element) != -1) {
         removeElement(element, true);
       }
-      final AccessToken token = ApplicationManager.getApplication().acquireWriteActionLock(getClass());
-      try {
+      WriteAction.run(() -> {
         if (source != null) {
           source.delete();
         }
         if (target != null) {
           target.delete();
         }
-      }
-      finally {
-        token.finish();
-      }
+      });
     }
   }
 

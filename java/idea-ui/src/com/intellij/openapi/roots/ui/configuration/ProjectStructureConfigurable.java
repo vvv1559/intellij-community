@@ -20,7 +20,9 @@ import com.intellij.facet.Facet;
 import com.intellij.ide.util.PropertiesComponent;
 import com.intellij.openapi.actionSystem.*;
 import com.intellij.openapi.application.AccessToken;
+import com.intellij.openapi.application.TransactionGuard;
 import com.intellij.openapi.components.ServiceManager;
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleManager;
 import com.intellij.openapi.options.BaseConfigurable;
@@ -67,6 +69,7 @@ import static com.intellij.openapi.roots.ui.configuration.ProjectStructureConfig
 
 public class ProjectStructureConfigurable extends BaseConfigurable implements SearchableConfigurable, Place.Navigator,
                                                                               Configurable.NoMargin, Configurable.NoScroll {
+  private static final Logger LOG = Logger.getInstance("#com.intellij.openapi.roots.ui.configuration.ProjectStructureConfigurable");
 
   public static final DataKey<ProjectStructureConfigurable> KEY = DataKey.create("ProjectStructureConfiguration");
 
@@ -109,7 +112,8 @@ public class ProjectStructureConfigurable extends BaseConfigurable implements Se
   private final ModulesConfigurator myModuleConfigurator;
   private JdkListConfigurable myJdkListConfig;
 
-  private final JLabel myEmptySelection = new JLabel("<html><body><center>Select a setting to view or edit its details here</center></body></html>", JLabel.CENTER);
+  private final JLabel myEmptySelection = new JLabel("<html><body><center>Select a setting to view or edit its details here</center></body></html>",
+                                                     SwingConstants.CENTER);
 
   public ProjectStructureConfigurable(final Project project,
                                       final ProjectLibrariesConfigurable projectLibrariesConfigurable,
@@ -186,7 +190,7 @@ public class ProjectStructureConfigurable extends BaseConfigurable implements Se
     final DefaultActionGroup toolbarGroup = new DefaultActionGroup();
     toolbarGroup.add(new BackAction(myComponent));
     toolbarGroup.add(new ForwardAction(myComponent));
-    final ActionToolbar toolbar = ActionManager.getInstance().createActionToolbar(ActionPlaces.UNKNOWN, toolbarGroup, true);
+    final ActionToolbar toolbar = ActionManager.getInstance().createActionToolbar("ProjectStructure", toolbarGroup, true);
     toolbar.setTargetComponent(myComponent);
     myToolbarComponent = toolbar.getComponent();
     left.setBackground(UIUtil.SIDE_PANEL_BACKGROUND);
@@ -207,7 +211,7 @@ public class ProjectStructureConfigurable extends BaseConfigurable implements Se
   private void initSidePanel() {
     boolean isDefaultProject = myProject == ProjectManager.getInstance().getDefaultProject();
 
-    mySidePanel = new SidePanel(this, myHistory);
+    mySidePanel = new SidePanel(this);
     mySidePanel.addSeparator("Project Settings");
     addProjectConfig();
     if (!isDefaultProject) {
@@ -309,6 +313,8 @@ public class ProjectStructureConfigurable extends BaseConfigurable implements Se
 
   @Override
   public void apply() throws ConfigurationException {
+    LOG.assertTrue(TransactionGuard.getInstance().getContextTransaction() != null, "Project Structure should be shown in a transaction, see AnAction#startInTransaction");
+
     for (Configurable each : myName2Config) {
       if (each instanceof BaseStructureConfigurable && each.isModified()) {
         ((BaseStructureConfigurable)each).checkCanApply();
@@ -331,7 +337,7 @@ public class ProjectStructureConfigurable extends BaseConfigurable implements Se
     }
 
     myContext.getDaemonAnalyzer().clearCaches();
-    SwingUtilities.invokeLater(() -> BuildManager.getInstance().scheduleAutoMake());
+    BuildManager.getInstance().scheduleAutoMake();
   }
 
   @Override
@@ -374,10 +380,6 @@ public class ProjectStructureConfigurable extends BaseConfigurable implements Se
     finally {
       token.finish();
     }
-  }
-
-  public void hideSidePanel() {
-    mySplitter.getFirstComponent().setVisible(false);
   }
 
   @Override
@@ -434,7 +436,7 @@ public class ProjectStructureConfigurable extends BaseConfigurable implements Se
     if (moduleToSelect != null) {
       final Module module = ModuleManager.getInstance(myProject).findModuleByName(moduleToSelect);
       assert module != null;
-      place = place.putPath(ModuleStructureConfigurable.TREE_OBJECT, module).putPath(ModuleEditor.SELECTED_EDITOR_NAME, editorNameToSelect);
+      place = place.putPath(MasterDetailsComponent.TREE_OBJECT, module).putPath(ModuleEditor.SELECTED_EDITOR_NAME, editorNameToSelect);
     }
     return navigateTo(place, requestFocus);
   }
@@ -444,20 +446,20 @@ public class ProjectStructureConfigurable extends BaseConfigurable implements Se
   }
 
   public Place createModulePlace(@NotNull Module module) {
-    return createModulesPlace().putPath(ModuleStructureConfigurable.TREE_OBJECT, module);
+    return createModulesPlace().putPath(MasterDetailsComponent.TREE_OBJECT, module);
   }
 
   public ActionCallback select(@Nullable final Facet facetToSelect, final boolean requestFocus) {
     Place place = createModulesPlace();
     if (facetToSelect != null) {
-      place = place.putPath(ModuleStructureConfigurable.TREE_OBJECT, facetToSelect);
+      place = place.putPath(MasterDetailsComponent.TREE_OBJECT, facetToSelect);
     }
     return navigateTo(place, requestFocus);
   }
 
   public ActionCallback select(@NotNull Sdk sdk, final boolean requestFocus) {
     Place place = createPlaceFor(myJdkListConfig);
-    place.putPath(BaseStructureConfigurable.TREE_NAME, sdk.getName());
+    place.putPath(MasterDetailsComponent.TREE_NAME, sdk.getName());
     return navigateTo(place, requestFocus);
   }
 
@@ -473,7 +475,7 @@ public class ProjectStructureConfigurable extends BaseConfigurable implements Se
 
   public Place createProjectOrGlobalLibraryPlace(Library library) {
     Place place = createPlaceFor(getConfigurableFor(library));
-    place.putPath(BaseStructureConfigurable.TREE_NAME, library.getName());
+    place.putPath(MasterDetailsComponent.TREE_NAME, library.getName());
     return place;
   }
 
@@ -485,7 +487,7 @@ public class ProjectStructureConfigurable extends BaseConfigurable implements Se
   public Place createArtifactPlace(Artifact artifact) {
     Place place = createPlaceFor(myArtifactsStructureConfigurable);
     if (artifact != null) {
-      place.putPath(BaseStructureConfigurable.TREE_NAME, artifact.getName());
+      place.putPath(MasterDetailsComponent.TREE_NAME, artifact.getName());
     }
     return place;
   }
@@ -496,7 +498,7 @@ public class ProjectStructureConfigurable extends BaseConfigurable implements Se
       return selectOrderEntry(libraryOrderEntry.getOwnerModule(), libraryOrderEntry);
     }
     Place place = createPlaceFor(getConfigurableFor(lib));
-    place.putPath(BaseStructureConfigurable.TREE_NAME, libraryOrderEntry.getLibraryName());
+    place.putPath(MasterDetailsComponent.TREE_NAME, libraryOrderEntry.getLibraryName());
     return navigateTo(place, requestFocus);
   }
 
@@ -592,20 +594,13 @@ public class ProjectStructureConfigurable extends BaseConfigurable implements Se
     return ServiceManager.getService(project, ProjectStructureConfigurable.class);
   }
 
+  @NotNull
   public ProjectSdksModel getProjectJdksModel() {
     return myProjectJdksModel;
   }
 
   public JdkListConfigurable getJdkConfig() {
     return myJdkListConfig;
-  }
-
-  public ProjectLibrariesConfigurable getProjectLibrariesConfig() {
-    return myProjectLibrariesConfig;
-  }
-
-  public GlobalLibrariesConfigurable getGlobalLibrariesConfig() {
-    return myGlobalLibrariesConfig;
   }
 
   public ModuleStructureConfigurable getModulesConfig() {

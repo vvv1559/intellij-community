@@ -376,6 +376,27 @@ public class PyFormatterTest extends PyTestCase {
 
   public void testSpaceWithinDeclarationParentheses() {  // PY-8818
     getCommonCodeStyleSettings().SPACE_WITHIN_METHOD_PARENTHESES = true;
+    getCommonCodeStyleSettings().SPACE_WITHIN_EMPTY_METHOD_PARENTHESES = false;
+    doTest();
+  }
+
+  // PY-21598
+  public void testSpaceBetweenParenthesesInEmptyParameterList() {
+    getCommonCodeStyleSettings().SPACE_WITHIN_METHOD_PARENTHESES = false;
+    getCommonCodeStyleSettings().SPACE_WITHIN_EMPTY_METHOD_PARENTHESES = true;
+    doTest();
+  }
+
+  public void testSpaceWithingCallParentheses() {
+    getCommonCodeStyleSettings().SPACE_WITHIN_METHOD_CALL_PARENTHESES = true;
+    getCommonCodeStyleSettings().SPACE_WITHIN_EMPTY_METHOD_CALL_PARENTHESES = false;
+    doTest();
+  }
+
+  // PY-21598
+  public void testSpaceBetweenParenthesesInEmptyArgumentList() {
+    getCommonCodeStyleSettings().SPACE_WITHIN_METHOD_CALL_PARENTHESES = false;
+    getCommonCodeStyleSettings().SPACE_WITHIN_EMPTY_METHOD_CALL_PARENTHESES = true;
     doTest();
   }
 
@@ -455,12 +476,17 @@ public class PyFormatterTest extends PyTestCase {
     getCommonCodeStyleSettings().ALIGN_MULTILINE_PARAMETERS_IN_CALLS = true;
     final String testName = "formatter/" + getTestName(true);
     myFixture.configureByFile(testName + ".py");
-    WriteCommandAction.runWriteCommandAction(null, () -> myFixture.type("\n("));
+    myFixture.type("\n(");
     myFixture.checkResultByFile(testName + "_after.py");
   }
 
   // PY-12145
   public void testAlignmentOfClosingBraceInDictLiteralWhenNoHangingIndent() {
+    doTest();
+  }
+  
+  public void testNoAlignmentClosingBraceInDictLiteralWhenOpeningBraceIsForcedOnNewLine() {
+    getPythonCodeStyleSettings().DICT_NEW_LINE_AFTER_LEFT_BRACE = true;
     doTest();
   }
 
@@ -659,5 +685,162 @@ public class PyFormatterTest extends PyTestCase {
   public void testNoSpaceAroundPowerOperator() {
     getPythonCodeStyleSettings().SPACE_AROUND_POWER_OPERATOR = false;
     doTest();
+  }
+
+  // PY-20392
+  public void testSpaceAfterTrailingCommaInDictLiterals() {
+    doTest();
+  }
+
+  // PY-20392
+  public void testSpaceAfterTrailingCommaIfNoSpaceAfterCommaButWithinBracesOrBrackets() {
+    getPythonCodeStyleSettings().SPACE_WITHIN_BRACES = true;
+    getCommonCodeStyleSettings().SPACE_WITHIN_BRACKETS = true;
+    getCommonCodeStyleSettings().SPACE_AFTER_COMMA = false;
+    doTest();
+  }
+
+  // PY-10182
+  public void testHangClosingParenthesisInFromImport() {
+    // Shouldn't affect the result
+    getPythonCodeStyleSettings().ALIGN_MULTILINE_IMPORTS = false;
+    getPythonCodeStyleSettings().HANG_CLOSING_BRACKETS = true;
+    doTest();
+  }
+
+  // PY-10182
+  public void testHangClosingParenthesisInFunctionCall() {
+    getPythonCodeStyleSettings().HANG_CLOSING_BRACKETS = true;
+    doTest();
+  }
+
+  // PY-10182  
+  public void testHangClosingParenthesisInFunctionDefinition() {
+    getPythonCodeStyleSettings().HANG_CLOSING_BRACKETS = true;
+    doTest();
+  }
+
+  // PY-10182
+  public void testHangClosingBracketsInCollectionLiterals() {
+    getPythonCodeStyleSettings().HANG_CLOSING_BRACKETS = true;
+    doTest();
+  }
+
+  // PY-15874
+  public void testHangClosingOffComprehensionsAndGeneratorExpressions() {
+    getPythonCodeStyleSettings().HANG_CLOSING_BRACKETS = false;
+    doTest();
+  }
+  
+  // PY-15874
+  public void testHangClosingOnComprehensionsAndGeneratorExpressions() {
+    getPythonCodeStyleSettings().HANG_CLOSING_BRACKETS = true;
+    doTest();
+  }
+
+  // PY-20633
+  public void testFromImportWrappingChopDownIfLong() {
+    getPythonCodeStyleSettings().FROM_IMPORT_WRAPPING = WrapType.CHOP_DOWN_IF_LONG.getLegacyRepresentation();
+    getCodeStyleSettings().setRightMargin(PythonLanguage.INSTANCE, 30);
+    doTest();
+  }
+
+  // PY-20633
+  public void testFromImportParenthesesPlacement() {
+    getPythonCodeStyleSettings().FROM_IMPORT_NEW_LINE_AFTER_LEFT_PARENTHESIS = true;
+    getPythonCodeStyleSettings().FROM_IMPORT_NEW_LINE_BEFORE_RIGHT_PARENTHESIS = true;
+    getCommonCodeStyleSettings().SPACE_AFTER_COLON = true;
+    getCodeStyleSettings().setRightMargin(PythonLanguage.INSTANCE, 35);
+    doTest();
+  }
+  
+  // PY-20633
+  public void testFromImportParenthesesPlacementHangClosingParenthesis() {
+    getPythonCodeStyleSettings().FROM_IMPORT_NEW_LINE_AFTER_LEFT_PARENTHESIS = true;
+    getPythonCodeStyleSettings().FROM_IMPORT_NEW_LINE_BEFORE_RIGHT_PARENTHESIS = true;
+    getPythonCodeStyleSettings().HANG_CLOSING_BRACKETS = true;
+    getCommonCodeStyleSettings().SPACE_AFTER_COLON = true;
+    getCodeStyleSettings().setRightMargin(PythonLanguage.INSTANCE, 35);
+    doTest();
+  }
+
+  // PY-20633
+  public void testFromImportForceParenthesesIfMultiline() {
+    getCodeStyleSettings().setRightMargin(PythonLanguage.INSTANCE, 30);
+    getPythonCodeStyleSettings().FROM_IMPORT_PARENTHESES_FORCE_IF_MULTILINE = true;
+    doTest();
+  }
+
+  // PY-20633
+  // See http://docs.pylonsproject.org/en/latest/community/codestyle.html
+  public void testPyramidFromImportFormatting() {
+    getPythonCodeStyleSettings().FROM_IMPORT_PARENTHESES_FORCE_IF_MULTILINE = true;
+    getPythonCodeStyleSettings().FROM_IMPORT_NEW_LINE_AFTER_LEFT_PARENTHESIS = true;
+    getPythonCodeStyleSettings().FROM_IMPORT_NEW_LINE_BEFORE_RIGHT_PARENTHESIS = true;
+    getPythonCodeStyleSettings().FROM_IMPORT_WRAPPING = WrapType.ALWAYS.getLegacyRepresentation();
+    getPythonCodeStyleSettings().FROM_IMPORT_TRAILING_COMMA_IF_MULTILINE = true;
+    getPythonCodeStyleSettings().HANG_CLOSING_BRACKETS = true;
+    doTest();
+  }
+
+  // PY-9764
+  public void testFromImportTrailingCommaWithParentheses() {
+    getCodeStyleSettings().setRightMargin(PythonLanguage.INSTANCE, 30);
+    getPythonCodeStyleSettings().FROM_IMPORT_PARENTHESES_FORCE_IF_MULTILINE = true;
+    getPythonCodeStyleSettings().FROM_IMPORT_TRAILING_COMMA_IF_MULTILINE = true;
+    doTest();
+  }
+
+  // PY-9764
+  public void testFromImportTrailingCommaWithoutParentheses() {
+    getCodeStyleSettings().setRightMargin(PythonLanguage.INSTANCE, 30);
+    getPythonCodeStyleSettings().FROM_IMPORT_PARENTHESES_FORCE_IF_MULTILINE = false;
+    getPythonCodeStyleSettings().FROM_IMPORT_TRAILING_COMMA_IF_MULTILINE = true;
+    doTest();
+  }
+
+  // PY-21931
+  public void testSpacesAroundElseInConditionalExpression() {
+    doTest();
+  }
+
+  // PY-20970
+  public void testSpacesAfterNonlocal() {
+    runWithLanguageLevel(LanguageLevel.PYTHON30, this::doTest);
+  }
+
+  // PY-21515
+  public void testSpacesBeforeFromImportSource() {
+    doTest();
+  }
+
+  public void testSpacesAfterFromInYieldFrom() {
+    runWithLanguageLevel(LanguageLevel.PYTHON33, this::doTest);
+  }
+
+  // PY-24220
+  public void testBlankLinesAfterTopLevelImportsBeforeClass() {
+    getCommonCodeStyleSettings().BLANK_LINES_AFTER_IMPORTS = 5;
+    doTest();
+  }
+
+  // PY-24220
+  public void testBlankLinesAfterTopLevelImportsBeforeClassWithPrecedingComments() {
+    getCommonCodeStyleSettings().BLANK_LINES_AFTER_IMPORTS = 5;
+    doTest();
+  }
+
+  // PY-25356
+  public void testCommentsSpacing() {
+    doTest();
+  }
+
+  // PY-19705
+  public void testBlankLinesAroundFirstMethod() {
+    doTest();
+  }
+
+  public void testVariableAnnotations() {
+    runWithLanguageLevel(LanguageLevel.PYTHON36, this::doTest);
   }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@ import com.intellij.codeInsight.template.TemplateBuilderImpl;
 import com.intellij.openapi.actionSystem.Shortcut;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.Result;
+import com.intellij.openapi.command.CommandProcessor;
 import com.intellij.openapi.command.WriteCommandAction;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.Editor;
@@ -36,6 +37,7 @@ import com.intellij.psi.codeStyle.CodeStyleManager;
 import com.intellij.psi.codeStyle.JavaCodeStyleManager;
 import com.intellij.psi.codeStyle.VariableKind;
 import com.intellij.psi.scope.processor.VariablesProcessor;
+import com.intellij.psi.search.searches.ReferencesSearch;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.psi.util.PsiTypesUtil;
 import com.intellij.psi.util.TypeConversionUtil;
@@ -55,16 +57,13 @@ import javax.swing.*;
 import java.awt.*;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 
-/**
- * User: anna
- * Date: 12/8/10
- */
 public class JavaVariableInplaceIntroducer extends AbstractJavaInplaceIntroducer {
 
-  private SmartPsiElementPointer<PsiDeclarationStatement> myPointer;
+  private SmartPsiElementPointer<? extends PsiElement> myPointer;
 
   private JCheckBox myCanBeFinalCb;
   private final IntroduceVariableSettings mySettings;
@@ -121,12 +120,12 @@ public class JavaVariableInplaceIntroducer extends AbstractJavaInplaceIntroducer
 
   @Nullable
   protected PsiVariable getVariable() {
-    final PsiDeclarationStatement declarationStatement = myPointer != null ? myPointer.getElement() : null;
-    if (declarationStatement != null) {
-      PsiElement[] declaredElements = declarationStatement.getDeclaredElements();
+    final PsiElement declarationStatement = myPointer != null ? myPointer.getElement() : null;
+    if (declarationStatement instanceof PsiDeclarationStatement) {
+      PsiElement[] declaredElements = ((PsiDeclarationStatement)declarationStatement).getDeclaredElements();
       return declaredElements.length == 0 ? null : (PsiVariable)declaredElements[0];
     }
-    return null;
+    return declarationStatement instanceof PsiVariable ? (PsiVariable)declarationStatement : null;
   }
 
   @Override
@@ -156,7 +155,7 @@ public class JavaVariableInplaceIntroducer extends AbstractJavaInplaceIntroducer
     super.performCleanup();
     PsiVariable variable = getVariable();
     if (variable != null) {
-      super.restoreState(variable);
+      CommandProcessor.getInstance().executeCommand(myProject, () -> super.restoreState(variable), null, null);
     }
   }
 
@@ -284,16 +283,16 @@ public class JavaVariableInplaceIntroducer extends AbstractJavaInplaceIntroducer
   }
 
   @Override
-  protected void collectAdditionalElementsToRename(List<Pair<PsiElement, TextRange>> stringUsages) {
+  protected void collectAdditionalElementsToRename(@NotNull List<Pair<PsiElement, TextRange>> stringUsages) {
     if (isReplaceAllOccurrences()) {
       for (PsiExpression expression : getOccurrences()) {
         LOG.assertTrue(expression.isValid(), expression.getText());
-        stringUsages.add(Pair.<PsiElement, TextRange>create(expression, new TextRange(0, expression.getTextLength())));
+        stringUsages.add(Pair.create(expression, new TextRange(0, expression.getTextLength())));
       }
     } else if (getExpr() != null && !myReplaceSelf && getExpr().getParent() != getVariable()) {
       final PsiExpression expr = getExpr();
       LOG.assertTrue(expr.isValid(), expr.getText());
-      stringUsages.add(Pair.<PsiElement, TextRange>create(expr, new TextRange(0, expr.getTextLength())));
+      stringUsages.add(Pair.create(expr, new TextRange(0, expr.getTextLength())));
     }
   }
 
@@ -325,7 +324,7 @@ public class JavaVariableInplaceIntroducer extends AbstractJavaInplaceIntroducer
             final PsiExpression initializer = psiVariable.getInitializer();
             LOG.assertTrue(initializer != null);
             final PsiType type = initializer.getType();
-            if (((PsiReferenceExpression)parent).resolve() == null && type != null) {
+            if (((PsiReferenceExpression)parent).resolve() == null && type != null && !type.equals(psiVariable.getType())) {
               final PsiElementFactory elementFactory = JavaPsiFacade.getElementFactory(project);
               final PsiExpression castedExpr =
                 elementFactory.createExpressionFromText("((" + type.getCanonicalText() + ")" + referenceExpression.getText() + ")", parent);
@@ -393,13 +392,22 @@ public class JavaVariableInplaceIntroducer extends AbstractJavaInplaceIntroducer
 
   @Override
   protected PsiVariable createFieldToStartTemplateOn(String[] names, PsiType psiType) {
-    final PsiVariable variable = ApplicationManager.getApplication().runWriteAction(
-      IntroduceVariableBase.introduce(myProject, myExpr, myEditor, myChosenAnchor.getElement(), getOccurrences(), mySettings));
-    PsiDocumentManager.getInstance(myProject).doPostponedOperationsAndUnblockDocument(myEditor.getDocument());
-    final PsiDeclarationStatement declarationStatement = PsiTreeUtil.getParentOfType(variable, PsiDeclarationStatement.class);
-    myPointer = declarationStatement != null ? SmartPointerManager.getInstance(myProject).createSmartPsiElementPointer(declarationStatement) : null;
-    myEditor.putUserData(ReassignVariableUtil.DECLARATION_KEY, myPointer);
-    setAdvertisementText(getAdvertisementText(declarationStatement, variable.getType(), myHasTypeSuggestion));
+    PsiVariable variable = introduceVariable();
+
+    final PsiVariable restoredVar = getVariable();
+    if (restoredVar != null) {
+      variable = restoredVar;
+    }
+
+    if (isReplaceAllOccurrences()) {
+      List<RangeMarker> occurrences = new ArrayList<>();
+      ReferencesSearch.search(variable).forEach(reference -> {
+        occurrences.add(createMarker(reference.getElement()));
+      });
+      setOccurrenceMarkers(occurrences);
+      myOccurrences = new PsiExpression[occurrences.size()];
+    }
+
     final PsiIdentifier identifier = variable.getNameIdentifier();
     if (identifier != null) {
       myEditor.getCaretModel().moveToOffset(identifier.getTextOffset());
@@ -411,7 +419,29 @@ public class JavaVariableInplaceIntroducer extends AbstractJavaInplaceIntroducer
     finally {
       myDeleteSelf = true;
     }
+    PsiDocumentManager.getInstance(myProject).doPostponedOperationsAndUnblockDocument(myEditor.getDocument());
     initOccurrencesMarkers();
+    return variable;
+  }
+
+  protected PsiVariable introduceVariable() {
+    PsiVariable variable = IntroduceVariableBase
+      .introduce(myProject, myExpr, myEditor, myChosenAnchor.getElement(), getOccurrences(), mySettings);
+    SmartPointerManager smartPointerManager = SmartPointerManager.getInstance(myProject);
+    if (variable instanceof PsiField) {
+      myPointer = smartPointerManager.createSmartPsiElementPointer(variable);
+    }
+    else {
+      final PsiDeclarationStatement declarationStatement = PsiTreeUtil.getParentOfType(variable, PsiDeclarationStatement.class);
+      if (declarationStatement != null) {
+        SmartPsiElementPointer<PsiDeclarationStatement> pointer = smartPointerManager.createSmartPsiElementPointer(declarationStatement);
+        myPointer = pointer;
+        myEditor.putUserData(ReassignVariableUtil.DECLARATION_KEY, pointer);
+        setAdvertisementText(getAdvertisementText(declarationStatement, variable.getType(), myHasTypeSuggestion));
+      }
+    }
+
+    PsiDocumentManager.getInstance(myProject).doPostponedOperationsAndUnblockDocument(myEditor.getDocument());
     return variable;
   }
 

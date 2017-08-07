@@ -51,11 +51,6 @@ import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 
-/**
- * Created by IntelliJ IDEA.
- * User: sweinreuter
- * Date: 26.07.2007
- */
 public class UnusedDefineInspection extends BaseInspection {
   @Override
   public boolean isEnabledByDefault() {
@@ -212,14 +207,8 @@ public class UnusedDefineInspection extends BaseInspection {
 
       @Override
       @NotNull
-      public String getName() {
-        return "Remove define";
-      }
-
-      @Override
-      @NotNull
       public String getFamilyName() {
-        return getName();
+        return "Remove define";
       }
 
       @Override

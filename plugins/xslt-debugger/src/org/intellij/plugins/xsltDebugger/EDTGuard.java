@@ -105,13 +105,7 @@ class EDTGuard implements InvocationHandler {
       return convert(method.invoke(myTarget, args));
     } catch (InvocationTargetException e) {
       final Throwable t = e.getTargetException();
-      if (t instanceof RuntimeException) {
-        throw (RuntimeException)t;
-      } else if (t instanceof Error) {
-        throw (Error)t;
-      } else {
-        throw t;
-      }
+      throw t;
     }
   }
 
@@ -206,7 +200,7 @@ class EDTGuard implements InvocationHandler {
       }
     });
 
-    final Alarm alarm = new Alarm(Alarm.ThreadToUse.SHARED_THREAD, d);
+    final Alarm alarm = new Alarm(Alarm.ThreadToUse.POOLED_THREAD, d);
     final Alarm alarm2 = new Alarm(Alarm.ThreadToUse.POOLED_THREAD, alarm);
 
     final Runnable watchdog = () -> ref.set(true);

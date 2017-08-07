@@ -48,7 +48,7 @@ import java.util.List;
  * @since 10-Aug-2007
  */
 public class PluginDownloader {
-  private static final Logger LOG = Logger.getInstance("#" + PluginDownloader.class.getName());
+  private static final Logger LOG = Logger.getInstance(PluginDownloader.class);
 
   private static final String FILENAME = "filename=";
 
@@ -213,12 +213,15 @@ public class PluginDownloader {
   }
 
   public void install() throws IOException {
-    LOG.assertTrue(myFile != null);
+    LOG.assertTrue(myFile != null, "Cannot install plugin '" + getPluginName()+"'");
+
+    if (myFile == null) throw new IOException("Cannot find file for plugin '" + getPluginName()+"'");
+
     if (myOldFile != null) {
       StartupActionScriptManager.ActionCommand deleteOld = new StartupActionScriptManager.DeleteCommand(myOldFile);
       StartupActionScriptManager.addActionCommand(deleteOld);
     }
-    PluginInstaller.install(myFile, getPluginName(), true);
+    PluginInstaller.install(myFile, getPluginName(), true, myDescriptor);
     InstalledPluginsState state = InstalledPluginsState.getInstanceIfLoaded();
     if (state != null) {
       state.onPluginInstall(myDescriptor);
@@ -236,7 +239,7 @@ public class PluginDownloader {
     indicator.checkCanceled();
     indicator.setText2(IdeBundle.message("progress.downloading.plugin", getPluginName()));
 
-    return HttpRequests.request(myPluginUrl).gzip(false).forceHttps(myForceHttps).connect(new HttpRequests.RequestProcessor<File>() {
+    return HttpRequests.request(myPluginUrl).gzip(false).forceHttps(myForceHttps).productNameAsUserAgent().connect(new HttpRequests.RequestProcessor<File>() {
       @Override
       public File process(@NotNull HttpRequests.Request request) throws IOException {
         request.saveToFile(file, indicator);

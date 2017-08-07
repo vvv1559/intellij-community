@@ -31,10 +31,11 @@ public class EscapeHandler extends EditorActionHandler {
   }
 
   @Override
-  public void doExecute(Editor editor, Caret caret, DataContext dataContext) {
+  public void doExecute(@NotNull Editor editor, Caret caret, DataContext dataContext) {
     Project project = CommonDataKeys.PROJECT.getData(dataContext);
-    if (project != null) {
-      HintManagerImpl.getInstanceImpl().hideHints(HintManager.HIDE_BY_ESCAPE | HintManager.HIDE_BY_ANY_KEY, true, false);
+    if (project != null &&
+        HintManagerImpl.getInstanceImpl().hideHints(HintManager.HIDE_BY_ESCAPE | HintManager.HIDE_BY_ANY_KEY, true, false)) {
+      return;
     }
     myOriginalHandler.execute(editor, caret, dataContext);
   }

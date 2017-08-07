@@ -27,6 +27,7 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.roots.ModuleRootManager;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.*;
 import com.intellij.psi.util.PsiTreeUtil;
@@ -34,13 +35,14 @@ import com.intellij.psi.xml.XmlAttribute;
 import com.intellij.psi.xml.XmlAttributeValue;
 import com.intellij.psi.xml.XmlFile;
 import com.intellij.psi.xml.XmlTag;
-import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.xml.*;
 import com.intellij.util.xml.highlighting.*;
 import com.intellij.util.xml.reflect.DomAttributeChildDescription;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.idea.devkit.dom.*;
+import org.jetbrains.idea.devkit.dom.impl.PluginPsiClassConverter;
+import org.jetbrains.idea.devkit.inspections.quickfix.AddWithTagFix;
 import org.jetbrains.idea.devkit.util.PsiUtil;
 import org.jetbrains.jps.model.java.JavaModuleSourceRootTypes;
 
@@ -70,10 +72,14 @@ public class PluginXmlDomInspection extends BasicDomElementsInspection<IdeaPlugi
     super.checkDomElement(element, holder, helper);
 
     if (element instanceof IdeaPlugin) {
+      annotateIdeaPlugin((IdeaPlugin)element, holder);
       checkJetBrainsPlugin((IdeaPlugin)element, holder);
     }
     else if (element instanceof Extension) {
       annotateExtension((Extension)element, holder);
+    }
+    else if (element instanceof ExtensionPoint) {
+      annotateExtensionPoint((ExtensionPoint)element, holder);
     }
     else if (element instanceof Vendor) {
       annotateVendor((Vendor)element, holder);
@@ -93,6 +99,29 @@ public class PluginXmlDomInspection extends BasicDomElementsInspection<IdeaPlugi
     else if (element instanceof Group) {
       annotateGroup((Group)element, holder);
     }
+
+    if (element instanceof GenericDomValue) {
+      final GenericDomValue domValue = (GenericDomValue)element;
+
+      if (domValue.getConverter() instanceof PluginPsiClassConverter) {
+        annotatePsiClassValue(domValue, holder);
+      }
+    }
+  }
+
+  private static void annotatePsiClassValue(GenericDomValue domValue, DomElementAnnotationHolder holder) {
+    final Object value = domValue.getValue();
+    if (value instanceof PsiClass) {
+      PsiClass psiClass = (PsiClass)value;
+      if (psiClass.getContainingClass() != null &&
+          !StringUtil.containsChar(domValue.getRawText(), '$')) {
+        holder.createProblem(domValue, "Inner class must be separated with '$'");
+      }
+    }
+  }
+
+  private static void annotateIdeaPlugin(IdeaPlugin ideaPlugin, DomElementAnnotationHolder holder) {
+    highlightNotUsedAnymore(ideaPlugin.getIdeaPluginVersion(), holder);
   }
 
   private static void checkJetBrainsPlugin(IdeaPlugin ideaPlugin, DomElementAnnotationHolder holder) {
@@ -112,14 +141,23 @@ public class PluginXmlDomInspection extends BasicDomElementsInspection<IdeaPlugi
       return;
     }
 
-    final Vendor vendor = ContainerUtil.getFirstItem(ideaPlugin.getVendors());
-    if (vendor == null) {
+    final Vendor vendor = ideaPlugin.getVendor();
+    if (!DomUtil.hasXml(vendor)) {
       holder.createProblem(DomUtil.getFileElement(ideaPlugin),
                            "Plugin developed as a part of IntelliJ IDEA project should specify 'JetBrains' as its vendor",
                            new SpecifyJetBrainsAsVendorQuickFix());
     }
     else if (!PluginManagerMain.isDevelopedByJetBrains(vendor.getValue())) {
       holder.createProblem(vendor, "Plugin developed as a part of IntelliJ IDEA project should include 'JetBrains' as one of its vendors");
+    }
+  }
+
+  private static void annotateExtensionPoint(ExtensionPoint extensionPoint, DomElementAnnotationHolder holder) {
+    if (extensionPoint.getWithElements().isEmpty() &&
+        !extensionPoint.collectMissingWithTags().isEmpty()) {
+      holder.createProblem(extensionPoint,
+                           "<extensionPoint> does not have <with> tags to specify the types of class fields",
+                           new AddWithTagFix());
     }
   }
 
@@ -158,13 +196,22 @@ public class PluginXmlDomInspection extends BasicDomElementsInspection<IdeaPlugi
       Matcher matcher = IdeaPluginDescriptorImpl.EXPLICIT_BIG_NUMBER_PATTERN.matcher(untilBuild);
       if (matcher.matches()) {
         holder.createProblem(ideaVersion.getUntilBuild(), "Don't use '" + matcher.group(2) + "' in 'until-build', use '*' instead",
-                             new CorrectUntilBuildAttributeFix(IdeaPluginDescriptorImpl.convertExplicitBigNumberInUntilBuildToStar(untilBuild)));
+                             new CorrectUntilBuildAttributeFix(
+                               IdeaPluginDescriptorImpl.convertExplicitBigNumberInUntilBuildToStar(untilBuild)));
       }
       if (untilBuild.matches("\\d+")) {
         int branch = Integer.parseInt(untilBuild);
         String corrected = (branch - 1) + ".*";
-        String message = "Plain numbers in 'until-build' attribute may be misleading. '" + untilBuild + "' means the same as '" + untilBuild
-                         + ".0', so the plugin won't be compatible with " + untilBuild + ".* builds. It's better to specify '" + corrected + "' instead.";
+        String message = "Plain numbers in 'until-build' attribute may be misleading. '" +
+                         untilBuild +
+                         "' means the same as '" +
+                         untilBuild
+                         +
+                         ".0', so the plugin won't be compatible with " +
+                         untilBuild +
+                         ".* builds. It's better to specify '" +
+                         corrected +
+                         "' instead.";
         holder.createProblem(ideaVersion.getUntilBuild(), message, new CorrectUntilBuildAttributeFix(corrected));
       }
     }
@@ -201,8 +248,8 @@ public class PluginXmlDomInspection extends BasicDomElementsInspection<IdeaPlugi
       if (ITNReporter.class.getName().equals(implementation)) {
         IdeaPlugin plugin = extension.getParentOfType(IdeaPlugin.class, true);
         if (plugin != null) {
-          Vendor vendor = ContainerUtil.getFirstItem(plugin.getVendors());
-          if (vendor != null && PluginManagerMain.isDevelopedByJetBrains(vendor.getValue())) {
+          Vendor vendor = plugin.getVendor();
+          if (DomUtil.hasXml(vendor) && PluginManagerMain.isDevelopedByJetBrains(vendor.getValue())) {
             LocalQuickFix fix = new RemoveDomElementQuickFix(extension);
             holder.createProblem(extension, ProblemHighlightType.LIKE_UNUSED_SYMBOL,
                                  "Exceptions from plugins developed by JetBrains are reported via ITNReporter automatically," +
@@ -327,15 +374,8 @@ public class PluginXmlDomInspection extends BasicDomElementsInspection<IdeaPlugi
     @Nls
     @NotNull
     @Override
-    public String getName() {
-      return "Specify JetBrains as vendor";
-    }
-
-    @Nls
-    @NotNull
-    @Override
     public String getFamilyName() {
-      return getName();
+      return "Specify JetBrains as vendor";
     }
 
     @Override
@@ -344,8 +384,7 @@ public class PluginXmlDomInspection extends BasicDomElementsInspection<IdeaPlugi
       DomFileElement<IdeaPlugin> fileElement = DomManager.getDomManager(project).getFileElement((XmlFile)file, IdeaPlugin.class);
       if (fileElement != null) {
         IdeaPlugin root = fileElement.getRootElement();
-        XmlTag after = getLastSubTag(root, root.getId(), ContainerUtil.getLastItem(root.getDescriptions()),
-                                     ContainerUtil.getLastItem(root.getVersions()), root.getName());
+        XmlTag after = getLastSubTag(root, root.getId(), root.getDescription(), root.getVersion(), root.getName());
         XmlTag rootTag = root.getXmlTag();
         XmlTag vendorTag = rootTag.createChildTag("vendor", rootTag.getNamespace(), PluginManagerMain.JETBRAINS_VENDOR, false);
         if (after == null) {

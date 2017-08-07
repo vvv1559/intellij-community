@@ -15,6 +15,7 @@
  */
 package com.intellij.openapi.vcs.changes.local;
 
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vcs.changes.ChangeListListener;
 import com.intellij.openapi.vcs.changes.ChangeListWorker;
 import com.intellij.openapi.vcs.changes.LocalChangeList;
@@ -28,24 +29,37 @@ public class AddList implements ChangeListCommand {
   @Nullable private final Object myData;
 
   private LocalChangeList myNewListCopy;
+  private String myOldComment;
 
-  public AddList(@NotNull final String name, @Nullable final String comment, @Nullable Object data) {
+  public AddList(@NotNull String name, @Nullable String comment, @Nullable Object data) {
     myName = name;
     myComment = comment;
     myData = data;
   }
 
   public void apply(final ChangeListWorker worker) {
-    if (! worker.findListByName(myName)) {
-      myNewListCopy = worker.addChangeList(myName, myComment, myData);
-    } else {
-      worker.editComment(myName, myComment);
-      myNewListCopy = worker.getCopyByName(myName);
+    LocalChangeList list = worker.getChangeListByName(myName);
+    if (list == null) {
+      myOldComment = null;
+      myNewListCopy = worker.addChangeList(myName, myComment, myData).copy();
+    }
+    else if (StringUtil.isNotEmpty(myComment)) {
+      myOldComment = worker.editComment(myName, myComment);
+      myNewListCopy = list.copy();
+    }
+    else {
+      myOldComment = null;
+      myNewListCopy = null;
     }
   }
 
   public void doNotify(final EventDispatcher<ChangeListListener> dispatcher) {
-    dispatcher.getMulticaster().changeListAdded(myNewListCopy);
+    if (myOldComment != null) {
+      dispatcher.getMulticaster().changeListCommentChanged(myNewListCopy, myOldComment);
+    }
+    else if (myNewListCopy != null) {
+      dispatcher.getMulticaster().changeListAdded(myNewListCopy);
+    }
   }
 
   public LocalChangeList getNewListCopy() {

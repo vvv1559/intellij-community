@@ -39,8 +39,6 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
-import java.awt.event.ActionEvent;
-import java.awt.event.ActionListener;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -56,23 +54,18 @@ public class UncheckedWarningLocalInspectionBase extends BaseJavaBatchLocalInspe
   public boolean IGNORE_UNCHECKED_CAST;
   public boolean IGNORE_UNCHECKED_OVERRIDING;
 
-  protected static JCheckBox createSetting(final String cbText,
-                                           final boolean option,
-                                           final Pass<JCheckBox> pass) {
+  @NotNull
+  static JCheckBox createSetting(@NotNull String cbText, final boolean option, @NotNull Pass<JCheckBox> pass) {
     final JCheckBox uncheckedCb = new JCheckBox(cbText, option);
-    uncheckedCb.addActionListener(new ActionListener() {
-      @Override
-      public void actionPerformed(ActionEvent e) {
-        pass.pass(uncheckedCb);
-      }
-    });
+    uncheckedCb.addActionListener(e -> pass.pass(uncheckedCb));
     return uncheckedCb;
   }
 
-  public static LocalQuickFix[] getChangeVariableTypeFixes(@NotNull PsiVariable parameter, PsiType itemType, LocalQuickFix[] generifyFixes) {
+  @NotNull
+  private static LocalQuickFix[] getChangeVariableTypeFixes(@NotNull PsiVariable parameter, @Nullable PsiType itemType, LocalQuickFix[] generifyFixes) {
     if (itemType instanceof PsiMethodReferenceType) return generifyFixes;
-    final List<LocalQuickFix> result = new ArrayList<>();
     LOG.assertTrue(parameter.isValid());
+    final List<LocalQuickFix> result = new ArrayList<>();
     if (itemType != null) {
       for (ChangeVariableTypeQuickFixProvider fixProvider : Extensions.getExtensions(ChangeVariableTypeQuickFixProvider.EP_NAME)) {
         for (IntentionAction action : fixProvider.getFixes(parameter, itemType)) {
@@ -156,8 +149,9 @@ public class UncheckedWarningLocalInspectionBase extends BaseJavaBatchLocalInspe
     };
   }
 
+  @NotNull
   protected LocalQuickFix[] createFixes() {
-    return null;
+    return LocalQuickFix.EMPTY_ARRAY;
   }
 
   private static String isMethodCalledOnRawType(PsiElement expression) {
@@ -180,7 +174,7 @@ public class UncheckedWarningLocalInspectionBase extends BaseJavaBatchLocalInspe
     @NotNull private final LanguageLevel myLanguageLevel;
     private final LocalQuickFix[] myGenerifyFixes;
 
-    public UncheckedWarningsVisitor(boolean onTheFly, @NotNull LanguageLevel level) {
+    UncheckedWarningsVisitor(boolean onTheFly, @NotNull LanguageLevel level) {
       myOnTheFly = onTheFly;
       myLanguageLevel = level;
       myGenerifyFixes = onTheFly ? createFixes() : LocalQuickFix.EMPTY_ARRAY;
@@ -300,8 +294,8 @@ public class UncheckedWarningLocalInspectionBase extends BaseJavaBatchLocalInspe
       final PsiExpression iteratedValue = statement.getIteratedValue();
       if (iteratedValue == null) return;
       final PsiType itemType = JavaGenericsUtil.getCollectionItemType(iteratedValue);
-      checkRawToGenericsAssignment(parameter, iteratedValue, parameterType, itemType, true, myOnTheFly ? getChangeVariableTypeFixes(parameter, itemType,
-                                                                                                                                    myGenerifyFixes) : LocalQuickFix.EMPTY_ARRAY);
+      LocalQuickFix[] fixes = myOnTheFly ? getChangeVariableTypeFixes(parameter, itemType, myGenerifyFixes) : LocalQuickFix.EMPTY_ARRAY;
+      checkRawToGenericsAssignment(parameter, iteratedValue, parameterType, itemType, true, fixes);
     }
 
     @Override
@@ -349,7 +343,7 @@ public class UncheckedWarningLocalInspectionBase extends BaseJavaBatchLocalInspe
                                                          JavaHighlightUtil.formatType(componentType));
           if (!arrayTypeFixChecked) {
             final PsiType checkResult = JavaHighlightUtil.sameType(initializers);
-            fix = checkResult != null ? new VariableArrayTypeFix(arrayInitializer, checkResult) : null;
+            fix = checkResult != null ? VariableArrayTypeFix.createFix(arrayInitializer, checkResult) : null;
             arrayTypeFixChecked = true;
           }
 
@@ -409,24 +403,38 @@ public class UncheckedWarningLocalInspectionBase extends BaseJavaBatchLocalInspe
     public void visitReturnStatement(PsiReturnStatement statement) {
       super.visitReturnStatement(statement);
       if (IGNORE_UNCHECKED_ASSIGNMENT) return;
-      final PsiElement psiElement = PsiTreeUtil.getParentOfType(statement, PsiMethod.class, PsiLambdaExpression.class);
-      if (psiElement instanceof PsiMethod) {
-        final PsiMethod method = (PsiMethod)psiElement;
-        final PsiType returnType = method.getReturnType();
-        if (returnType != null && !PsiType.VOID.equals(returnType)) {
-          final PsiExpression returnValue = statement.getReturnValue();
-          if (returnValue != null) {
-            final PsiType valueType = returnValue.getType();
-            if (valueType != null) {
-              checkRawToGenericsAssignment(returnValue, returnValue, returnType, valueType,
-                                           false,
-                                           new LocalQuickFix[]{QuickFixFactory.getInstance().createMethodReturnFix(method, valueType, true)});
-            }
+      final PsiType returnType = PsiTypesUtil.getMethodReturnType(statement);
+      if (returnType != null && !PsiType.VOID.equals(returnType)) {
+        final PsiExpression returnValue = statement.getReturnValue();
+        if (returnValue != null) {
+          final PsiType valueType = returnValue.getType();
+          if (valueType != null) {
+            final PsiElement psiElement = PsiTreeUtil.getParentOfType(statement, PsiMethod.class, PsiLambdaExpression.class);
+            LocalQuickFix[] fixes = psiElement instanceof PsiMethod
+                                    ? new LocalQuickFix[]{QuickFixFactory.getInstance().createMethodReturnFix((PsiMethod)psiElement, valueType, true)}
+                                    : LocalQuickFix.EMPTY_ARRAY;
+            checkRawToGenericsAssignment(returnValue, returnValue, returnType, valueType, false, fixes);
           }
         }
       }
     }
 
+    @Override
+    public void visitLambdaExpression(PsiLambdaExpression expression) {
+      super.visitLambdaExpression(expression);
+
+      if (IGNORE_UNCHECKED_ASSIGNMENT) return;
+      PsiElement body = expression.getBody();
+      if (body instanceof PsiExpression) {
+        PsiType interfaceReturnType = LambdaUtil.getFunctionalInterfaceReturnType(expression);
+        if (interfaceReturnType != null && !PsiType.VOID.equals(interfaceReturnType)) {
+          PsiType type = ((PsiExpression)body).getType();
+          if (type != null) {
+            checkRawToGenericsAssignment(body, (PsiExpression)body, interfaceReturnType, type, false, LocalQuickFix.EMPTY_ARRAY);
+          }
+        }
+      }
+    }
 
     @Nullable
     private String getUncheckedCallDescription(PsiElement place, JavaResolveResult resolveResult) {
@@ -466,14 +474,18 @@ public class UncheckedWarningLocalInspectionBase extends BaseJavaBatchLocalInspe
 
           @Override
           public Boolean visitClassType(PsiClassType classType) {
-            PsiClass psiClass = classType.resolve();
+            PsiClassType.ClassResolveResult result = classType.resolveGenerics();
+            PsiClass psiClass = result.getElement();
             if (psiClass instanceof PsiTypeParameter) {
               if (((PsiTypeParameter)psiClass).getOwner() == method) return Boolean.FALSE;
               return substitutor.substitute((PsiTypeParameter)psiClass) == null ? Boolean.TRUE : Boolean.FALSE;
             }
-            PsiType[] parameters = classType.getParameters();
-            for (PsiType parameter : parameters) {
-              if (parameter.accept(this).booleanValue()) return Boolean.TRUE;
+            if (psiClass != null) {
+              PsiSubstitutor typeSubstitutor = result.getSubstitutor();
+              for (PsiTypeParameter parameter : PsiUtil.typeParametersIterable(psiClass)) {
+                PsiType psiType = typeSubstitutor.substitute(parameter);
+                if (psiType != null && psiType.accept(this).booleanValue()) return Boolean.TRUE;
+              }
             }
             return Boolean.FALSE;
           }

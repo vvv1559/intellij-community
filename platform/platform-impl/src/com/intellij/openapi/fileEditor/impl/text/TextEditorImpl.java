@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,14 +26,20 @@ import com.intellij.openapi.editor.highlighter.EditorHighlighter;
 import com.intellij.openapi.editor.highlighter.EditorHighlighterFactory;
 import com.intellij.openapi.fileEditor.*;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.UserDataHolderBase;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.pom.Navigatable;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.TestOnly;
 
 import javax.swing.*;
 import java.beans.PropertyChangeListener;
 import java.beans.PropertyChangeSupport;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /**
  * @author Vladimir Kondratyev
@@ -44,14 +50,16 @@ public class TextEditorImpl extends UserDataHolderBase implements TextEditor {
   @NotNull private final TextEditorComponent myComponent;
   @NotNull protected final VirtualFile myFile;
   private final AsyncEditorLoader myAsyncLoader;
+  private final Future<?> myLoadingFinished;
 
   TextEditorImpl(@NotNull final Project project, @NotNull final VirtualFile file, final TextEditorProvider provider) {
     myProject = project;
     myFile = file;
     myChangeSupport = new PropertyChangeSupport(this);
     myComponent = createEditorComponent(project, file);
+    Disposer.register(this, myComponent);
     myAsyncLoader = new AsyncEditorLoader(this, myComponent, provider);
-    myAsyncLoader.scheduleBackgroundLoading(true);
+    myLoadingFinished = myAsyncLoader.start();
   }
 
   @NotNull
@@ -70,7 +78,12 @@ public class TextEditorImpl extends UserDataHolderBase implements TextEditor {
 
   @Override
   public void dispose(){
-    myComponent.dispose();
+  }
+
+  @NotNull
+  @Override
+  public VirtualFile getFile() {
+    return myFile;
   }
 
   @Override
@@ -172,9 +185,9 @@ public class TextEditorImpl extends UserDataHolderBase implements TextEditor {
   }
 
   @Override
-  public boolean canNavigateTo(@NotNull final Navigatable navigatable) {
-    return navigatable instanceof OpenFileDescriptor && (((OpenFileDescriptor)navigatable).getLine() != -1 ||
-                                                         ((OpenFileDescriptor)navigatable).getOffset() >= 0);
+  public boolean canNavigateTo(@NotNull Navigatable navigatable) {
+    return navigatable instanceof OpenFileDescriptor &&
+           (((OpenFileDescriptor)navigatable).getLine() >= 0 || ((OpenFileDescriptor)navigatable).getOffset() >= 0);
   }
 
   @Override
@@ -185,5 +198,15 @@ public class TextEditorImpl extends UserDataHolderBase implements TextEditor {
   @Override
   public String toString() {
     return "Editor: "+myComponent.getFile();
+  }
+
+  @TestOnly
+  public void waitForLoaded(long timeout, @NotNull TimeUnit unit) throws TimeoutException {
+    try {
+      myLoadingFinished.get(timeout, unit);
+    }
+    catch (InterruptedException | ExecutionException e) {
+      throw new RuntimeException(e);
+    }
   }
 }

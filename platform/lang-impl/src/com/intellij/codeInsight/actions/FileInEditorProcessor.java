@@ -49,7 +49,7 @@ import java.awt.*;
 import static com.intellij.codeInsight.actions.TextRangeType.SELECTED_TEXT;
 import static com.intellij.codeInsight.actions.TextRangeType.VCS_CHANGED_TEXT;
 
-class FileInEditorProcessor {
+public class FileInEditorProcessor {
   private static final Logger LOG = Logger.getInstance(FileInEditorProcessor.class);
 
   private final Editor myEditor;
@@ -160,7 +160,7 @@ class FileInEditorProcessor {
         builder.append("No lines changed: changes since last revision are already properly formatted").append("<br>");
       }
       else {
-        builder.append("No lines changed: code is already properly formatted").append("<br>");
+        builder.append("No lines changed: content is already properly formatted").append("<br>");
       }
     }
     else {

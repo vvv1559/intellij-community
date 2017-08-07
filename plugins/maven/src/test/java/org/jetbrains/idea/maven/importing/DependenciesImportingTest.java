@@ -15,7 +15,6 @@
  */
 package org.jetbrains.idea.maven.importing;
 
-import com.intellij.openapi.application.AccessToken;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.Result;
 import com.intellij.openapi.application.WriteAction;
@@ -78,7 +77,7 @@ public class DependenciesImportingTest extends MavenImportingTestCase {
     assertModules("project");
     assertModuleLibDep("project", "Maven: junit:junit:4.0",
                        Arrays.asList("jar://" + getRepositoryPath() + "/junit/junit/4.0/junit-4.0.jar!/"),
-                       Collections.<String>emptyList(), Collections.<String>emptyList());
+                       Collections.emptyList(), Collections.emptyList());
   }
 
   public void testTestJarDependencies() throws Exception {
@@ -1777,8 +1776,8 @@ public class DependenciesImportingTest extends MavenImportingTestCase {
 
     assertModuleLibDep("project", "Maven: xxx:yyy:1",
                        Arrays.asList("jar://" + getRoot() + "/foo/bar.jar!/"),
-                       Collections.<String>emptyList(),
-                       Collections.<String>emptyList());
+                       Collections.emptyList(),
+                       Collections.emptyList());
 
     scheduleResolveAll();
     resolveDependenciesAndImport();
@@ -1787,8 +1786,8 @@ public class DependenciesImportingTest extends MavenImportingTestCase {
 
     assertModuleLibDep("project", "Maven: xxx:yyy:1",
                        Arrays.asList("jar://" + getRoot() + "/foo/bar.jar!/"),
-                       Collections.<String>emptyList(),
-                       Collections.<String>emptyList());
+                       Collections.emptyList(),
+                       Collections.emptyList());
   }
 
   public void testRemovingPreviousSystemPathForForSystemLibraries() throws Exception {
@@ -1808,8 +1807,8 @@ public class DependenciesImportingTest extends MavenImportingTestCase {
 
     assertModuleLibDep("project", "Maven: xxx:yyy:1",
                        Arrays.asList("jar://" + getRoot() + "/foo/bar.jar!/"),
-                       Collections.<String>emptyList(),
-                       Collections.<String>emptyList());
+                       Collections.emptyList(),
+                       Collections.emptyList());
 
     createProjectPom("<groupId>test</groupId>" +
                      "<artifactId>project</artifactId>" +
@@ -1830,8 +1829,8 @@ public class DependenciesImportingTest extends MavenImportingTestCase {
 
     assertModuleLibDep("project", "Maven: xxx:yyy:1",
                        Arrays.asList("jar://" + getRoot() + "/foo/xxx.jar!/"),
-                       Collections.<String>emptyList(),
-                       Collections.<String>emptyList());
+                       Collections.emptyList(),
+                       Collections.emptyList());
   }
 
   public void testRemovingUnusedLibraries() throws Exception {
@@ -2080,13 +2079,7 @@ public class DependenciesImportingTest extends MavenImportingTestCase {
   }
 
   private Library createProjectLibrary(final String libraryName) {
-    AccessToken accessToken = WriteAction.start();
-    try {
-      return ProjectLibraryTable.getInstance(myProject).createLibrary(libraryName);
-    }
-    finally {
-      accessToken.finish();
-    }
+    return WriteAction.compute(() -> ProjectLibraryTable.getInstance(myProject).createLibrary(libraryName));
   }
 
   private void createAndAddProjectLibrary(final String moduleName, final String libraryName) {

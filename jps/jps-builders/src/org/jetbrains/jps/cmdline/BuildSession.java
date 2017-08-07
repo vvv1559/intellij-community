@@ -94,7 +94,7 @@ final class BuildSession implements Runnable, CanceledStatus {
     myBuildType = convertCompileType(params.getBuildType());
     myScopes = params.getScopeList();
     List<String> filePaths = params.getFilePathList();
-    final Map<String, String> builderParams = new HashMap<String, String>();
+    final Map<String, String> builderParams = new HashMap<>();
     for (CmdlineRemoteProto.Message.KeyValuePair pair : params.getBuilderParameterList()) {
       builderParams.put(pair.getKey(), pair.getValue());
     }
@@ -113,8 +113,8 @@ final class BuildSession implements Runnable, CanceledStatus {
   @Override
   public void run() {
     Throwable error = null;
-    final Ref<Boolean> hasErrors = new Ref<Boolean>(false);
-    final Ref<Boolean> doneSomething = new Ref<Boolean>(false);
+    final Ref<Boolean> hasErrors = new Ref<>(false);
+    final Ref<Boolean> doneSomething = new Ref<>(false);
     try {
       ProfilingHelper profilingHelper = null;
       if (Utils.IS_PROFILING_MODE) {
@@ -197,13 +197,14 @@ final class BuildSession implements Runnable, CanceledStatus {
       msgHandler.processMessage(new CompilerMessage("build", BuildMessage.Kind.ERROR, "Cannot determine build data storage root for project " + myProjectPath));
       return;
     }
-    if (!dataStorageRoot.exists()) {
+    final boolean storageFilesAbsent = !dataStorageRoot.exists() || !new File(dataStorageRoot, FS_STATE_FILE).exists();
+    if (storageFilesAbsent) {
       // invoked the very first time for this project
       myBuildRunner.setForceCleanCaches(true);
     }
     final ProjectDescriptor preloadedProject = myPreloadedData != null? myPreloadedData.getProjectDescriptor() : null;
     final DataInputStream fsStateStream = 
-      preloadedProject != null || myInitialFSDelta == null /*this will force FS rescan*/? null : createFSDataStream(dataStorageRoot, myInitialFSDelta.getOrdinal());
+      storageFilesAbsent || preloadedProject != null || myInitialFSDelta == null /*this will force FS rescan*/? null : createFSDataStream(dataStorageRoot, myInitialFSDelta.getOrdinal());
 
     if (fsStateStream != null || myPreloadedData != null) {
       // optimization: check whether we can skip the build
@@ -345,16 +346,13 @@ final class BuildSession implements Runnable, CanceledStatus {
   }
 
   public void processFSEvent(final CmdlineRemoteProto.Message.ControllerMessage.FSEvent event) {
-    myEventsProcessor.execute(new Runnable() {
-      @Override
-      public void run() {
-        try {
-          applyFSEvent(myProjectDescriptor, event, true);
-          myLastEventOrdinal += 1;
-        }
-        catch (IOException e) {
-          LOG.error(e);
-        }
+    myEventsProcessor.execute(() -> {
+      try {
+        applyFSEvent(myProjectDescriptor, event, true);
+        myLastEventOrdinal += 1;
+      }
+      catch (IOException e) {
+        LOG.error(e);
       }
     });
   }
@@ -364,7 +362,7 @@ final class BuildSession implements Runnable, CanceledStatus {
     if (future != null) {
       if (result.getIsSuccess()) {
         final List<String> paths = result.getPathList();
-        final List<File> files = new ArrayList<File>(paths.size());
+        final List<File> files = new ArrayList<>(paths.size());
         for (String path : paths) {
           files.add(new File(path));
         }
@@ -397,7 +395,7 @@ final class BuildSession implements Runnable, CanceledStatus {
           LOG.debug("Applying deleted path from fs event: " + file.getPath());
         }
         for (BuildRootDescriptor rootDescriptor : descriptor) {
-          pd.fsState.registerDeleted(rootDescriptor.getTarget(), file, timestamps);
+          pd.fsState.registerDeleted(null, rootDescriptor.getTarget(), file, timestamps);
         }
       }
       else {
@@ -595,7 +593,7 @@ final class BuildSession implements Runnable, CanceledStatus {
         if (!trace.isEmpty()) {
           messageText.append("\n").append(trace);
         }
-        if (error instanceof RebuildRequestedException) {
+        if (error instanceof RebuildRequestedException || cause instanceof IOException) {
           messageText.append("\n").append("Please perform full project rebuild (Build | Rebuild Project)");
         }
         lastMessage = CmdlineProtoUtil.toMessage(mySessionId, CmdlineProtoUtil.createFailure(messageText.toString(), cause));
@@ -651,12 +649,7 @@ final class BuildSession implements Runnable, CanceledStatus {
     private EventsProcessor() {
       super("BuildSession.EventsProcessor.EventsProcessor pool", SharedThreadPool.getInstance());
       myProcessingEnabled.down();
-      execute(new Runnable() {
-        @Override
-        public void run() {
-          myProcessingEnabled.waitFor();
-        }
-      });
+      execute(() -> myProcessingEnabled.waitFor());
     }
 
     private void startProcessing() {

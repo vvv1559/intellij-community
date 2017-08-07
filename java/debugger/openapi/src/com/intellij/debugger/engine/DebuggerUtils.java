@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -42,7 +42,6 @@ import com.intellij.psi.util.InheritanceUtil;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.psi.util.PsiTypesUtil;
 import com.intellij.util.IncorrectOperationException;
-import com.intellij.util.StringBuilderSpinAllocator;
 import com.intellij.util.containers.ContainerUtil;
 import com.sun.jdi.*;
 import org.jdom.Element;
@@ -73,20 +72,19 @@ public abstract class DebuggerUtils {
         return ((StringReference)value).value();
       }
       if (isInteger(value)) {
-        long v = ((PrimitiveValue)value).longValue();
-        return String.valueOf(v);
+        return String.valueOf(((PrimitiveValue)value).longValue());
       }
-      if (isNumeric(value)) {
-        double v = ((PrimitiveValue)value).doubleValue();
-        return String.valueOf(v);
+      if (value instanceof FloatValue) {
+        return String.valueOf(((FloatValue)value).floatValue());
+      }
+      if (value instanceof DoubleValue) {
+        return String.valueOf(((DoubleValue)value).doubleValue());
       }
       if (value instanceof BooleanValue) {
-        boolean v = ((PrimitiveValue)value).booleanValue();
-        return String.valueOf(v);
+        return String.valueOf(((PrimitiveValue)value).booleanValue());
       }
       if (value instanceof CharValue) {
-        char v = ((PrimitiveValue)value).charValue();
-        return String.valueOf(v);
+        return String.valueOf(((PrimitiveValue)value).charValue());
       }
       if (value instanceof ObjectReference) {
         if (value instanceof ArrayReference) {
@@ -201,17 +199,9 @@ public abstract class DebuggerUtils {
 
   public static String translateStringValue(final String str) {
     int length = str.length();
-    final StringBuilder buffer = StringBuilderSpinAllocator.alloc();
-    try {
-      StringUtil.escapeStringCharacters(length, str, buffer);
-      if (str.length() > length) {
-        buffer.append("...");
-      }
-      return buffer.toString();
-    }
-    finally {
-      StringBuilderSpinAllocator.dispose(buffer);
-    }
+    final StringBuilder buffer = new StringBuilder();
+    StringUtil.escapeStringCharacters(length, str, buffer);
+    return buffer.toString();
   }
 
   @Nullable
@@ -423,11 +413,14 @@ public abstract class DebuggerUtils {
     }
   }
 
-  public static boolean hasSideEffects(PsiElement element) {
+  public static boolean hasSideEffects(@Nullable PsiElement element) {
     return hasSideEffectsOrReferencesMissingVars(element, null);
   }
   
-  public static boolean hasSideEffectsOrReferencesMissingVars(PsiElement element, @Nullable final Set<String> visibleLocalVariables) {
+  public static boolean hasSideEffectsOrReferencesMissingVars(@Nullable PsiElement element, @Nullable final Set<String> visibleLocalVariables) {
+    if (element == null) {
+      return false;
+    }
     final Ref<Boolean> rv = new Ref<>(Boolean.FALSE);
     element.accept(new JavaRecursiveElementWalkingVisitor() {
       @Override 
@@ -494,10 +487,7 @@ public abstract class DebuggerUtils {
     if (typeComponent == null) {
       return false;
     }
-    for (SyntheticTypeComponentProvider provider : SyntheticTypeComponentProvider.EP_NAME.getExtensions()) {
-      if (provider.isSynthetic(typeComponent)) return true;
-    }
-    return false;
+    return Arrays.stream(SyntheticTypeComponentProvider.EP_NAME.getExtensions()).anyMatch(provider -> provider.isSynthetic(typeComponent));
   }
 
   /**
@@ -505,10 +495,7 @@ public abstract class DebuggerUtils {
    */
   @Deprecated
   public static boolean isSimpleGetter(PsiMethod method) {
-    for (SimpleGetterProvider provider : SimpleGetterProvider.EP_NAME.getExtensions()) {
-      if (provider.isSimpleGetter(method)) return true;
-    }
-    return false;
+    return Arrays.stream(SimpleGetterProvider.EP_NAME.getExtensions()).anyMatch(provider -> provider.isSimpleGetter(method));
   }
 
   public static boolean isInsideSimpleGetter(@NotNull PsiElement contextElement) {
@@ -516,10 +503,8 @@ public abstract class DebuggerUtils {
       PsiMethod psiMethod = PsiTreeUtil.getParentOfType(contextElement, PsiMethod.class);
       if (psiMethod != null && provider.isSimpleGetter(psiMethod)) return true;
     }
-    for (SimplePropertyGetterProvider provider : SimplePropertyGetterProvider.EP_NAME.getExtensions()) {
-      if (provider.isInsideSimpleGetter(contextElement)) return true;
-    }
-    return false;
+    return Arrays.stream(SimplePropertyGetterProvider.EP_NAME.getExtensions())
+      .anyMatch(provider -> provider.isInsideSimpleGetter(contextElement));
   }
 
   public static boolean isPrimitiveType(final String typeName) {
@@ -575,11 +560,7 @@ public abstract class DebuggerUtils {
       return true;
     }
 
-    for (JavaDebugAware provider : JavaDebugAware.EP_NAME.getExtensions()) {
-      if (breakpointAware ? provider.isBreakpointAware(file) : provider.isActionAware(file)) {
-        return true;
-      }
-    }
-    return false;
+    return Arrays.stream(JavaDebugAware.EP_NAME.getExtensions())
+      .anyMatch(provider -> breakpointAware ? provider.isBreakpointAware(file) : provider.isActionAware(file));
   }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,17 +17,15 @@ package com.intellij.find.impl.livePreview;
 
 import com.intellij.find.*;
 import com.intellij.find.impl.FindResultImpl;
+import com.intellij.openapi.Disposable;
 import com.intellij.openapi.application.ApplicationManager;
-import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.RangeMarker;
 import com.intellij.openapi.editor.SelectionModel;
-import com.intellij.openapi.editor.event.DocumentAdapter;
 import com.intellij.openapi.editor.event.DocumentEvent;
-import com.intellij.openapi.editor.event.SelectionEvent;
+import com.intellij.openapi.editor.event.DocumentListener;
 import com.intellij.openapi.editor.event.SelectionListener;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.vfs.ReadonlyStatusHandler;
 import com.intellij.util.Alarm;
@@ -37,32 +35,24 @@ import org.jetbrains.annotations.Nullable;
 import java.util.ArrayList;
 
 public class LivePreviewController implements LivePreview.Delegate, FindUtil.ReplaceDelegate {
-
-  private static final Logger LOG = Logger.getInstance("#com.intellij.find.impl.livePreview.LivePreviewController");
-
   public static final int USER_ACTIVITY_TRIGGERING_DELAY = 30;
   public static final int MATCHES_LIMIT = 10000;
   protected EditorSearchSession myComponent;
 
   private int myUserActivityDelay = USER_ACTIVITY_TRIGGERING_DELAY;
 
-  private final Alarm myLivePreviewAlarm = new Alarm(Alarm.ThreadToUse.SHARED_THREAD);
+  private final Alarm myLivePreviewAlarm;
   protected SearchResults mySearchResults;
   private LivePreview myLivePreview;
   private final boolean myReplaceDenied = false;
-  private boolean mySuppressUpdate = false;
+  private boolean mySuppressUpdate;
 
   private boolean myTrackingDocument;
   private boolean myChanged;
 
-  private boolean myListeningSelection = false;
+  private boolean myListeningSelection;
 
-  private final SelectionListener mySelectionListener = new SelectionListener() {
-    @Override
-    public void selectionChanged(SelectionEvent e) {
-      smartUpdate();
-    }
-  };
+  private final SelectionListener mySelectionListener = e -> smartUpdate();
   private boolean myDisposed;
 
   public void setTrackingSelection(boolean b) {
@@ -79,7 +69,7 @@ public class LivePreviewController implements LivePreview.Delegate, FindUtil.Rep
   }
 
 
-  private final DocumentAdapter myDocumentListener = new DocumentAdapter() {
+  private final DocumentListener myDocumentListener = new DocumentListener() {
     @Override
     public void documentChanged(final DocumentEvent e) {
       if (!myTrackingDocument) {
@@ -97,13 +87,17 @@ public class LivePreviewController implements LivePreview.Delegate, FindUtil.Rep
   private void smartUpdate() {
     if (myLivePreview == null) return;
     myLivePreview.inSmartUpdate();
-    updateInBackground(mySearchResults.getFindModel(), false);
+    FindModel findModel = mySearchResults.getFindModel();
+    if (findModel != null) {
+      updateInBackground(findModel, false);
+    }
   }
 
   public void moveCursor(SearchResults.Direction direction) {
     if (direction == SearchResults.Direction.UP) {
       mySearchResults.prevOccurrence(false);
-    } else {
+    }
+    else {
       mySearchResults.nextOccurrence(false);
     }
   }
@@ -112,10 +106,11 @@ public class LivePreviewController implements LivePreview.Delegate, FindUtil.Rep
     return myReplaceDenied;
   }
 
-  public LivePreviewController(SearchResults searchResults, @Nullable EditorSearchSession component) {
+  public LivePreviewController(SearchResults searchResults, @Nullable EditorSearchSession component, @NotNull Disposable parentDisposable) {
     mySearchResults = searchResults;
     myComponent = component;
     getEditor().getDocument().addDocumentListener(myDocumentListener);
+    myLivePreviewAlarm = new Alarm(Alarm.ThreadToUse.POOLED_THREAD, parentDisposable);
   }
 
   public int getUserActivityDelay() {
@@ -126,11 +121,9 @@ public class LivePreviewController implements LivePreview.Delegate, FindUtil.Rep
     myUserActivityDelay = userActivityDelay;
   }
 
-  public void updateInBackground(FindModel findModel, final boolean allowedToChangedEditorSelection) {
+  public void updateInBackground(@NotNull FindModel findModel, final boolean allowedToChangedEditorSelection) {
     final int stamp = mySearchResults.getStamp();
     myLivePreviewAlarm.cancelAllRequests();
-    if (findModel == null) return;
-    final boolean unitTestMode = ApplicationManager.getApplication().isUnitTestMode();
     final FindModel copy = new FindModel();
     copy.copyFrom(findModel);
 
@@ -140,9 +133,10 @@ public class LivePreviewController implements LivePreview.Delegate, FindUtil.Rep
       if (project != null && project.isDisposed()) return;
       mySearchResults.updateThreadSafe(copy, allowedToChangedEditorSelection, null, stamp);
     };
-    if (unitTestMode) {
+    if (ApplicationManager.getApplication().isUnitTestMode()) {
       request.run();
-    } else {
+    }
+    else {
       myLivePreviewAlarm.addRequest(request, myUserActivityDelay);
     }
   }
@@ -159,7 +153,7 @@ public class LivePreviewController implements LivePreview.Delegate, FindUtil.Rep
 
     if (currentModel != null) {
       if (currentModel.isReplaceState()) {
-        FindManager findManager = FindManager.getInstance(editor.getProject());
+        FindManager findManager = FindManager.getInstance(mySearchResults.getProject());
         try {
           stringToReplace = findManager.getStringToReplace(foundString, currentModel,
                                                            findResult.getStartOffset(), documentText);
@@ -174,9 +168,10 @@ public class LivePreviewController implements LivePreview.Delegate, FindUtil.Rep
 
   @Nullable
   public TextRange performReplace(final FindResult occurrence, final String replacement, final Editor editor) {
-    if (myReplaceDenied || !ReadonlyStatusHandler.ensureDocumentWritable(editor.getProject(), editor.getDocument())) return null;
+    Project project = mySearchResults.getProject();
+    if (myReplaceDenied || !ReadonlyStatusHandler.ensureDocumentWritable(project, editor.getDocument())) return null;
     FindModel findModel = mySearchResults.getFindModel();
-    TextRange result = FindUtil.doReplace(editor.getProject(),
+    TextRange result = FindUtil.doReplace(project,
                                           editor.getDocument(),
                                           findModel,
                                           new FindResultImpl(occurrence.getStartOffset(), occurrence.getEndOffset()),
@@ -188,8 +183,11 @@ public class LivePreviewController implements LivePreview.Delegate, FindUtil.Rep
     return result;
   }
 
-  public void performReplaceAll(Editor e) {
-    if (!ReadonlyStatusHandler.ensureDocumentWritable(e.getProject(), e.getDocument())) return;
+  private void performReplaceAll(Editor e) {
+    Project project = mySearchResults.getProject();
+    if (!ReadonlyStatusHandler.ensureDocumentWritable(project, e.getDocument())) {
+      return;
+    }
     if (mySearchResults.getFindModel() != null) {
       final FindModel copy = new FindModel();
       copy.copyFrom(mySearchResults.getFindModel());
@@ -200,10 +198,11 @@ public class LivePreviewController implements LivePreview.Delegate, FindUtil.Rep
       if (!selectionModel.hasSelection() || copy.isGlobal()) {
         copy.setGlobal(true);
         offset = 0;
-      } else {
+      }
+      else {
         offset = selectionModel.getBlockSelectionStarts()[0];
       }
-      FindUtil.replace(e.getProject(), e, offset, copy, this);
+      FindUtil.replace(project, e, offset, copy, this);
     }
   }
 

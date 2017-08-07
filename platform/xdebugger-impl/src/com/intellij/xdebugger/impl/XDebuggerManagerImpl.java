@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,18 +26,15 @@ import com.intellij.execution.ui.ExecutionConsole;
 import com.intellij.execution.ui.RunContentDescriptor;
 import com.intellij.execution.ui.RunContentManager;
 import com.intellij.execution.ui.RunContentWithExecutorListener;
-import com.intellij.ide.DataManager;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.components.*;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.markup.GutterIconRenderer;
 import com.intellij.openapi.fileEditor.FileDocumentManagerAdapter;
 import com.intellij.openapi.fileEditor.FileEditorManager;
-import com.intellij.openapi.fileEditor.FileEditorManagerAdapter;
 import com.intellij.openapi.fileEditor.FileEditorManagerListener;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.startup.StartupManager;
-import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.util.SmartList;
 import com.intellij.util.containers.ContainerUtil;
@@ -46,13 +43,13 @@ import com.intellij.util.messages.MessageBusConnection;
 import com.intellij.util.xmlb.annotations.Property;
 import com.intellij.xdebugger.*;
 import com.intellij.xdebugger.breakpoints.XBreakpoint;
-import com.intellij.xdebugger.breakpoints.XBreakpointAdapter;
+import com.intellij.xdebugger.breakpoints.XBreakpointListener;
 import com.intellij.xdebugger.breakpoints.XLineBreakpoint;
 import com.intellij.xdebugger.impl.breakpoints.XBreakpointBase;
 import com.intellij.xdebugger.impl.breakpoints.XBreakpointManagerImpl;
+import com.intellij.xdebugger.impl.evaluate.quick.common.ValueLookupManager;
 import com.intellij.xdebugger.impl.settings.XDebuggerSettingManagerImpl;
 import com.intellij.xdebugger.impl.ui.ExecutionPointHighlighter;
-import com.intellij.xdebugger.impl.ui.XDebugSessionData;
 import com.intellij.xdebugger.impl.ui.XDebugSessionTab;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
@@ -98,13 +95,13 @@ public class XDebuggerManagerImpl extends XDebuggerManager
         updateExecutionPoint(file, true);
       }
     });
-    messageBusConnection.subscribe(FileEditorManagerListener.FILE_EDITOR_MANAGER, new FileEditorManagerAdapter() {
+    messageBusConnection.subscribe(FileEditorManagerListener.FILE_EDITOR_MANAGER, new FileEditorManagerListener() {
       @Override
       public void fileOpened(@NotNull FileEditorManager source, @NotNull VirtualFile file) {
         updateExecutionPoint(file, false);
       }
     });
-    myBreakpointManager.addBreakpointListener(new XBreakpointAdapter<XBreakpoint<?>>() {
+    myBreakpointManager.addBreakpointListener(new XBreakpointListener<XBreakpoint<?>>() {
       @Override
       public void breakpointChanged(@NotNull XBreakpoint<?> breakpoint) {
         if (!(breakpoint instanceof XLineBreakpoint)) {
@@ -203,8 +200,9 @@ public class XDebuggerManagerImpl extends XDebuggerManager
                                               @Nullable RunContentDescriptor contentToReuse,
                                               boolean showToolWindowOnSuspendOnly,
                                               @NotNull XDebugProcessStarter starter) throws ExecutionException {
-    XDebugSessionImpl session = startSession(contentToReuse, starter, new XDebugSessionImpl(null, this, sessionName,
-                                                                                            icon, showToolWindowOnSuspendOnly));
+    XDebugSessionImpl session = startSession(contentToReuse, starter,
+      new XDebugSessionImpl(null, this, sessionName, icon, showToolWindowOnSuspendOnly, contentToReuse));
+
     if (!showToolWindowOnSuspendOnly) {
       session.showSessionTab();
     }
@@ -218,16 +216,6 @@ public class XDebuggerManagerImpl extends XDebuggerManager
                                          @NotNull XDebugSessionImpl session) throws ExecutionException {
     XDebugProcess process = processStarter.start(session);
     myProject.getMessageBus().syncPublisher(TOPIC).processStarted(process);
-
-    XDebugSessionData oldSessionData = null;
-    if (contentToReuse != null) {
-      JComponent component = contentToReuse.getComponent();
-      if (component != null) {
-        oldSessionData = XDebugSessionData.DATA_KEY.getData(DataManager.getInstance().getDataContext(component));
-      }
-    }
-
-    session.initSessionData(oldSessionData);
 
     // Perform custom configuration of session data for XDebugProcessConfiguratorStarter classes
     if (processStarter instanceof XDebugProcessConfiguratorStarter) {
@@ -245,17 +233,12 @@ public class XDebuggerManagerImpl extends XDebuggerManager
   public void removeSession(@NotNull final XDebugSessionImpl session) {
     XDebugSessionTab sessionTab = session.getSessionTab();
     mySessions.remove(session.getDebugProcess().getProcessHandler());
-    if (sessionTab != null) {
-      RunContentDescriptor descriptor = sessionTab.getRunContentDescriptor();
-      if (descriptor != null) {
-        // in test-mode RunContentWithExecutorListener.contentRemoved events are not sent (see RunContentManagerImpl.showRunContent)
-        // so we make sure the mySessions and mySessionData are cleared correctly when session is disposed
-        Disposer.register(descriptor, () -> mySessions.remove(session.getDebugProcess().getProcessHandler()));
-      }
-
-      if (!myProject.isDisposed() && !ApplicationManager.getApplication().isUnitTestMode() && XDebuggerSettingManagerImpl.getInstanceImpl().getGeneralSettings().isHideDebuggerOnProcessTermination()) {
-        ExecutionManager.getInstance(myProject).getContentManager().hideRunContent(DefaultDebugExecutor.getDebugExecutorInstance(), descriptor);
-      }
+    if (sessionTab != null &&
+        !myProject.isDisposed() &&
+        !ApplicationManager.getApplication().isUnitTestMode() &&
+        XDebuggerSettingManagerImpl.getInstanceImpl().getGeneralSettings().isHideDebuggerOnProcessTermination()) {
+      ExecutionManager.getInstance(myProject).getContentManager().hideRunContent(DefaultDebugExecutor.getDebugExecutorInstance(),
+                                                                                 sessionTab.getRunContentDescriptor());
     }
     if (myActiveSession.compareAndSet(session, null)) {
       onActiveSessionChanged();
@@ -273,6 +256,7 @@ public class XDebuggerManagerImpl extends XDebuggerManager
 
   private void onActiveSessionChanged() {
     myBreakpointManager.getLineBreakpointManager().queueAllBreakpointsUpdate();
+    ApplicationManager.getApplication().invokeLater(() -> ValueLookupManager.getInstance(myProject).hideHint(), myProject.getDisposed());
   }
 
   @Override

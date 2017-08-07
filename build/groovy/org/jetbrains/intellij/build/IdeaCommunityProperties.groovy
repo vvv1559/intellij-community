@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,7 +22,7 @@ import groovy.transform.CompileStatic
  * @author nik
  */
 @CompileStatic
-class IdeaCommunityProperties extends ProductProperties {
+class IdeaCommunityProperties extends BaseIdeaProperties {
   IdeaCommunityProperties(String home) {
     baseFileName = "idea"
     platformPrefix = "Idea"
@@ -31,11 +31,25 @@ class IdeaCommunityProperties extends ProductProperties {
     additionalIDEPropertiesFilePaths = ["$home/build/conf/ideaCE.properties".toString()]
     toolsJarRequired = true
     buildCrossPlatformDistribution = true
+
+    productLayout.platformApiModules = CommunityRepositoryModules.PLATFORM_API_MODULES + JAVA_API_MODULES
+    productLayout.platformImplementationModules = CommunityRepositoryModules.PLATFORM_IMPLEMENTATION_MODULES + JAVA_IMPLEMENTATION_MODULES +
+                                                  ["duplicates-analysis", "structuralsearch", "structuralsearch-java", "typeMigration", "platform-main"] -
+                                                  ["jps-model-impl", "jps-model-serialization"]
+    productLayout.additionalPlatformJars.put("resources.jar", "community-resources")
+    productLayout.bundledPluginModules = BUNDLED_PLUGIN_MODULES
+    productLayout.mainModules = ["community-main"]
+    productLayout.allNonTrivialPlugins = CommunityRepositoryModules.COMMUNITY_REPOSITORY_PLUGINS + [
+      CommunityRepositoryModules.androidPlugin([:]),
+      CommunityRepositoryModules.groovyPlugin([])
+    ]
+    productLayout.classesLoadingOrderFilePath = "$home/build/order.txt"
   }
 
   @Override
   @CompileDynamic
   void copyAdditionalFiles(BuildContext buildContext, String targetDirectory) {
+    super.copyAdditionalFiles(buildContext, targetDirectory)
     buildContext.ant.copy(todir: targetDirectory) {
       fileset(file: "$buildContext.paths.communityHome/LICENSE.txt")
       fileset(file: "$buildContext.paths.communityHome/NOTICE.txt")
@@ -55,18 +69,18 @@ class IdeaCommunityProperties extends ProductProperties {
       }
 
       @Override
-      String rootDirectoryName(ApplicationInfoProperties applicationInfo, String buildNumber) { "" }
+      String getFullNameIncludingEdition(ApplicationInfoProperties applicationInfo) { "IntelliJ IDEA Community Edition" }
 
       @Override
-      String fullNameIncludingEdition(ApplicationInfoProperties applicationInfo) { "IntelliJ IDEA Community Edition" }
+      String getFullNameIncludingEditionAndVendor(ApplicationInfoProperties applicationInfo) { "IntelliJ IDEA Community Edition" }
 
       @Override
-      String fullNameIncludingEditionAndVendor(ApplicationInfoProperties applicationInfo) { "IntelliJ IDEA Community Edition" }
-
-      @Override
-      String uninstallFeedbackPageUrl(ApplicationInfoProperties applicationInfo) {
+      String getUninstallFeedbackPageUrl(ApplicationInfoProperties applicationInfo) {
         "https://www.jetbrains.com/idea/uninstall/?edition=IC-${applicationInfo.majorVersion}.${applicationInfo.minorVersion}"
       }
+
+      @Override
+      String getBaseDownloadUrlForJre() { "https://download.jetbrains.com/idea" }
     }
   }
 
@@ -75,10 +89,14 @@ class IdeaCommunityProperties extends ProductProperties {
     return new LinuxDistributionCustomizer() {
       {
         iconPngPath = "$projectHome/platform/icons/src/icon_CE_128.png"
+        //snapName = "intellij-idea-community"
+        //snapDescription =
+        //  "The most intelligent Java IDE. Every aspect of IntelliJ IDEA is specifically designed to maximize developer productivity. " +
+        //  "Together, powerful static code analysis and ergonomic design make development not only productive but also an enjoyable experience."
       }
 
       @Override
-      String rootDirectoryName(ApplicationInfoProperties applicationInfo, String buildNumber) { "idea-IC-$buildNumber" }
+      String getRootDirectoryName(ApplicationInfoProperties applicationInfo, String buildNumber) { "idea-IC-$buildNumber" }
     }
   }
 
@@ -86,16 +104,17 @@ class IdeaCommunityProperties extends ProductProperties {
   MacDistributionCustomizer createMacCustomizer(String projectHome) {
     return new MacDistributionCustomizer() {
       {
-        helpId = "IJ"
+        icnsPath = "$projectHome/build/conf/ideaCE/mac/images/idea.icns"
         urlSchemes = ["idea"]
         associateIpr = true
         enableYourkitAgentInEAP = false
         bundleIdentifier = "com.jetbrains.intellij.ce"
-        dmgImagePath = "$projectHome/build/conf/mac/communitydmg.png"
+        dmgImagePath = "$projectHome/build/conf/ideaCE/mac/images/communitydmg.png"
+        icnsPathForEAP = "$projectHome/build/conf/ideaCE/mac/images/communityEAP.icns"
       }
 
       @Override
-      String rootDirectoryName(ApplicationInfoProperties applicationInfo, String buildNumber) {
+      String getRootDirectoryName(ApplicationInfoProperties applicationInfo, String buildNumber) {
         applicationInfo.isEAP ? "IntelliJ IDEA ${applicationInfo.majorVersion}.${applicationInfo.minorVersion} CE EAP.app"
                               : "IntelliJ IDEA CE.app"
       }
@@ -103,8 +122,11 @@ class IdeaCommunityProperties extends ProductProperties {
   }
 
   @Override
-  String systemSelector(ApplicationInfoProperties applicationInfo) { "IdeaIC${applicationInfo.majorVersion}.${applicationInfo.minorVersionMainPart}" }
+  String getSystemSelector(ApplicationInfoProperties applicationInfo) { "IdeaIC${applicationInfo.majorVersion}.${applicationInfo.minorVersionMainPart}" }
 
   @Override
-  String baseArtifactName(ApplicationInfoProperties applicationInfo, String buildNumber) { "ideaIC-$buildNumber" }
+  String getBaseArtifactName(ApplicationInfoProperties applicationInfo, String buildNumber) { "ideaIC-$buildNumber" }
+
+  @Override
+  String getOutputDirectoryName(ApplicationInfoProperties applicationInfo) { "idea-ce" }
 }

@@ -59,7 +59,7 @@ interface DebuggerViewSupport {
   fun computeInlineDebuggerData(name: String, variable: Variable, context: VariableContext, callback: XInlineDebuggerDataCallback) = ThreeState.UNSURE
 
   // return null if you don't need to add additional properties
-  fun computeAdditionalObjectProperties(value: ObjectValue, variable: Variable, context: VariableContext, node: XCompositeNode): Promise<*>? = null
+  fun computeAdditionalObjectProperties(value: ObjectValue, variable: Variable, context: VariableContext, node: XCompositeNode): Promise<Any?>? = null
 
   fun getMemberFilter(context: VariableContext): Promise<MemberFilter>
 
@@ -75,7 +75,7 @@ open class PromiseDebuggerEvaluator(protected val context: VariableContext) : XD
     try {
       evaluate(expression, expressionPosition)
         .done { callback.evaluated(VariableView(VariableImpl(expression, it.value), context)) }
-        .rejected { callback.errorOccurred(it.toString()) }
+        .rejected { callback.errorOccurred(it.message ?: it.toString()) }
     }
     catch (e: Throwable) {
       LOG.error(e)

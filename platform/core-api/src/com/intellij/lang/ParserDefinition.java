@@ -72,6 +72,7 @@ public interface ParserDefinition {
    * Returns the set of token types which are treated as comments by the PSI builder.
    * Tokens of those types are automatically skipped by PsiBuilder. Also, To Do patterns
    * are searched in the text of tokens of those types.
+   * This token set shouldn't contain types of non-leaf comment inner elements.
    *
    * @return the set of comment token types.
    */
@@ -95,11 +96,11 @@ public interface ParserDefinition {
    * !!!WARNING!!! PSI element types should be unambiguously determined by AST node element types.
    * You can not produce different PSI elements from AST nodes of the same types (e.g. based on AST node content).
    * Typically, your code should be as simple as that:
-   * <code>
+   * {@code
    *   if (node.getElementType == MY_ELEMENT_TYPE) {
    *     return new MyPsiElement(node);
    *   }
-   * </code>
+   * }
    *
    * @param node the node for which the PSI element should be returned.
    * @return the PSI element matching the element type of the AST node.

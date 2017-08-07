@@ -31,7 +31,7 @@ import java.util.TooManyListenersException;
 /**
  * @author max
  */
-class ExporterToTextFile implements com.intellij.ide.ExporterToTextFile {
+public class ExporterToTextFile implements com.intellij.ide.ExporterToTextFile {
   private final UsageViewImpl myUsageView;
 
   public ExporterToTextFile(@NotNull UsageViewImpl usageView) {
@@ -83,10 +83,7 @@ class ExporterToTextFile implements com.intellij.ide.ExporterToTextFile {
     }
 
     if (node instanceof UsageNode) {
-      TextChunk[] chunks = ((UsageNode)node).getUsage().getPresentation().getText();
-      for (TextChunk chunk : chunks) {
-        buf.append(chunk.getText());
-      }
+      appendUsageNodeText(buf, (UsageNode) node);
     }
     else if (node instanceof GroupNode) {
       UsageGroup group = ((GroupNode)node).getGroup();
@@ -102,6 +99,16 @@ class ExporterToTextFile implements com.intellij.ide.ExporterToTextFile {
       buf.append(node.toString());
     }
     buf.append(lineSeparator);
+  }
+
+  protected void appendUsageNodeText(StringBuilder buf, UsageNode node) {
+    TextChunk[] chunks = node.getUsage().getPresentation().getText();
+    int chunkCount = 0;
+    for (TextChunk chunk : chunks) {
+      if (chunkCount == 1) buf.append(" "); // add space after line number
+      buf.append(chunk.getText());
+      ++chunkCount;
+    }
   }
 
   @NotNull

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -98,14 +98,11 @@ public final class SocketLock {
     }
     finally {
       try {
-        underLocks(new Callable<Void>() {
-          @Override
-          public Void call() throws Exception {
-            FileUtil.delete(new File(myConfigPath, PORT_FILE));
-            FileUtil.delete(new File(mySystemPath, PORT_FILE));
-            FileUtil.delete(new File(mySystemPath, TOKEN_FILE));
-            return null;
-          }
+        underLocks(() -> {
+          FileUtil.delete(new File(myConfigPath, PORT_FILE));
+          FileUtil.delete(new File(mySystemPath, PORT_FILE));
+          FileUtil.delete(new File(mySystemPath, TOKEN_FILE));
+          return null;
         });
       }
       catch (Exception e) {
@@ -203,9 +200,8 @@ public final class SocketLock {
     log("trying: port=%s", portNumber);
     args = checkForJetBrainsProtocolCommand(args);
     try {
-      Socket socket = new Socket(InetAddress.getLoopbackAddress(), portNumber);
-      try {
-        socket.setSoTimeout(1000);
+      try (Socket socket = new Socket(InetAddress.getLoopbackAddress(), portNumber)) {
+        socket.setSoTimeout(5000);
 
         boolean result = false;
         @SuppressWarnings("IOResourceOpenedButNotSafelyClosed") DataInputStream in = new DataInputStream(socket.getInputStream());
@@ -248,9 +244,6 @@ public final class SocketLock {
           return ActivateStatus.CANNOT_ACTIVATE;
         }
       }
-      finally {
-        socket.close();
-      }
     }
     catch (ConnectException e) {
       log("%s (stale port file?)", e.getMessage());
@@ -262,6 +255,7 @@ public final class SocketLock {
     return ActivateStatus.NO_INSTANCE;
   }
 
+  @SuppressWarnings("ALL")
   private static void printPID(int port) {
     try {
       Socket socket = new Socket(InetAddress.getLoopbackAddress(), port);

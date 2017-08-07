@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@
  */
 package com.intellij.execution.remote;
 
-import com.intellij.application.options.ModulesComboBox;
+import com.intellij.application.options.ModuleDescriptionsComboBox;
 import com.intellij.execution.ExecutionBundle;
 import com.intellij.execution.configurations.RemoteConnection;
 import com.intellij.execution.ui.ConfigurationArgumentsHelpArea;
@@ -53,7 +53,7 @@ public class RemoteConfigurable extends SettingsEditor<RemoteConfiguration> {
   private ConfigurationArgumentsHelpArea myHelpArea;
   @NonNls private ConfigurationArgumentsHelpArea myJDK13HelpArea;
   private ConfigurationArgumentsHelpArea myJDK14HelpArea;
-  private LabeledComponent<ModulesComboBox> myModule;
+  private LabeledComponent<ModuleDescriptionsComboBox> myModule;
   private String myHostName = "";
   @NonNls
   protected static final String LOCALHOST = "localhost";
@@ -128,8 +128,9 @@ public class RemoteConfigurable extends SettingsEditor<RemoteConfiguration> {
     };
     myAddressField.addFocusListener(fieldFocusListener);
     myPortField.addFocusListener(fieldFocusListener);
-
-    myModuleSelector = new ConfigurationModuleSelector(project, myModule.getComponent(), "<whole project>");
+    
+    myModule.getComponent().allowEmptySelection("<whole project>");
+    myModuleSelector = new ConfigurationModuleSelector(project, myModule.getComponent());
   }
 
   public void applyEditorTo(@NotNull final RemoteConfiguration configuration) throws ConfigurationException {
@@ -150,7 +151,7 @@ public class RemoteConfigurable extends SettingsEditor<RemoteConfiguration> {
     myModuleSelector.applyTo(configuration);
   }
 
-  public void resetEditorFrom(final RemoteConfiguration configuration) {
+  public void resetEditorFrom(@NotNull final RemoteConfiguration configuration) {
     if (!SystemInfo.isWindows) {
       configuration.USE_SOCKET_TRANSPORT = true;
       myRbShmem.setEnabled(false);

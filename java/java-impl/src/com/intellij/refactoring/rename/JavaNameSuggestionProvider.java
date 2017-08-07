@@ -118,7 +118,7 @@ public class JavaNameSuggestionProvider implements NameSuggestionProvider {
     }
     final List<String> result = new ArrayList<>();
     result.add(suggestProperlyCasedName(prefix, NameUtil.splitNameIntoWords(name)));
-    if (name.startsWith(prefix)) {
+    if (name.startsWith(prefix) && !prefix.isEmpty()) {
       name = name.substring(prefix.length());
       result.add(suggestProperlyCasedName(prefix, NameUtil.splitNameIntoWords(name)));
     }
@@ -159,7 +159,7 @@ public class JavaNameSuggestionProvider implements NameSuggestionProvider {
     JavaCodeStyleManager codeStyleManager = JavaCodeStyleManager.getInstance(element.getProject());
     VariableKind variableKind = codeStyleManager.getVariableKind(var);
     final SuggestedNameInfo nameInfo = codeStyleManager.suggestVariableName(variableKind, null, var.getInitializer(), var.getType());
-    final PsiExpression expression = PsiTreeUtil.getParentOfType(nameSuggestionContext, PsiExpression.class, false);
+    final PsiExpression expression = PsiTreeUtil.getParentOfType(nameSuggestionContext, PsiCallExpression.class, false, PsiLambdaExpression.class, PsiClass.class);
     if (expression != null) {
       return new SuggestedNameInfo.Delegate(codeStyleManager.suggestVariableName(variableKind, null, expression, var.getType()).names, nameInfo);
       

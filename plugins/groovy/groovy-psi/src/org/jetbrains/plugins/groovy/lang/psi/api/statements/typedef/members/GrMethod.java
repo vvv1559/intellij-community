@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,10 +27,11 @@ import org.jetbrains.plugins.groovy.lang.groovydoc.psi.api.GrDocCommentOwner;
 import org.jetbrains.plugins.groovy.lang.psi.GrNamedElement;
 import org.jetbrains.plugins.groovy.lang.psi.api.auxiliary.modifiers.GrModifierList;
 import org.jetbrains.plugins.groovy.lang.psi.api.statements.GrParametersOwner;
-import org.jetbrains.plugins.groovy.lang.psi.api.statements.GrTopLevelDefinition;
 import org.jetbrains.plugins.groovy.lang.psi.api.statements.blocks.GrCodeBlock;
 import org.jetbrains.plugins.groovy.lang.psi.api.statements.blocks.GrOpenBlock;
+import org.jetbrains.plugins.groovy.lang.psi.api.statements.params.GrParameter;
 import org.jetbrains.plugins.groovy.lang.psi.api.statements.params.GrParameterList;
+import org.jetbrains.plugins.groovy.lang.psi.api.toplevel.GrTopStatement;
 import org.jetbrains.plugins.groovy.lang.psi.api.types.GrTypeElement;
 import org.jetbrains.plugins.groovy.lang.psi.api.types.GrTypeParameterListOwner;
 
@@ -41,9 +42,9 @@ import java.util.Map;
  * @date: 26.03.2007
  */
 public interface GrMethod extends GrMembersDeclaration, GrNamedElement, PsiMethod, GrMember,
-        GrParametersOwner, GrTopLevelDefinition, GrTypeParameterListOwner, GrDocCommentOwner {
+                                  GrParametersOwner, GrTopStatement, GrTypeParameterListOwner, GrDocCommentOwner {
   GrMethod[] EMPTY_ARRAY = new GrMethod[0];
-  ArrayFactory<GrMethod> ARRAY_FACTORY = count -> new GrMethod[count];
+  ArrayFactory<GrMethod> ARRAY_FACTORY = count -> count == 0 ? EMPTY_ARRAY : new GrMethod[count];
 
   @Nullable
   GrOpenBlock getBlock();
@@ -88,4 +89,8 @@ public interface GrMethod extends GrMembersDeclaration, GrNamedElement, PsiMetho
 
   @NotNull
   GrReflectedMethod[] getReflectedMethods();
+
+  @NotNull
+  @Override
+  GrParameter[] getParameters();
 }

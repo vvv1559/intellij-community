@@ -35,6 +35,7 @@ public final class CommandProcessor implements Runnable {
 
   private final List<CommandGroup> myCommandGroupList = new ArrayList<>();
   private int myCommandCount;
+  private boolean myFlushed;
 
   public final int getCommandCount() {
     synchronized (myLock) {
@@ -42,50 +43,67 @@ public final class CommandProcessor implements Runnable {
     }
   }
 
+  public void flush() {
+    synchronized (myLock) {
+      myFlushed = true;
+      //noinspection StatementWithEmptyBody
+      while (run(true));
+    }
+  }
+
   /**
    * Executes passed batch of commands. Note, that the processor surround the
-   * commands with BlockFocusEventsCmd - UnbockFocusEventsCmd. It's required to
+   * commands with BlockFocusEventsCmd - UnblockFocusEventsCmd. It's required to
    * prevent focus handling of events which is caused by the commands to be executed.
    */
   public final void execute(@NotNull List<FinalizableCommand> commandList, @NotNull Condition expired) {
     synchronized (myLock) {
-      final boolean isBusy = myCommandCount > 0;
+      final boolean isBusy = myCommandCount > 0 || !myFlushed;
 
       final CommandGroup commandGroup = new CommandGroup(commandList, expired);
       myCommandGroupList.add(commandGroup);
       myCommandCount += commandList.size();
 
       if (!isBusy) {
-        run();
+        run(false);
       }
     }
   }
 
   public final void run() {
+    while (run(false));
+  }
+
+  private boolean run(boolean synchronously) {
     synchronized (myLock) {
       final CommandGroup commandGroup = getNextCommandGroup();
-      if (commandGroup == null || commandGroup.isEmpty()) return;
-
+      if (commandGroup == null || commandGroup.isEmpty()) return false;
       final Condition conditionForGroup = commandGroup.getExpireCondition();
 
       final FinalizableCommand command = commandGroup.takeNextCommand();
       myCommandCount--;
 
-      final Condition expire = command.getExpireCondition() != null ? command.getExpireCondition() : conditionForGroup;
-
+      Condition expire = command.getExpireCondition() != null ? command.getExpireCondition() : conditionForGroup;
+      if (expire == null) expire = ApplicationManager.getApplication().getDisposed();
+      if (expire.value(null)) return true;
       if (LOG.isDebugEnabled()) {
         LOG.debug("CommandProcessor.run " + command);
+      }
+      if (synchronously) {
+        command.run();
+        return true;
       }
       // max. I'm not actually quite sure this should have NON_MODAL modality but it should
       // definitely have some since runnables in command list may (and do) request some PSI activity
       final boolean queueNext = myCommandCount > 0;
       Application application = ApplicationManager.getApplication();
-      ModalityState modalityState = Registry.is("ide.perProjectModality") ? ModalityState.defaultModalityState() : ModalityState.NON_MODAL;
-      application.getInvokator().invokeLater(command, modalityState, expire == null ? application.getDisposed() : expire).doWhenDone(() -> {
+      ModalityState modalityState = Registry.is("ide.perProjectModality") ? ModalityState.current() : ModalityState.NON_MODAL;
+      application.getInvokator().invokeLater(command, modalityState, expire).doWhenDone(() -> {
         if (queueNext) {
-          this.run();
+          run(false);
         }
       });
+      return true;
     }
   }
 

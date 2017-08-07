@@ -28,11 +28,11 @@ import com.intellij.ui.EditorTextField;
 import com.intellij.ui.TableUtil;
 import com.intellij.ui.table.JBTable;
 import com.intellij.util.ui.AbstractTableCellEditor;
+import com.intellij.util.ui.MouseEventHandler;
 import com.intellij.util.ui.UIUtil;
 import gnu.trove.TIntArrayList;
 import gnu.trove.TIntObjectHashMap;
 import gnu.trove.TIntObjectProcedure;
-import gnu.trove.TIntProcedure;
 import org.jetbrains.annotations.NotNull;
 
 import javax.swing.*;
@@ -268,12 +268,9 @@ public abstract class JBListTable {
           return true;
         }
       });
-      completeRows.forEach(new TIntProcedure() {
-        @Override
-        public boolean execute(int row) {
-          myRowAnimationStates.remove(row);
-          return true;
-        }
+      completeRows.forEach(row -> {
+        myRowAnimationStates.remove(row);
+        return true;
       });
       if (myRowAnimationStates.isEmpty()) {
         stopAnimation();
@@ -304,6 +301,9 @@ public abstract class JBListTable {
                         currentRowHeight + (leftToAnimate < 0 ? -resizeAbs : resizeAbs);
         myTable.setRowHeight(myRow, newHeight);
         myLastUpdateTime = currentTime;
+
+        TableUtil.scrollSelectionToVisible(myTable);
+
         return myTargetHeight == newHeight;
       }
     }
@@ -472,7 +472,7 @@ public abstract class JBListTable {
         editor.setFocusCycleRoot(true);
 
         editor.setFocusTraversalPolicy(new JBListTableFocusTraversalPolicy(editor));
-        MouseSuppressor.install(editor);
+        editor.addMouseListener(MouseEventHandler.CONSUMER);
 
         myCellEditor = new MyCellEditor(editor);
         return myCellEditor;

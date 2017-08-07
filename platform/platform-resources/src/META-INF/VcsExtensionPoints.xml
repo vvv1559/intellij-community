@@ -33,6 +33,8 @@
       <with attribute="predicateClassName" implements="com.intellij.util.NotNullFunction"/>
     </extensionPoint>
 
+    <extensionPoint name="vcs.commitMessageProvider" interface="com.intellij.openapi.vcs.changes.ui.CommitMessageProvider"/>
+
     <extensionPoint name="editChangelistSupport"
                     interface="com.intellij.openapi.vcs.changes.ui.EditChangelistSupport"
                     area="IDEA_PROJECT"/>
@@ -55,12 +57,13 @@
                     interface="com.intellij.openapi.vcs.impl.VcsBaseContentProvider"
                     area="IDEA_PROJECT"/>
 
+    <extensionPoint name="vcs.ignoredFilesHolder" interface="com.intellij.openapi.vcs.changes.VcsIgnoredFilesHolder$Provider" area="IDEA_PROJECT"/>
+
     <extensionPoint name="vcsPopupProvider"
                     interface="com.intellij.openapi.vcs.actions.VcsQuickListContentProvider"/>
     <extensionPoint name="patch.extension" interface="com.intellij.openapi.diff.impl.patch.PatchEP" area="IDEA_PROJECT"/>
-    <extensionPoint name="vcsChangesViewRefresher" interface="com.intellij.openapi.vcs.changes.ChangesViewRefresher"/>
+    <extensionPoint name="vcsChangesViewRefresher" interface="com.intellij.openapi.vcs.changes.ChangesViewRefresher" area="IDEA_PROJECT"/>
     <extensionPoint name="vcsAnnotationGutterActionProvider" interface="com.intellij.openapi.vcs.annotate.AnnotationGutterActionProvider"/>
-    <extensionPoint name="vcschangedetails" interface="com.intellij.openapi.vcs.changes.VcsChangeDetailsProvider" area="IDEA_PROJECT"/>
 
     <extensionPoint name="vcs.taskHandler" interface="com.intellij.openapi.vcs.VcsTaskHandler" area="IDEA_PROJECT"/>
 
@@ -71,5 +74,17 @@
 
     <extensionPoint qualifiedName="com.intellij.openapi.vcs.actions.AnnotateToggleAction.Provider"
                     interface="com.intellij.openapi.vcs.actions.AnnotateToggleAction$Provider"/>
+
+    <extensionPoint qualifiedName="com.intellij.ignoredFileProvider"
+                    interface="com.intellij.openapi.vcs.changes.IgnoredFileProvider"/>
+
+    <extensionPoint name="openapi.vcs.history.actions.ShowDiffBeforeWithLocalAction.ExtensionProvider"
+                    interface="com.intellij.openapi.actionSystem.AnActionExtensionProvider"/>
+    <extensionPoint name="openapi.vcs.history.actions.ShowDiffAfterWithLocalAction.ExtensionProvider"
+                    interface="com.intellij.openapi.actionSystem.AnActionExtensionProvider"/>
+    <extensionPoint name="openapi.vcs.changes.actions.CreatePatchFromChangesAction.Dialog.ExtensionProvider"
+                    interface="com.intellij.openapi.actionSystem.AnActionExtensionProvider"/>
+    <extensionPoint name="openapi.vcs.changes.actions.CreatePatchFromChangesAction.Clipboard.ExtensionProvider"
+                    interface="com.intellij.openapi.actionSystem.AnActionExtensionProvider"/>
   </extensionPoints>
 </idea-plugin>

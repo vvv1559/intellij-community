@@ -58,7 +58,7 @@ public interface ModuleRootModel {
   @NotNull
   OrderEntry[] getOrderEntries();
 
-  /*
+  /**
    * Returns the SDK used by the module.
    *
    * @return either module-specific or inherited SDK
@@ -68,7 +68,7 @@ public interface ModuleRootModel {
   Sdk getSdk();
 
   /**
-   * Returns <code>true</code> if SDK for this module is inherited from a project.
+   * Returns {@code true} if SDK for this module is inherited from a project.
    *
    * @return true if the SDK is inherited, false otherwise
    * @see ProjectRootManager#getProjectSdk()

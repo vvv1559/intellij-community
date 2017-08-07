@@ -17,6 +17,10 @@ IRONPYTHON_EXE = None
 JYTHON_JAR_LOCATION = None
 JAVA_LOCATION = None
 
+try:
+    xrange
+except:
+    xrange = range
 
 import unittest
 import os
@@ -32,6 +36,16 @@ if sys.version_info[:2] == (2, 7):
         TEST_DJANGO = True
     except:
         pass
+
+IS_PY2 = False
+if sys.version_info[0] == 2:
+    IS_PY2 = True
+
+if IS_PY2:
+    builtin_qualifier = "__builtin__"
+else:
+    builtin_qualifier = "builtins"
+
 
 TEST_CYTHON = os.getenv('PYDEVD_USE_CYTHON', None) == 'YES'
 
@@ -52,7 +66,7 @@ class WriterThreadCaseSetNextStatement(debugger_unittest.AbstractWriterThread):
         assert line == 6, 'Expected return to be in line 6, was: %s' % line
 
         self.write_evaluate_expression('%s\t%s\t%s' % (thread_id, frame_id, 'LOCAL'), 'a')
-        self.wait_for_evaluation('<var name="a" type="int" value="int: 2"')
+        self.wait_for_evaluation('<var name="a" type="int" qualifier="{}" value="int: 2"'.format(builtin_qualifier))
         self.write_set_next_statement(thread_id, 2, 'method')
         thread_id, frame_id, line = self.wait_for_breakpoint_hit('111', True)
         assert line == 2, 'Expected return to be in line 2, was: %s' % line
@@ -61,7 +75,7 @@ class WriterThreadCaseSetNextStatement(debugger_unittest.AbstractWriterThread):
         thread_id, frame_id, line = self.wait_for_breakpoint_hit('108', True)
 
         self.write_evaluate_expression('%s\t%s\t%s' % (thread_id, frame_id, 'LOCAL'), 'a')
-        self.wait_for_evaluation('<var name="a" type="int" value="int: 1"')
+        self.wait_for_evaluation('<var name="a" type="int" qualifier="{}" value="int: 1"'.format(builtin_qualifier))
 
         self.write_remove_breakpoint(breakpoint_id)
         self.write_run_thread(thread_id)
@@ -160,7 +174,7 @@ class WriterThreadCase19(debugger_unittest.AbstractWriterThread):
         assert line == 8, 'Expected return to be in line 8, was: %s' % line
 
         self.write_evaluate_expression('%s\t%s\t%s' % (thread_id, frame_id, 'LOCAL'), 'a.__var')
-        self.wait_for_evaluation('<var name="a.__var" type="int" value="int')
+        self.wait_for_evaluation('<var name="a.__var" type="int" qualifier="{}" value="int'.format(builtin_qualifier))
         self.write_run_thread(thread_id)
 
 
@@ -229,10 +243,13 @@ class WriterThreadCase17a(debugger_unittest.AbstractWriterThread):
         self.write_make_initial_run()
 
         thread_id, frame_id, line = self.wait_for_breakpoint_hit('111', True)
+        assert line == 2, 'Expected return to be in line 2, was: %s' % line
 
         self.write_step_in(thread_id)
-        thread_id, frame_id, line = self.wait_for_breakpoint_hit('107', True)
+        thread_id, frame_id, line, name = self.wait_for_breakpoint_hit('107', get_line=True, get_name=True)
+
         # Should Skip step into properties setter
+        assert name == 'm3'
         assert line == 10, 'Expected return to be in line 10, was: %s' % line
         self.write_run_thread(thread_id)
 
@@ -258,9 +275,9 @@ class WriterThreadCase16(debugger_unittest.AbstractWriterThread):
 
         # First pass check is that we have all three expected variables defined
         self.write_get_frame(thread_id, frame_id)
-        self.wait_for_vars('<var name="smallarray" type="ndarray" value="ndarray%253A %255B  0.%252B1.j   1.%252B1.j   2.%252B1.j   3.%252B1.j   4.%252B1.j   5.%252B1.j   6.%252B1.j   7.%252B1.j%250A   8.%252B1.j   9.%252B1.j  10.%252B1.j  11.%252B1.j  12.%252B1.j  13.%252B1.j  14.%252B1.j  15.%252B1.j%250A  16.%252B1.j  17.%252B1.j  18.%252B1.j  19.%252B1.j  20.%252B1.j  21.%252B1.j  22.%252B1.j  23.%252B1.j%250A  24.%252B1.j  25.%252B1.j  26.%252B1.j  27.%252B1.j  28.%252B1.j  29.%252B1.j  30.%252B1.j  31.%252B1.j%250A  32.%252B1.j  33.%252B1.j  34.%252B1.j  35.%252B1.j  36.%252B1.j  37.%252B1.j  38.%252B1.j  39.%252B1.j%250A  40.%252B1.j  41.%252B1.j  42.%252B1.j  43.%252B1.j  44.%252B1.j  45.%252B1.j  46.%252B1.j  47.%252B1.j%250A  48.%252B1.j  49.%252B1.j  50.%252B1.j  51.%252B1.j  52.%252B1.j  53.%252B1.j  54.%252B1.j  55.%252B1.j%250A  56.%252B1.j  57.%252B1.j  58.%252B1.j  59.%252B1.j  60.%252B1.j  61.%252B1.j  62.%252B1.j  63.%252B1.j%250A  64.%252B1.j  65.%252B1.j  66.%252B1.j  67.%252B1.j  68.%252B1.j  69.%252B1.j  70.%252B1.j  71.%252B1.j%250A  72.%252B1.j  73.%252B1.j  74.%252B1.j  75.%252B1.j  76.%252B1.j  77.%252B1.j  78.%252B1.j  79.%252B1.j%250A  80.%252B1.j  81.%252B1.j  82.%252B1.j  83.%252B1.j  84.%252B1.j  85.%252B1.j  86.%252B1.j  87.%252B1.j%250A  88.%252B1.j  89.%252B1.j  90.%252B1.j  91.%252B1.j  92.%252B1.j  93.%252B1.j  94.%252B1.j  95.%252B1.j%250A  96.%252B1.j  97.%252B1.j  98.%252B1.j  99.%252B1.j%255D" isContainer="True" />')
-        self.wait_for_vars('<var name="bigarray" type="ndarray" value="ndarray%253A %255B%255B    0     1     2 ...%252C  9997  9998  9999%255D%250A %255B10000 10001 10002 ...%252C 19997 19998 19999%255D%250A %255B20000 20001 20002 ...%252C 29997 29998 29999%255D%250A ...%252C %250A %255B70000 70001 70002 ...%252C 79997 79998 79999%255D%250A %255B80000 80001 80002 ...%252C 89997 89998 89999%255D%250A %255B90000 90001 90002 ...%252C 99997 99998 99999%255D%255D" isContainer="True" />')
-        self.wait_for_vars('<var name="hugearray" type="ndarray" value="ndarray%253A %255B      0       1       2 ...%252C 9999997 9999998 9999999%255D" isContainer="True" />')
+        self.wait_for_vars('<var name="smallarray" type="ndarray" qualifier="numpy" value="ndarray%253A %255B  0.%252B1.j   1.%252B1.j   2.%252B1.j   3.%252B1.j   4.%252B1.j   5.%252B1.j   6.%252B1.j   7.%252B1.j%250A   8.%252B1.j   9.%252B1.j  10.%252B1.j  11.%252B1.j  12.%252B1.j  13.%252B1.j  14.%252B1.j  15.%252B1.j%250A  16.%252B1.j  17.%252B1.j  18.%252B1.j  19.%252B1.j  20.%252B1.j  21.%252B1.j  22.%252B1.j  23.%252B1.j%250A  24.%252B1.j  25.%252B1.j  26.%252B1.j  27.%252B1.j  28.%252B1.j  29.%252B1.j  30.%252B1.j  31.%252B1.j%250A  32.%252B1.j  33.%252B1.j  34.%252B1.j  35.%252B1.j  36.%252B1.j  37.%252B1.j  38.%252B1.j  39.%252B1.j%250A  40.%252B1.j  41.%252B1.j  42.%252B1.j  43.%252B1.j  44.%252B1.j  45.%252B1.j  46.%252B1.j  47.%252B1.j%250A  48.%252B1.j  49.%252B1.j  50.%252B1.j  51.%252B1.j  52.%252B1.j  53.%252B1.j  54.%252B1.j  55.%252B1.j%250A  56.%252B1.j  57.%252B1.j  58.%252B1.j  59.%252B1.j  60.%252B1.j  61.%252B1.j  62.%252B1.j  63.%252B1.j%250A  64.%252B1.j  65.%252B1.j  66.%252B1.j  67.%252B1.j  68.%252B1.j  69.%252B1.j  70.%252B1.j  71.%252B1.j%250A  72.%252B1.j  73.%252B1.j  74.%252B1.j  75.%252B1.j  76.%252B1.j  77.%252B1.j  78.%252B1.j  79.%252B1.j%250A  80.%252B1.j  81.%252B1.j  82.%252B1.j  83.%252B1.j  84.%252B1.j  85.%252B1.j  86.%252B1.j  87.%252B1.j%250A  88.%252B1.j  89.%252B1.j  90.%252B1.j  91.%252B1.j  92.%252B1.j  93.%252B1.j  94.%252B1.j  95.%252B1.j%250A  96.%252B1.j  97.%252B1.j  98.%252B1.j  99.%252B1.j%255D" isContainer="True" />')
+        self.wait_for_vars('<var name="bigarray" type="ndarray" qualifier="numpy" value="ndarray%253A %255B%255B    0     1     2 ...%252C  9997  9998  9999%255D%250A %255B10000 10001 10002 ...%252C 19997 19998 19999%255D%250A %255B20000 20001 20002 ...%252C 29997 29998 29999%255D%250A ...%252C %250A %255B70000 70001 70002 ...%252C 79997 79998 79999%255D%250A %255B80000 80001 80002 ...%252C 89997 89998 89999%255D%250A %255B90000 90001 90002 ...%252C 99997 99998 99999%255D%255D" isContainer="True" />')
+        self.wait_for_vars('<var name="hugearray" type="ndarray" qualifier="numpy" value="ndarray%253A %255B      0       1       2 ...%252C 9999997 9999998 9999999%255D" isContainer="True" />')
 
         # For each variable, check each of the resolved (meta data) attributes...
         self.write_get_variable(thread_id, frame_id, 'smallarray')
@@ -274,15 +291,17 @@ class WriterThreadCase16(debugger_unittest.AbstractWriterThread):
         self.wait_for_var('<var name="%27size%27')
 
         self.write_get_variable(thread_id, frame_id, 'bigarray')
+        # isContainer could be true on some numpy versions, so, we only check for the var begin.
         self.wait_for_var([
-            '<var name="min" type="int64" value="int64%253A 0" />',
-            '<var name="min" type="int64" value="int64%3A 0" />',
-            '<var name="size" type="int" value="int%3A 100000" />',
+            '<var name="min" type="int64" qualifier="numpy" value="int64%253A 0"',
+            '<var name="min" type="int64" qualifier="numpy" value="int64%3A 0"',
+            '<var name="size" type="int" qualifier="{}" value="int%3A 100000"'.format(builtin_qualifier),
         ])
         self.wait_for_var([
-            '<var name="max" type="int64" value="int64%253A 99999" />',
-            '<var name="max" type="int32" value="int32%253A 99999" />',
-            '<var name="max" type="int64" value="int64%3A 99999"'
+            '<var name="max" type="int64" qualifier="numpy" value="int64%253A 99999"',
+            '<var name="max" type="int32" qualifier="numpy" value="int32%253A 99999"',
+            '<var name="max" type="int64" qualifier="numpy" value="int64%3A 99999"',
+            '<var name="max" type="int32" qualifier="numpy" value="int32%253A 99999"',
         ])
         self.wait_for_var('<var name="shape" type="tuple"')
         self.wait_for_var('<var name="dtype" type="dtype"')
@@ -294,12 +313,16 @@ class WriterThreadCase16(debugger_unittest.AbstractWriterThread):
         # the min/max
         self.write_get_variable(thread_id, frame_id, 'hugearray')
         self.wait_for_var([
-            '<var name="min" type="str" value="str%253A ndarray too big%252C calculating min would slow down debugging" />',
-            '<var name="min" type="str" value="str%3A ndarray too big%252C calculating min would slow down debugging" />',
+            '<var name="min" type="str" qualifier={} value="str%253A ndarray too big%252C calculating min would slow down debugging" />'.format(builtin_qualifier),
+            '<var name="min" type="str" qualifier={} value="str%3A ndarray too big%252C calculating min would slow down debugging" />'.format(builtin_qualifier),
+            '<var name="min" type="str" qualifier="{}" value="str%253A ndarray too big%252C calculating min would slow down debugging" />'.format(builtin_qualifier),
+            '<var name="min" type="str" qualifier="{}" value="str%3A ndarray too big%252C calculating min would slow down debugging" />'.format(builtin_qualifier),
         ])
         self.wait_for_var([
-            '<var name="max" type="str" value="str%253A ndarray too big%252C calculating max would slow down debugging" />',
-            '<var name="max" type="str" value="str%3A ndarray too big%252C calculating max would slow down debugging" />',
+            '<var name="max" type="str" qualifier={} value="str%253A ndarray too big%252C calculating max would slow down debugging" />'.format(builtin_qualifier),
+            '<var name="max" type="str" qualifier={} value="str%3A ndarray too big%252C calculating max would slow down debugging" />'.format(builtin_qualifier),
+            '<var name="max" type="str" qualifier="{}" value="str%253A ndarray too big%252C calculating max would slow down debugging" />'.format(builtin_qualifier),
+            '<var name="max" type="str" qualifier="{}" value="str%3A ndarray too big%252C calculating max would slow down debugging" />'.format(builtin_qualifier),
         ])
         self.wait_for_var('<var name="shape" type="tuple"')
         self.wait_for_var('<var name="dtype" type="dtype"')
@@ -376,7 +399,7 @@ class WriterThreadCase14(debugger_unittest.AbstractWriterThread):
                 '<xml><more>False</more><output message="0"></output><output message="1"></output><output message="2"></output></xml>',
                 '<xml><more>0</more><output message="0"></output><output message="1"></output><output message="2"></output></xml>'
             ]
-            )
+        )
         assert 17 == self._sequence, 'Expected 19. Had: %s' % self._sequence
 
         self.write_run_thread(thread_id)
@@ -477,7 +500,9 @@ class WriterThreadCase11(debugger_unittest.AbstractWriterThread):
         self.write_add_breakpoint(2, 'Method1')
         self.write_make_initial_run()
 
-        thread_id, frame_id = self.wait_for_breakpoint_hit('111')
+        thread_id, frame_id, line = self.wait_for_breakpoint_hit('111', True)
+
+        assert line == 2, 'Expected return to be in line 2, was: %s' % line
 
         self.write_step_over(thread_id)
 
@@ -623,13 +648,13 @@ class WriterThreadCase7(debugger_unittest.AbstractWriterThread):
 
         self.write_get_frame(thread_id, frame_id)
 
-        self.wait_for_vars('<xml><var name="variable_for_test_1" type="int" value="int%253A 10" />%0A</xml>')
+        self.wait_for_vars('<xml><var name="variable_for_test_1" type="int" qualifier="{}" value="int%253A 10" />%0A</xml>'.format(builtin_qualifier))
 
         self.write_step_over(thread_id)
 
         self.write_get_frame(thread_id, frame_id)
 
-        self.wait_for_vars('<xml><var name="variable_for_test_1" type="int" value="int%253A 10" />%0A<var name="variable_for_test_2" type="int" value="int%253A 20" />%0A</xml>')
+        self.wait_for_vars('<xml><var name="variable_for_test_1" type="int" qualifier="{0}" value="int%253A 10" />%0A<var name="variable_for_test_2" type="int" qualifier="{0}" value="int%253A 20" />%0A</xml>'.format(builtin_qualifier))
 
         self.write_run_thread(thread_id)
 
@@ -868,6 +893,37 @@ class WriterThreadCaseQThread3(debugger_unittest.AbstractWriterThread):
         self.finished_ok = True
 
 #=======================================================================================================================
+# WriterThreadCaseQThread4
+#=======================================================================================================================
+class WriterThreadCaseQThread4(debugger_unittest.AbstractWriterThread):
+
+    TEST_FILE = debugger_unittest._get_debugger_test_file('_debugger_case_qthread4.py')
+
+    def run(self):
+        self.start_socket()
+        breakpoint_id = self.write_add_breakpoint(24, 'on_start')
+        self.write_make_initial_run()
+
+        thread_id, frame_id = self.wait_for_breakpoint_hit()
+
+        self.write_remove_breakpoint(breakpoint_id)
+        self.write_run_thread(thread_id)
+
+        self.log.append('Checking sequence. Found: %s' % (self._sequence))
+        assert 9 == self._sequence, 'Expected 9. Had: %s' % self._sequence
+
+        self.log.append('Marking finished ok.')
+        self.finished_ok = True
+
+    def additional_output_checks(self, stdout, stderr):
+        if 'On start called' not in stdout:
+            raise AssertionError('Expected "On start called" to be in stdout:\n%s' % (stdout,))
+        if 'Done sleeping' not in stdout:
+            raise AssertionError('Expected "Done sleeping" to be in stdout:\n%s' % (stdout,))
+        if 'native Qt signal is not callable' in stderr:
+            raise AssertionError('Did not expect "native Qt signal is not callable" to be in stderr:\n%s' % (stderr,))
+
+#=======================================================================================================================
 # WriterThreadCase1
 #=======================================================================================================================
 class WriterThreadCase1(debugger_unittest.AbstractWriterThread):
@@ -907,6 +963,162 @@ class WriterThreadCase1(debugger_unittest.AbstractWriterThread):
         self.log.append('asserted')
 
         self.finished_ok = True
+
+#=======================================================================================================================
+# WriterThreadCaseMSwitch
+#=======================================================================================================================
+class WriterThreadCaseMSwitch(debugger_unittest.AbstractWriterThread):
+
+    TEST_FILE = 'tests_pydevd_python._debugger_case_m_switch'
+    IS_MODULE = True
+
+    def get_environ(self):
+        env = os.environ.copy()
+        curr_pythonpath = env.get('PYTHONPATH', '')
+
+        root_dirname = os.path.dirname(os.path.dirname(__file__))
+
+        curr_pythonpath += root_dirname + os.pathsep
+        env['PYTHONPATH'] = curr_pythonpath
+        return env
+
+    def get_main_filename(self):
+        return debugger_unittest._get_debugger_test_file('_debugger_case_m_switch.py')
+
+    def run(self):
+        self.start_socket()
+
+        self.log.append('writing add breakpoint')
+        breakpoint_id = self.write_add_breakpoint(1, None)
+
+        self.log.append('making initial run')
+        self.write_make_initial_run()
+
+        self.log.append('waiting for breakpoint hit')
+        thread_id, frame_id = self.wait_for_breakpoint_hit()
+
+        self.write_remove_breakpoint(breakpoint_id)
+
+        self.log.append('run thread')
+        self.write_run_thread(thread_id)
+
+        self.log.append('asserting')
+        try:
+            assert 9 == self._sequence, 'Expected 9. Had: %s' % self._sequence
+        except:
+            self.log.append('assert failed!')
+            raise
+        self.log.append('asserted')
+
+        self.finished_ok = True
+
+#=======================================================================================================================
+# WriterThreadCaseRemoteDebugger
+#=======================================================================================================================
+class WriterThreadCaseRemoteDebugger(debugger_unittest.AbstractWriterThread):
+
+    TEST_FILE = debugger_unittest._get_debugger_test_file('_debugger_case_remote.py')
+
+    def run(self):
+        self.start_socket(8787)
+
+        self.log.append('making initial run')
+        self.write_make_initial_run()
+
+        self.log.append('waiting for breakpoint hit')
+        thread_id, frame_id = self.wait_for_breakpoint_hit('105')
+
+        self.log.append('run thread')
+        self.write_run_thread(thread_id)
+
+        self.log.append('asserting')
+        try:
+            assert 5 == self._sequence, 'Expected 5. Had: %s' % self._sequence
+        except:
+            self.log.append('assert failed!')
+            raise
+        self.log.append('asserted')
+
+        self.finished_ok = True
+
+#=======================================================================================================================
+# _SecondaryMultiProcProcessWriterThread
+#=======================================================================================================================
+class _SecondaryMultiProcProcessWriterThread(debugger_unittest.AbstractWriterThread):
+
+    FORCE_KILL_PROCESS_WHEN_FINISHED_OK = True
+
+    def __init__(self, server_socket):
+        debugger_unittest.AbstractWriterThread.__init__(self)
+        self.server_socket = server_socket
+
+    def run(self):
+        print('waiting for second process')
+        self.sock, addr = self.server_socket.accept()
+        print('accepted second process')
+
+        from tests_pydevd_python.debugger_unittest import ReaderThread
+        self.reader_thread = ReaderThread(self.sock)
+        self.reader_thread.start()
+
+        self._sequence = -1
+        # initial command is always the version
+        self.write_version()
+        self.log.append('start_socket')
+        self.write_make_initial_run()
+        time.sleep(.5)
+        self.finished_ok = True
+
+#=======================================================================================================================
+# WriterThreadCaseRemoteDebuggerMultiProc
+#=======================================================================================================================
+class WriterThreadCaseRemoteDebuggerMultiProc(debugger_unittest.AbstractWriterThread):
+
+    # It seems sometimes it becomes flaky on the ci because the process outlives the writer thread...
+    # As we're only interested in knowing if a second connection was received, just kill the related
+    # process.
+    FORCE_KILL_PROCESS_WHEN_FINISHED_OK = True
+
+    TEST_FILE = debugger_unittest._get_debugger_test_file('_debugger_case_remote_1.py')
+
+    def run(self):
+        self.start_socket(8787)
+
+        self.log.append('making initial run')
+        self.write_make_initial_run()
+
+        self.log.append('waiting for breakpoint hit')
+        thread_id, frame_id = self.wait_for_breakpoint_hit('105')
+
+        self.secondary_multi_proc_process_writer_thread  = secondary_multi_proc_process_writer_thread = \
+            _SecondaryMultiProcProcessWriterThread(self.server_socket)
+        secondary_multi_proc_process_writer_thread.start()
+
+        self.log.append('run thread')
+        self.write_run_thread(thread_id)
+
+        for _i in xrange(400):
+            if secondary_multi_proc_process_writer_thread.finished_ok:
+                break
+            time.sleep(.1)
+        else:
+            self.log.append('Secondary process not finished ok!')
+            raise AssertionError('Secondary process not finished ok!')
+
+        self.log.append('Secondary process finished!')
+        try:
+            assert 5 == self._sequence, 'Expected 5. Had: %s' % self._sequence
+        except:
+            self.log.append('assert failed!')
+            raise
+        self.log.append('asserted')
+
+        self.finished_ok = True
+
+    def do_kill(self):
+        debugger_unittest.AbstractWriterThread.do_kill(self)
+        if hasattr(self, 'secondary_multi_proc_process_writer_thread'):
+            self.secondary_multi_proc_process_writer_thread.do_kill()
 
 #=======================================================================================================================
 # DebuggerBase
@@ -1006,6 +1218,29 @@ class DebuggerBase(debugger_unittest.DebuggerRunner):
         if self._has_qt():
             self.check_case(WriterThreadCaseQThread3)
 
+    def test_case_qthread4(self):
+        if self._has_qt():
+            self.check_case(WriterThreadCaseQThread4)
+
+    def test_m_switch(self):
+        self.check_case(WriterThreadCaseMSwitch)
+
+
+
+# class TestPythonRemoteDebugger(unittest.TestCase, debugger_unittest.DebuggerRunner):
+#
+#     def get_command_line(self):
+#         return [PYTHON_EXE, '-u']
+#
+#     def add_command_line_args(self, args):
+#         return args + [self.writer_thread.TEST_FILE]
+#
+#     def test_remote_debugger(self):
+#         self.check_case(WriterThreadCaseRemoteDebugger)
+#
+#     def test_remote_debugger2(self):
+#         self.check_case(WriterThreadCaseRemoteDebuggerMultiProc)
+
 
 class TestPython(unittest.TestCase, DebuggerBase):
     def get_command_line(self):
@@ -1018,11 +1253,11 @@ class TestPython(unittest.TestCase, DebuggerBase):
 class TestJython(unittest.TestCase, DebuggerBase):
     def get_command_line(self):
         return [
-                JAVA_LOCATION,
-                '-classpath',
-                JYTHON_JAR_LOCATION,
-                'org.python.util.jython'
-            ]
+            JAVA_LOCATION,
+            '-classpath',
+            JYTHON_JAR_LOCATION,
+            'org.python.util.jython'
+        ]
 
     # This case requires decorators to work (which are not present on Jython 2.1), so, this test is just removed from the jython run.
     def test_case_13(self):
@@ -1041,9 +1276,9 @@ class TestJython(unittest.TestCase, DebuggerBase):
 class TestIronPython(unittest.TestCase, DebuggerBase):
     def get_command_line(self):
         return [
-                IRONPYTHON_EXE,
-                '-X:Frames'
-            ]
+            IRONPYTHON_EXE,
+            '-X:Frames'
+        ]
 
     def test_case_3(self):
         self.skipTest("Timing issues") # This test fails once in a while due to timing issues on IronPython, so, skipping it.
@@ -1140,34 +1375,34 @@ if __name__ == '__main__':
         #    pass
         suite = unittest.TestSuite()
 
-#         suite.addTests(unittest.makeSuite(TestJython)) # Note: Jython should be 2.2.1
-#
-#         suite.addTests(unittest.makeSuite(TestIronPython))
-#
-        suite.addTests(unittest.makeSuite(TestPython))
+        #         suite.addTests(unittest.makeSuite(TestJython)) # Note: Jython should be 2.2.1
+        #
+        #         suite.addTests(unittest.makeSuite(TestIronPython))
+        #
+        #         suite.addTests(unittest.makeSuite(TestPython))
 
 
 
 
-#         suite.addTest(TestIronPython('test_case_18'))
-#         suite.addTest(TestIronPython('test_case_17'))
-#         suite.addTest(TestIronPython('test_case_3'))
-#         suite.addTest(TestIronPython('test_case_7'))
-#
-#         suite.addTest(TestPython('test_case_10'))
-#         suite.addTest(TestPython('test_case_django'))
-#         suite.addTest(TestPython('test_case_qthread1'))
-#         suite.addTest(TestPython('test_case_qthread2'))
-#         suite.addTest(TestPython('test_case_qthread3'))
+        #         suite.addTest(TestIronPython('test_case_18'))
+        #         suite.addTest(TestIronPython('test_case_17'))
+        #         suite.addTest(TestIronPython('test_case_3'))
+        #         suite.addTest(TestIronPython('test_case_7'))
+        #
+        #         suite.addTest(TestPython('test_case_10'))
+        #         suite.addTest(TestPython('test_case_django'))
+        #         suite.addTest(TestPython('test_case_qthread1'))
+        #         suite.addTest(TestPython('test_case_qthread2'))
+        #         suite.addTest(TestPython('test_case_qthread3'))
 
-#         suite.addTest(TestPython('test_case_17a'))
+        #         suite.addTest(TestPython('test_case_17a'))
 
 
-#         suite.addTest(TestJython('test_case_1'))
-#         suite.addTest(TestPython('test_case_2'))
-#         unittest.TextTestRunner(verbosity=3).run(suite)
-    #     suite.addTest(TestPython('test_case_17'))
-    #     suite.addTest(TestPython('test_case_18'))
-    #     suite.addTest(TestPython('test_case_19'))
+        #         suite.addTest(TestJython('test_case_1'))
+        #         suite.addTest(TestPython('test_case_2'))
+        #         unittest.TextTestRunner(verbosity=3).run(suite)
+        #     suite.addTest(TestPython('test_case_17'))
+        #     suite.addTest(TestPython('test_case_18'))
+        suite.addTest(TestPython('test_case_qthread4'))
 
         unittest.TextTestRunner(verbosity=3).run(suite)

@@ -21,14 +21,14 @@ import javax.swing.*;
 
 /**
  * NOTE THIS FILE IS AUTO-GENERATED
- * DO NOT EDIT IT BY HAND, run build/scripts/icons.gant instead
+ * DO NOT EDIT IT BY HAND, run "Generate icon classes" configuration instead
  */
 public class RemoteServersIcons {
   private static Icon load(String path) {
     return IconLoader.getIcon(path, RemoteServersIcons.class);
   }
 
-  public static final Icon ResumeScaled = load("/icons/resumeScaled.png"); // 8x8
+  public static final Icon ResumeScaled = load("/icons/resumeScaled.png"); // 16x16
   public static final Icon ServersToolWindow = load("/icons/serversToolWindow.png"); // 13x13
-  public static final Icon SuspendScaled = load("/icons/suspendScaled.png"); // 8x8
+  public static final Icon SuspendScaled = load("/icons/suspendScaled.png"); // 16x16
 }

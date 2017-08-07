@@ -7,6 +7,7 @@ import com.intellij.notification.NotificationType;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ApplicationNamesInfo;
+import com.intellij.openapi.components.ApplicationComponent;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.NotNullLazyValue;
@@ -14,7 +15,6 @@ import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.util.Url;
 import com.intellij.util.UrlImpl;
 import com.intellij.util.net.NetUtils;
-import io.netty.channel.EventLoopGroup;
 import io.netty.channel.oio.OioEventLoopGroup;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
@@ -32,7 +32,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-public class BuiltInServerManagerImpl extends BuiltInServerManager {
+public class BuiltInServerManagerImpl extends BuiltInServerManager implements ApplicationComponent {
   private static final Logger LOG = Logger.getInstance(BuiltInServerManager.class);
 
   public static final NotNullLazyValue<NotificationGroup> NOTIFICATION_GROUP = new NotNullLazyValue<NotificationGroup>() {
@@ -65,9 +65,7 @@ public class BuiltInServerManagerImpl extends BuiltInServerManager {
       try {
         serverStartFuture.get();
       }
-      catch (InterruptedException ignored) {
-      }
-      catch (ExecutionException ignored) {
+      catch (InterruptedException | ExecutionException ignored) {
       }
     }
     return this;
@@ -122,13 +120,6 @@ public class BuiltInServerManagerImpl extends BuiltInServerManager {
   @Nullable
   public Disposable getServerDisposable() {
     return server;
-  }
-
-  @NotNull
-  public EventLoopGroup getEventLoopGroup() {
-    waitForStart();
-    assert server != null;
-    return server.getEventLoopGroup();
   }
 
   @Override

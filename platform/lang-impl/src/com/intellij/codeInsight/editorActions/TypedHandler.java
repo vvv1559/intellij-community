@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,7 +18,6 @@ package com.intellij.codeInsight.editorActions;
 
 import com.intellij.codeInsight.AutoPopupController;
 import com.intellij.codeInsight.CodeInsightSettings;
-import com.intellij.codeInsight.CodeInsightUtilBase;
 import com.intellij.codeInsight.completion.CompletionContributor;
 import com.intellij.codeInsight.highlighting.BraceMatcher;
 import com.intellij.codeInsight.highlighting.BraceMatchingUtil;
@@ -32,6 +31,7 @@ import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.command.CommandProcessor;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.*;
+import com.intellij.openapi.editor.actionSystem.ActionPlan;
 import com.intellij.openapi.editor.actionSystem.TypedActionHandler;
 import com.intellij.openapi.editor.ex.EditorEx;
 import com.intellij.openapi.editor.highlighter.EditorHighlighter;
@@ -57,11 +57,11 @@ import com.intellij.util.text.CharArrayUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 public class TypedHandler extends TypedActionHandlerBase {
+  private static final Set<Character> COMPLEX_CHARS =
+    new HashSet<>(Arrays.asList('\n', '\t', '(', ')', '<', '>', '[', ']', '{', '}', '"', '\''));
 
   private static final Logger LOG = Logger.getInstance("#com.intellij.codeInsight.editorActions.TypedHandler");
 
@@ -134,6 +134,18 @@ public class TypedHandler extends TypedActionHandlerBase {
   }
 
   @Override
+  public void beforeExecute(@NotNull Editor editor, char c, @NotNull DataContext context, @NotNull ActionPlan plan) {
+    if (COMPLEX_CHARS.contains(c) || Character.isSurrogate(c)) return;
+
+    if (editor.isInsertMode()) {
+      int offset = plan.getCaretOffset();
+      plan.replace(offset, offset, String.valueOf(c));
+    }
+
+    super.beforeExecute(editor, c, context, plan);
+  }
+
+  @Override
   public void execute(@NotNull final Editor originalEditor, final char charTyped, @NotNull final DataContext dataContext) {
     final Project project = CommonDataKeys.PROJECT.getData(dataContext);
     final PsiFile originalFile;
@@ -145,7 +157,7 @@ public class TypedHandler extends TypedActionHandlerBase {
       return;
     }
 
-    if (!CodeInsightUtilBase.prepareEditorForWrite(originalEditor)) return;
+    if (!EditorModificationUtil.checkModificationAllowed(originalEditor)) return;
 
     final PsiDocumentManager psiDocumentManager = PsiDocumentManager.getInstance(project);
     final Document originalDocument = originalEditor.getDocument();
@@ -162,23 +174,35 @@ public class TypedHandler extends TypedActionHandlerBase {
 
         final TypedHandlerDelegate[] delegates = Extensions.getExtensions(TypedHandlerDelegate.EP_NAME);
 
-        boolean handled = false;
-        for (TypedHandlerDelegate delegate : delegates) {
-          final TypedHandlerDelegate.Result result = delegate.checkAutoPopup(charTyped, project, editor, file);
-          handled = result == TypedHandlerDelegate.Result.STOP;
-          if (result != TypedHandlerDelegate.Result.CONTINUE) {
-            break;
+        if (caret == originalEditor.getCaretModel().getPrimaryCaret()) {
+          boolean handled = false;
+          for (TypedHandlerDelegate delegate : delegates) {
+            final TypedHandlerDelegate.Result result = delegate.checkAutoPopup(charTyped, project, editor, file);
+            handled = result == TypedHandlerDelegate.Result.STOP;
+            if (result != TypedHandlerDelegate.Result.CONTINUE) {
+              break;
+            }
           }
-        }
 
-        if (!handled) {
-          autoPopupCompletion(editor, charTyped, project, file);
-          autoPopupParameterInfo(editor, charTyped, project, file);
+          if (!handled) {
+            autoPopupCompletion(editor, charTyped, project, file);
+            autoPopupParameterInfo(editor, charTyped, project, file);
+          }
         }
 
         if (!editor.isInsertMode()) {
           type(originalEditor, charTyped);
           return;
+        }
+
+        for (TypedHandlerDelegate delegate : delegates) {
+          final TypedHandlerDelegate.Result result = delegate.beforeSelectionRemoved(charTyped, project, editor, file);
+          if (result == TypedHandlerDelegate.Result.STOP) {
+            return;
+          }
+          if (result == TypedHandlerDelegate.Result.DEFAULT) {
+            break;
+          }
         }
 
         EditorModificationUtil.deleteSelectedText(editor);
@@ -269,7 +293,10 @@ public class TypedHandler extends TypedActionHandlerBase {
       if (element != null) {
         final List<CompletionContributor> list = CompletionContributor.forLanguage(element.getLanguage());
         for (CompletionContributor contributor : list) {
-          if (contributor.invokeAutoPopup(element, charTyped)) return true;
+          if (contributor.invokeAutoPopup(element, charTyped)) {
+            LOG.debug(contributor + " requested completion autopopup when typing '" + charTyped + "'");
+            return true;
+          }
         }
       }
     }
@@ -302,6 +329,11 @@ public class TypedHandler extends TypedActionHandlerBase {
 
   @NotNull
   public static Editor injectedEditorIfCharTypedIsSignificant(final char charTyped, @NotNull Editor editor, @NotNull PsiFile oldFile) {
+    return injectedEditorIfCharTypedIsSignificant((int)charTyped, editor, oldFile);
+  }
+
+  @NotNull
+  public static Editor injectedEditorIfCharTypedIsSignificant(final int charTyped, @NotNull Editor editor, @NotNull PsiFile oldFile) {
     int offset = editor.getCaretModel().getOffset();
     // even for uncommitted document try to retrieve injected fragment that has been there recently
     // we are assuming here that when user is (even furiously) typing, injected language would not change
@@ -314,7 +346,8 @@ public class TypedHandler extends TypedActionHandlerBase {
           // IDEA-52375/WEB-9105 fix: last quote in editable fragment should be handled by outer language quote handler
           TextRange hostRange = documentWindow.getHostRange(offset);
           CharSequence sequence = editor.getDocument().getCharsSequence();
-          if (sequence.length() > offset && charTyped != sequence.charAt(offset) || hostRange != null && hostRange.contains(offset)) {
+          if (sequence.length() > offset && charTyped != Character.codePointAt(sequence, offset) ||
+              hostRange != null && hostRange.contains(offset)) {
             return injectedEditor;
           }
         }

@@ -150,15 +150,12 @@ public class PropertiesCopyHandler extends CopyHandlerDelegateBase {
       LOG.assertTrue(representativeFromSourceBundle != null);
       final ResourceBundle sourceResourceBundle = representativeFromSourceBundle.getPropertiesFile().getResourceBundle();
       if (sourceResourceBundle.equals(targetResourceBundle)) {
-        DataManager.getInstance().getDataContextFromFocus().doWhenDone(new Consumer<DataContext>() {
-          @Override
-          public void consume(DataContext context) {
-            final FileEditor fileEditor = PlatformDataKeys.FILE_EDITOR.getData(context);
-            if (fileEditor instanceof ResourceBundleEditor) {
-              final ResourceBundleEditor resourceBundleEditor = (ResourceBundleEditor)fileEditor;
-              resourceBundleEditor.updateTreeRoot();
-              resourceBundleEditor.selectProperty(newName);
-            }
+        DataManager.getInstance().getDataContextFromFocus().doWhenDone((Consumer<DataContext>)context -> {
+          final FileEditor fileEditor = PlatformDataKeys.FILE_EDITOR.getData(context);
+          if (fileEditor instanceof ResourceBundleEditor) {
+            final ResourceBundleEditor resourceBundleEditor = (ResourceBundleEditor)fileEditor;
+            resourceBundleEditor.updateTreeRoot();
+            resourceBundleEditor.selectProperty(newName);
           }
         });
       } else {
@@ -328,7 +325,8 @@ public class PropertiesCopyHandler extends CopyHandlerDelegateBase {
     @Nullable
     @Override
     public PsiFileSystemItem getParent() {
-      return PsiManager.getInstance(getProject()).findDirectory(myResourceBundle.getBaseDirectory());
+      VirtualFile dir = myResourceBundle.getBaseDirectory();
+      return dir == null ? null : PsiManager.getInstance(getProject()).findDirectory(dir);
     }
 
     @Override

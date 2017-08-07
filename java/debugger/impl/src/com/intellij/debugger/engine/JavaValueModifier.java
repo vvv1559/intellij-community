@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@ package com.intellij.debugger.engine;
 import com.intellij.debugger.DebuggerBundle;
 import com.intellij.debugger.DebuggerInvocationUtil;
 import com.intellij.debugger.EvaluatingComputable;
+import com.intellij.debugger.SourcePosition;
 import com.intellij.debugger.engine.evaluation.*;
 import com.intellij.debugger.engine.evaluation.expression.*;
 import com.intellij.debugger.engine.events.DebuggerContextCommandImpl;
@@ -26,9 +27,10 @@ import com.intellij.debugger.impl.DebuggerContextImpl;
 import com.intellij.debugger.impl.DebuggerSession;
 import com.intellij.debugger.ui.impl.watch.NodeDescriptorImpl;
 import com.intellij.debugger.ui.impl.watch.ValueDescriptorImpl;
-import com.intellij.openapi.progress.util.ProgressWindowWithNotification;
+import com.intellij.openapi.progress.util.ProgressWindow;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.text.StringUtil;
+import com.intellij.psi.PsiElement;
 import com.intellij.xdebugger.frame.XValueModifier;
 import com.sun.jdi.*;
 import org.jetbrains.annotations.NotNull;
@@ -66,7 +68,7 @@ public abstract class JavaValueModifier extends XValueModifier {
         }
 
         @Override
-        public void contextAction() throws Exception {
+        public void contextAction(@NotNull SuspendContextImpl suspendContext) throws Exception {
           callback.setValue(
             StringUtil.wrapWithDoubleQuote(DebuggerUtils.translateStringValue(DebuggerUtils.getValueAsString(evaluationContext, value))));
         }
@@ -185,16 +187,7 @@ public abstract class JavaValueModifier extends XValueModifier {
           setValue(expressionToShow, evaluator, evaluationContext, setValueRunnable);
         }
       }
-      catch (InvocationException e) {
-        throw EvaluateExceptionUtil.createEvaluateException(e);
-      }
-      catch (ClassNotLoadedException e) {
-        throw EvaluateExceptionUtil.createEvaluateException(e);
-      }
-      catch (IncompatibleThreadStateException e) {
-        throw EvaluateExceptionUtil.createEvaluateException(e);
-      }
-      catch (InvalidTypeException e) {
+      catch (InvocationException | InvalidTypeException | IncompatibleThreadStateException | ClassNotLoadedException e) {
         throw EvaluateExceptionUtil.createEvaluateException(e);
       }
       catch (ObjectCollectedException e) {
@@ -204,7 +197,7 @@ public abstract class JavaValueModifier extends XValueModifier {
   }
 
   protected void set(@NotNull final String expression, final XModificationCallback callback, final DebuggerContextImpl debuggerContext, final SetValueRunnable setValueRunnable) {
-    final ProgressWindowWithNotification progressWindow = new ProgressWindowWithNotification(true, debuggerContext.getProject());
+    final ProgressWindow progressWindow = new ProgressWindow(true, debuggerContext.getProject());
     final EvaluationContextImpl evaluationContext = myJavaValue.getEvaluationContext();
 
     SuspendContextCommandImpl askSetAction = new DebuggerContextCommandImpl(debuggerContext) {
@@ -212,17 +205,16 @@ public abstract class JavaValueModifier extends XValueModifier {
         return Priority.HIGH;
       }
 
-      public void threadAction() {
+      public void threadAction(@NotNull SuspendContextImpl suspendContext) {
         ExpressionEvaluator evaluator;
         try {
-          final Project project = evaluationContext.getProject();
+          Project project = evaluationContext.getProject();
+          SourcePosition position = ContextUtil.getSourcePosition(evaluationContext);
+          PsiElement context = ContextUtil.getContextElement(evaluationContext, position);
           evaluator = DebuggerInvocationUtil.commitAndRunReadAction(project, new EvaluatingComputable<ExpressionEvaluator>() {
               public ExpressionEvaluator compute() throws EvaluateException {
                 return EvaluatorBuilderImpl
-                  .build(new TextWithImportsImpl(CodeFragmentKind.EXPRESSION, expression),
-                         ContextUtil.getContextElement(evaluationContext),
-                         ContextUtil.getSourcePosition(evaluationContext),
-                         project);
+                  .build(new TextWithImportsImpl(CodeFragmentKind.EXPRESSION, expression), context, position, project);
               }
             });
 

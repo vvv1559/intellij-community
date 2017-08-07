@@ -41,6 +41,7 @@ import com.intellij.refactoring.RefactoringBundle;
 import com.intellij.refactoring.move.moveFilesOrDirectories.MoveFilesOrDirectoriesUtil;
 import com.intellij.ui.DocumentAdapter;
 import com.intellij.ui.RecentsManager;
+import com.intellij.ui.TextFieldWithHistory;
 import com.intellij.ui.TextFieldWithHistoryWithBrowseButton;
 import com.intellij.ui.components.JBLabelDecorator;
 import com.intellij.ui.components.JBTextField;
@@ -65,7 +66,7 @@ public class CopyFilesOrDirectoriesDialog extends DialogWrapper {
   private static final String COPY_OPEN_IN_EDITOR = "Copy.OpenInEditor";
   private static final String RECENT_KEYS = "CopyFile.RECENT_KEYS";
 
-  public static String shortenPath(VirtualFile file) {
+  public static String shortenPath(@NotNull VirtualFile file) {
     return StringUtil.shortenPathWithEllipsis(file.getPresentableUrl(), MAX_PATH_LENGTH);
   }
 
@@ -106,6 +107,12 @@ public class CopyFilesOrDirectoriesDialog extends DialogWrapper {
 
     setTitle(RefactoringBundle.message(doClone ? "copy.files.clone.title" : "copy.files.copy.title"));
     init();
+
+    for (int i = 0; i < elements.length; i++) {
+      if (elements[i] instanceof PsiFile) {
+        elements[i] = ((PsiFile)elements[i]).getOriginalFile();
+      }
+    }
 
     if (elements.length == 1) {
       String text;
@@ -150,7 +157,7 @@ public class CopyFilesOrDirectoriesDialog extends DialogWrapper {
     }
     if (myShowDirectoryField) {
       String targetPath = defaultTargetDirectory == null ? "" : defaultTargetDirectory.getVirtualFile().getPresentableUrl();
-      myTargetDirectoryField.getChildComponent().setText(targetPath);
+      getTargetDirectoryComponent().setText(targetPath);
     }
     validateOKButton();
   }
@@ -185,7 +192,11 @@ public class CopyFilesOrDirectoriesDialog extends DialogWrapper {
 
   @Override
   public JComponent getPreferredFocusedComponent() {
-    return myShowNewNameField ? myNewNameField : myTargetDirectoryField.getChildComponent();
+    return myShowNewNameField ? myNewNameField : getTargetDirectoryComponent();
+  }
+
+  protected TextFieldWithHistory getTargetDirectoryComponent() {
+    return myTargetDirectoryField.getChildComponent();
   }
 
   @Override
@@ -216,14 +227,14 @@ public class CopyFilesOrDirectoriesDialog extends DialogWrapper {
       myTargetDirectoryField.setTextFieldPreferredWidth(MAX_PATH_LENGTH);
       final List<String> recentEntries = RecentsManager.getInstance(myProject).getRecentEntries(RECENT_KEYS);
       if (recentEntries != null) {
-        myTargetDirectoryField.getChildComponent().setHistory(recentEntries);
+        getTargetDirectoryComponent().setHistory(recentEntries);
       }
       final FileChooserDescriptor descriptor = FileChooserDescriptorFactory.createSingleFolderDescriptor();
       myTargetDirectoryField.addBrowseFolderListener(RefactoringBundle.message("select.target.directory"),
                                                      RefactoringBundle.message("the.file.will.be.copied.to.this.directory"),
                                                      myProject, descriptor,
                                                      TextComponentAccessor.TEXT_FIELD_WITH_HISTORY_WHOLE_TEXT);
-      myTargetDirectoryField.getChildComponent().addDocumentListener(new DocumentAdapter() {
+      getTargetDirectoryComponent().addDocumentListener(new DocumentAdapter() {
         @Override
         protected void textChanged(DocumentEvent e) {
           validateOKButton();
@@ -271,7 +282,8 @@ public class CopyFilesOrDirectoriesDialog extends DialogWrapper {
         return;
       }
 
-      if (myFileCopy && myTargetDirectory != null) {
+      if (myFileCopy && myTargetDirectory != null &&
+          myOpenFilesInEditor.isVisible() && myOpenFilesInEditor.isSelected()) {
         if (FileTypeChooser.getKnownFileTypeOrAssociate(myTargetDirectory.getVirtualFile(), newName, myProject) == null) {
           myUnknownFileType = true;
         }
@@ -282,7 +294,7 @@ public class CopyFilesOrDirectoriesDialog extends DialogWrapper {
       saveOpenInEditorState(myOpenFilesInEditor.isSelected());
     }
     if (myShowDirectoryField) {
-      final String targetDirectoryName = myTargetDirectoryField.getChildComponent().getText();
+      final String targetDirectoryName = getTargetDirectoryComponent().getText();
 
       if (targetDirectoryName.length() == 0) {
         Messages.showErrorDialog(myProject, RefactoringBundle.message("no.target.directory.specified"),
@@ -320,7 +332,7 @@ public class CopyFilesOrDirectoriesDialog extends DialogWrapper {
   }
 
   private void validateOKButton() {
-    if (myShowDirectoryField && myTargetDirectoryField.getChildComponent().getText().length() == 0) {
+    if (myShowDirectoryField && getTargetDirectoryComponent().getText().length() == 0) {
       setOKActionEnabled(false);
       return;
     }

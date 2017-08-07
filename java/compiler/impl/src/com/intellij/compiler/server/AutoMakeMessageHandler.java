@@ -137,8 +137,10 @@ class AutoMakeMessageHandler extends DefaultMessageHandler {
         final long line = message.hasLine() ? message.getLine() : -1;
         final long column = message.hasColumn() ? message.getColumn() : -1;
         final CompilerMessage msg = myContext.createAndAddMessage(category, message.getText(), url, (int)line, (int)column, null);
-        if (kind == CmdlineRemoteProto.Message.BuilderMessage.CompileMessage.Kind.ERROR) {
-          informWolf(myProject, message);
+        if (kind == CmdlineRemoteProto.Message.BuilderMessage.CompileMessage.Kind.ERROR || kind == CmdlineRemoteProto.Message.BuilderMessage.CompileMessage.Kind.JPS_INFO) {
+          if (kind == CmdlineRemoteProto.Message.BuilderMessage.CompileMessage.Kind.ERROR) {
+            informWolf(myProject, message);
+          }
           if (msg != null) {
             ProblemsView.SERVICE.getInstance(myProject).addMessage(msg, sessionId);
           }
@@ -151,8 +153,10 @@ class AutoMakeMessageHandler extends DefaultMessageHandler {
   private static CompilerMessageCategory convertToCategory(CmdlineRemoteProto.Message.BuilderMessage.CompileMessage.Kind kind) {
     switch(kind) {
       case ERROR: return CompilerMessageCategory.ERROR;
-      case INFO: return CompilerMessageCategory.INFORMATION;
       case WARNING: return CompilerMessageCategory.WARNING;
+      case INFO: return CompilerMessageCategory.INFORMATION;
+      case JPS_INFO: return CompilerMessageCategory.INFORMATION;
+      case OTHER: return CompilerMessageCategory.INFORMATION;
       default: return null;
     }
   }
@@ -166,7 +170,7 @@ class AutoMakeMessageHandler extends DefaultMessageHandler {
     if (descr == null) {
       descr = failure.hasStacktrace()? failure.getStacktrace() : "";
     }
-    final String msg = "Auto make failure: " + descr;
+    final String msg = "Auto build failure: " + descr;
     CompilerManager.NOTIFICATION_GROUP.createNotification(msg, MessageType.INFO);
     ProblemsView.SERVICE.getInstance(myProject).addMessage(new CompilerMessageImpl(myProject, CompilerMessageCategory.ERROR, msg), sessionId);
   }
@@ -182,7 +186,7 @@ class AutoMakeMessageHandler extends DefaultMessageHandler {
         //statusMessage = "All files are up-to-date";
         break;
       case ERRORS:
-        statusMessage = "Auto make completed with errors";
+        statusMessage = "Auto build completed with errors";
         break;
       case CANCELED:
         //statusMessage = "Auto make has been canceled";

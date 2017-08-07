@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,27 +21,33 @@ import com.intellij.openapi.application.Result;
 import com.intellij.openapi.application.WriteAction;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.EditorFactory;
-import com.intellij.openapi.editor.event.DocumentAdapter;
 import com.intellij.openapi.editor.event.DocumentEvent;
+import com.intellij.openapi.editor.event.DocumentListener;
+import com.intellij.openapi.externalSystem.service.project.autoimport.FileChangeListenerBase;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.fileEditor.impl.FileDocumentManagerImpl;
 import com.intellij.openapi.module.Module;
-import com.intellij.openapi.project.ModuleAdapter;
+import com.intellij.openapi.project.ModuleListener;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.roots.ModuleRootAdapter;
 import com.intellij.openapi.roots.ModuleRootEvent;
+import com.intellij.openapi.roots.ModuleRootListener;
 import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.io.FileUtil;
-import com.intellij.openapi.vfs.*;
-import com.intellij.openapi.vfs.newvfs.BulkFileListener;
-import com.intellij.openapi.vfs.newvfs.NewVirtualFile;
-import com.intellij.openapi.vfs.newvfs.events.*;
+import com.intellij.openapi.vfs.LocalFileSystem;
+import com.intellij.openapi.vfs.VfsUtilCore;
+import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.openapi.vfs.VirtualFileManager;
+import com.intellij.openapi.vfs.newvfs.events.VFileContentChangeEvent;
+import com.intellij.openapi.vfs.newvfs.events.VFileEvent;
 import com.intellij.openapi.vfs.pointers.VirtualFilePointer;
 import com.intellij.openapi.vfs.pointers.VirtualFilePointerListener;
 import com.intellij.openapi.vfs.pointers.VirtualFilePointerManager;
 import com.intellij.psi.PsiDocumentManager;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiManager;
+import com.intellij.psi.xml.XmlFile;
 import com.intellij.util.PathUtil;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.messages.MessageBusConnection;
@@ -64,7 +70,7 @@ import java.util.concurrent.ConcurrentMap;
 
 public class MavenProjectsManagerWatcher {
 
-  private static final Key<ConcurrentMap<Project, Integer>> CRC_WITHOUT_SPACES = Key.create("MavenProjectsManagerWatcher.CRC_WITHOUT_SPACES");
+  private static final Key<ConcurrentMap<Project, Long>> CRC_WITHOUT_SPACES = Key.create("MavenProjectsManagerWatcher.CRC_WITHOUT_SPACES");
 
   public static final Key<Boolean> FORCE_IMPORT_AND_RESOLVE_ON_REFRESH =
     Key.create(MavenProjectsManagerWatcher.class + "FORCE_IMPORT_AND_RESOLVE_ON_REFRESH");
@@ -112,7 +118,7 @@ public class MavenProjectsManagerWatcher {
     myChangedDocumentsQueue.makeUserAware(myProject);
     myChangedDocumentsQueue.activate();
 
-    myBusConnection.subscribe(ProjectTopics.MODULES, new ModuleAdapter() {
+    myBusConnection.subscribe(ProjectTopics.MODULES, new ModuleListener() {
       @Override
       public void moduleRemoved(@NotNull Project project, @NotNull Module module) {
         MavenProject mavenProject = myManager.findProject(module);
@@ -139,15 +145,16 @@ public class MavenProjectsManagerWatcher {
       }
     });
 
-    DocumentAdapter myDocumentListener = new DocumentAdapter() {
+    EditorFactory.getInstance().getEventMulticaster().addDocumentListener(new DocumentListener() {
       @Override
       public void documentChanged(DocumentEvent event) {
         Document doc = event.getDocument();
         VirtualFile file = FileDocumentManager.getInstance().getFile(doc);
 
         if (file == null) return;
-        boolean isMavenFile =
-          file.getName().equals(MavenConstants.POM_XML) || file.getName().equals(MavenConstants.PROFILES_XML) || isSettingsFile(file);
+        String fileName = file.getName();
+        boolean isMavenFile = fileName.equals(MavenConstants.POM_XML) || fileName.equals(MavenConstants.PROFILES_XML) ||
+                              isSettingsFile(file) || fileName.startsWith("pom.") || isPomFile(file.getPath());
         if (!isMavenFile) return;
 
         synchronized (myChangedDocuments) {
@@ -175,8 +182,7 @@ public class MavenProjectsManagerWatcher {
           }
         });
       }
-    };
-    EditorFactory.getInstance().getEventMulticaster().addDocumentListener(myDocumentListener, myBusConnection);
+    }, myBusConnection);
 
     final MavenGeneralSettings.Listener mySettingsPathsChangesListener = new MavenGeneralSettings.Listener() {
       @Override
@@ -222,13 +228,6 @@ public class MavenProjectsManagerWatcher {
         String url = VfsUtilCore.pathToUrl(path);
         mySettingsFilesPointers.add(
           VirtualFilePointerManager.getInstance().create(url, myChangedDocumentsQueue, new VirtualFilePointerListener() {
-            @Override
-            public void beforeValidityChanged(@NotNull VirtualFilePointer[] pointers) {
-            }
-
-            @Override
-            public void validityChanged(@NotNull VirtualFilePointer[] pointers) {
-            }
           }));
       }
     }
@@ -320,7 +319,7 @@ public class MavenProjectsManagerWatcher {
     // onSettingsChange() will be called indirectly by pathsChanged listener on GeneralSettings object
   }
 
-  private class MyRootChangesListener extends ModuleRootAdapter {
+  private class MyRootChangesListener implements ModuleRootListener {
     @Override
     public void rootsChanged(ModuleRootEvent event) {
       // todo is this logic necessary?
@@ -343,8 +342,7 @@ public class MavenProjectsManagerWatcher {
   }
 
   private boolean isPomFile(String path) {
-    if (!path.endsWith("/" + MavenConstants.POM_XML)) return false;
-    return myProjectsTree.isPotentialProject(path);
+    return MavenUtil.isPotentialPomFile(path) && myProjectsTree.isPotentialProject(path);
   }
 
   private boolean isProfilesFile(String path) {
@@ -367,7 +365,7 @@ public class MavenProjectsManagerWatcher {
     return false;
   }
 
-  private class MyFileChangeListener extends MyFileChangeListenerBase {
+  private class MyFileChangeListener extends FileChangeListenerBase {
     private List<VirtualFile> filesToUpdate;
     private List<VirtualFile> filesToRemove;
     private boolean settingsHaveChanged;
@@ -402,7 +400,7 @@ public class MavenProjectsManagerWatcher {
 
       VirtualFile pom = getPomFileProfilesFile(file);
       if (pom != null) {
-        if (remove || xmlFileWasChanged(pom, event)) {
+        if (remove || fileWasChanged(pom, event)) {
           filesToUpdate.add(pom);
         }
         return;
@@ -412,32 +410,37 @@ public class MavenProjectsManagerWatcher {
         filesToRemove.add(file);
       }
       else {
-        if (xmlFileWasChanged(file, event)) {
+        if (fileWasChanged(file, event)) {
           filesToUpdate.add(file);
         }
       }
     }
 
-    private boolean xmlFileWasChanged(VirtualFile xmlFile, VFileEvent event) {
-      if (!xmlFile.isValid() || !(event instanceof VFileContentChangeEvent)) return true;
+    private boolean fileWasChanged(VirtualFile file, VFileEvent event) {
+      if (!file.isValid() || !(event instanceof VFileContentChangeEvent)) return true;
 
-      ConcurrentMap<Project, Integer> map = xmlFile.getUserData(CRC_WITHOUT_SPACES);
+      ConcurrentMap<Project, Long> map = file.getUserData(CRC_WITHOUT_SPACES);
       if (map == null) {
-        ConcurrentMap<Project, Integer> value = ContainerUtil.createConcurrentWeakMap();
-        map = xmlFile.putUserDataIfAbsent(CRC_WITHOUT_SPACES, value);
+        ConcurrentMap<Project, Long> value = ContainerUtil.createConcurrentWeakMap();
+        map = file.putUserDataIfAbsent(CRC_WITHOUT_SPACES, value);
       }
 
-      Integer crc = map.get(myProject);
-      Integer newCrc;
+      Long crc = map.get(myProject);
+      Long newCrc;
 
-      try {
-        newCrc = MavenUtil.crcWithoutSpaces(xmlFile);
-      }
-      catch (IOException ignored) {
-        return true;
+      PsiFile psiFile = PsiManager.getInstance(myProject).findFile(file);
+      if(psiFile instanceof XmlFile) {
+        try {
+          newCrc = Long.valueOf(MavenUtil.crcWithoutSpaces(file));
+        }
+        catch (IOException ignored) {
+          return true;
+        }
+      } else {
+        newCrc = file.getModificationStamp();
       }
 
-      if (newCrc == -1 // XML is invalid
+      if (newCrc == -1 // file is invalid
           || newCrc.equals(crc)) {
         return false;
       }
@@ -492,95 +495,6 @@ public class MavenProjectsManagerWatcher {
     private void clearLists() {
       filesToUpdate = null;
       filesToRemove = null;
-    }
-  }
-
-  private static abstract class MyFileChangeListenerBase implements BulkFileListener {
-    protected abstract boolean isRelevant(String path);
-
-    protected abstract void updateFile(VirtualFile file, VFileEvent event);
-
-    protected abstract void deleteFile(VirtualFile file, VFileEvent event);
-
-    protected abstract void apply();
-
-    @Override
-    public void before(@NotNull List<? extends VFileEvent> events) {
-      for (VFileEvent each : events) {
-        if (each instanceof VFileDeleteEvent) {
-          deleteRecursively(each.getFile(), each);
-        }
-        else {
-          if (!isRelevant(each.getPath())) continue;
-          if (each instanceof VFilePropertyChangeEvent) {
-            if (isRenamed(each)) {
-              deleteRecursively(each.getFile(), each);
-            }
-          }
-          else if (each instanceof VFileMoveEvent) {
-            VFileMoveEvent moveEvent = (VFileMoveEvent)each;
-            String newPath = moveEvent.getNewParent().getPath() + "/" + moveEvent.getFile().getName();
-            if (!isRelevant(newPath)) {
-              deleteRecursively(moveEvent.getFile(), each);
-            }
-          }
-        }
-      }
-    }
-
-    private void deleteRecursively(VirtualFile f, final VFileEvent event) {
-      VfsUtilCore.visitChildrenRecursively(f, new VirtualFileVisitor() {
-        @Override
-        public boolean visitFile(@NotNull VirtualFile f) {
-          if (isRelevant(f.getPath())) deleteFile(f, event);
-          return true;
-        }
-
-        @Nullable
-        @Override
-        public Iterable<VirtualFile> getChildrenIterable(@NotNull VirtualFile f) {
-          return f.isDirectory() && f instanceof NewVirtualFile ? ((NewVirtualFile)f).iterInDbChildren() : null;
-        }
-      });
-    }
-
-    @Override
-    public void after(@NotNull List<? extends VFileEvent> events) {
-      for (VFileEvent each : events) {
-        if (!isRelevant(each.getPath())) continue;
-
-        if (each instanceof VFileCreateEvent) {
-          VFileCreateEvent createEvent = (VFileCreateEvent)each;
-          VirtualFile newChild = createEvent.getParent().findChild(createEvent.getChildName());
-          if (newChild != null) {
-            updateFile(newChild, each);
-          }
-        }
-        else if (each instanceof VFileCopyEvent) {
-          VFileCopyEvent copyEvent = (VFileCopyEvent)each;
-          VirtualFile newChild = copyEvent.getNewParent().findChild(copyEvent.getNewChildName());
-          if (newChild != null) {
-            updateFile(newChild, each);
-          }
-        }
-        else if (each instanceof VFileContentChangeEvent) {
-          updateFile(each.getFile(), each);
-        }
-        else if (each instanceof VFilePropertyChangeEvent) {
-          if (isRenamed(each)) {
-            updateFile(each.getFile(), each);
-          }
-        }
-        else if (each instanceof VFileMoveEvent) {
-          updateFile(each.getFile(), each);
-        }
-      }
-      apply();
-    }
-
-    private static boolean isRenamed(VFileEvent each) {
-      return ((VFilePropertyChangeEvent)each).getPropertyName().equals(VirtualFile.PROP_NAME)
-             && !Comparing.equal(((VFilePropertyChangeEvent)each).getOldValue(), ((VFilePropertyChangeEvent)each).getNewValue());
     }
   }
 }

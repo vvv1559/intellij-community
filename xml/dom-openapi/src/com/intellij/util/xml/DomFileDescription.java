@@ -46,7 +46,7 @@ public class DomFileDescription<T> {
   public static final ExtensionPointName<DomFileDescription> EP_NAME = ExtensionPointName.create("com.intellij.dom.fileDescription");
 
   private static final Logger LOG = Logger.getInstance("#com.intellij.util.xml.DomFileDescription");
-  private final ConcurrentInstanceMap<ScopeProvider> myScopeProviders = new ConcurrentInstanceMap<>();
+  private final Map<Class<? extends ScopeProvider>, ScopeProvider> myScopeProviders = ConcurrentInstanceMap.create();
   protected final Class<T> myRootElementClass;
   protected final String myRootTagName;
   private final String[] myAllPossibleRootTagNamespaces;
@@ -126,7 +126,7 @@ public class DomFileDescription<T> {
   }
 
   /**
-   * @return some version. Override and change (e.g. <code>super.getVersion()+1</code>) when after some changes some files stopped being
+   * @return some version. Override and change (e.g. {@code super.getVersion()+1}) when after some changes some files stopped being
    * described by this description or vice versa, so that the
    * {@link com.intellij.util.xml.DomService#getDomFileCandidates(Class, com.intellij.openapi.project.Project, com.intellij.psi.search.GlobalSearchScope)}
    * index is rebuilt correctly.

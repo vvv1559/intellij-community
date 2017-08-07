@@ -22,9 +22,6 @@ import com.intellij.psi.util.PsiUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-/**
- * User: anna
- */
 public class PsiGraphInferenceHelper implements PsiInferenceHelper {
   private final PsiManager myManager;
 
@@ -51,7 +48,7 @@ public class PsiGraphInferenceHelper implements PsiInferenceHelper {
     }
     else {
       final InferenceSession inferenceSession = new InferenceSession(new PsiTypeParameter[]{typeParameter}, partialSubstitutor, myManager, null);
-      inferenceSession.initExpressionConstraints(parameters, arguments, null, null);
+      inferenceSession.initExpressionConstraints(parameters, arguments, null);
       substitutor = inferenceSession.infer();
     }
     return substitutor.substitute(typeParameter);

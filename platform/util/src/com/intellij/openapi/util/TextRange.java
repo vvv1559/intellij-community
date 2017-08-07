@@ -33,7 +33,7 @@ public class TextRange implements Segment, Serializable {
   }
 
   /**
-   * @param checkForProperTextRange <code>true</code> if offsets should be checked by {@link #assertProperRange(int, int, Object)}
+   * @param checkForProperTextRange {@code true} if offsets should be checked by {@link #assertProperRange(int, int, Object)}
    * @see UnfairTextRange
    */
   protected TextRange(int startOffset, int endOffset, boolean checkForProperTextRange) {
@@ -131,6 +131,12 @@ public class TextRange implements Segment, Serializable {
   public TextRange shiftRight(int delta) {
     if (delta == 0) return this;
     return new TextRange(myStartOffset + delta, myEndOffset + delta);
+  }
+
+  @NotNull
+  public TextRange shiftLeft(int delta) {
+    if (delta == 0) return this;
+    return new TextRange(myStartOffset - delta, myEndOffset - delta);
   }
 
   @NotNull

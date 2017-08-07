@@ -31,28 +31,18 @@ import com.jetbrains.python.codeInsight.imports.AddImportHelper;
 import com.jetbrains.python.inspections.unresolvedReference.PyUnresolvedReferencesInspection;
 import com.jetbrains.python.psi.*;
 import com.jetbrains.python.refactoring.PyRefactoringUtil;
-import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.Collections;
 import java.util.List;
 
-/**
- * User: ktisha
- */
 public class PyMakeFunctionFromMethodQuickFix implements LocalQuickFix {
   public PyMakeFunctionFromMethodQuickFix() {
   }
 
   @NotNull
-  public String getName() {
-    return PyBundle.message("QFIX.NAME.make.function");
-  }
-
-  @NonNls
-  @NotNull
   public String getFamilyName() {
-    return getName();
+    return PyBundle.message("QFIX.NAME.make.function");
   }
 
   public void applyFix(@NotNull final Project project, @NotNull final ProblemDescriptor descriptor) {
@@ -120,7 +110,7 @@ public class PyMakeFunctionFromMethodQuickFix implements LocalQuickFix {
       final LocalInspectionToolSession session = new LocalInspectionToolSession(usageFile, 0, usageFile.getTextLength());
       final PyUnresolvedReferencesInspection.Visitor visitor = new PyUnresolvedReferencesInspection.Visitor(null,
                                                                                                             session,
-                                                                                                            Collections.<String>emptyList());
+                                                                                                            Collections.emptyList());
       usageFile.accept(new PyRecursiveElementVisitor() {
         @Override
         public void visitPyElement(PyElement node) {

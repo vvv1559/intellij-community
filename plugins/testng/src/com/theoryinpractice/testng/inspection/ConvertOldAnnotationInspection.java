@@ -14,12 +14,6 @@
  * limitations under the License.
  */
 
-/*
- * Created by IntelliJ IDEA.
- * User: amrk
- * Date: 11/09/2006
- * Time: 19:50:29
- */
 package com.theoryinpractice.testng.inspection;
 
 import com.intellij.codeInspection.BaseJavaLocalInspectionTool;
@@ -75,16 +69,11 @@ public class ConvertOldAnnotationInspection extends BaseJavaLocalInspectionTool 
   }
 
   private static class ConvertOldAnnotationsQuickfix implements LocalQuickFix {
-    private static final Logger LOG = Logger.getInstance("#" + ConvertOldAnnotationsQuickfix.class.getName());
-
-    @NotNull
-    public String getName() {
-      return DISPLAY_NAME;
-    }
+    private static final Logger LOG = Logger.getInstance(ConvertOldAnnotationsQuickfix.class);
 
     @NotNull
     public String getFamilyName() {
-      return getName();
+      return DISPLAY_NAME;
     }
 
     public void applyFix(@NotNull final Project project, @NotNull final ProblemDescriptor descriptor) {

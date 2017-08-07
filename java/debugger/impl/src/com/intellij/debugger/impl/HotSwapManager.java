@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -42,7 +42,7 @@ public class HotSwapManager extends AbstractProjectComponent {
 
   public HotSwapManager(Project project, DebuggerManagerEx manager) {
     super(project);
-    manager.addDebuggerManagerListener(new DebuggerManagerAdapter() {
+    manager.addDebuggerManagerListener(new DebuggerManagerListener() {
       public void sessionCreated(DebuggerSession session) {
         myTimeStamps.put(session, Long.valueOf(System.currentTimeMillis()));
       }
@@ -145,12 +145,7 @@ public class HotSwapManager extends AbstractProjectComponent {
           for (Pair<DebuggerSession, Long> pair : sessionWithStamps) {
             final DebuggerSession session = pair.first;
             if (fileStamp > pair.second) {
-              Map<String, HotSwapFile> container = result.get(session);
-              if (container == null) {
-                container = new java.util.HashMap<>();
-                result.put(session, container);
-              }
-              container.put(qualifiedName, hotswapFile);
+              result.computeIfAbsent(session, k -> new java.util.HashMap<>()).put(qualifiedName, hotswapFile);
             }
           }
         }

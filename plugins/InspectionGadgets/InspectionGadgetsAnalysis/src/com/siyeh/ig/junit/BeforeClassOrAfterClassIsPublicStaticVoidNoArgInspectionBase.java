@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,15 +15,28 @@
  */
 package com.siyeh.ig.junit;
 
+import com.intellij.codeInsight.AnnotationUtil;
 import com.intellij.psi.*;
-import com.intellij.psi.util.PsiFormatUtil;
 import com.siyeh.InspectionGadgetsBundle;
 import com.siyeh.ig.BaseInspection;
 import com.siyeh.ig.BaseInspectionVisitor;
 import com.siyeh.ig.psiutils.TestUtils;
 import org.jetbrains.annotations.NotNull;
 
+import java.util.Arrays;
+
 public class BeforeClassOrAfterClassIsPublicStaticVoidNoArgInspectionBase extends BaseInspection {
+  private static final String[] STATIC_CONFIGS = new String[] {
+    "org.junit.BeforeClass",
+    "org.junit.AfterClass",
+    "org.junit.jupiter.api.BeforeAll",
+    "org.junit.jupiter.api.AfterAll"
+  };
+
+  protected static boolean isJunit4Annotation(String annotation) {
+    return annotation.endsWith("Class");
+  }
+
   @Override
   @NotNull
   public String getID() {
@@ -41,7 +54,7 @@ public class BeforeClassOrAfterClassIsPublicStaticVoidNoArgInspectionBase extend
   @NotNull
   protected String buildErrorString(Object... infos) {
     return InspectionGadgetsBundle.message(
-      "before.class.or.after.class.is.public.static.void.no.arg.problem.descriptor");
+      "before.class.or.after.class.is.public.static.void.no.arg.problem.descriptor", infos[1]);
   }
 
   @Override
@@ -49,13 +62,15 @@ public class BeforeClassOrAfterClassIsPublicStaticVoidNoArgInspectionBase extend
     return new BeforeClassOrAfterClassIsPublicStaticVoidNoArgVisitor();
   }
 
-  private static class BeforeClassOrAfterClassIsPublicStaticVoidNoArgVisitor
-    extends BaseInspectionVisitor {
+  private static class BeforeClassOrAfterClassIsPublicStaticVoidNoArgVisitor extends BaseInspectionVisitor {
 
     @Override
     public void visitMethod(@NotNull PsiMethod method) {
       //note: no call to super;
-      if (!TestUtils.isJUnit4BeforeClassOrAfterClassMethod(method)) {
+      String annotation = Arrays.stream(STATIC_CONFIGS)
+        .filter(anno -> AnnotationUtil.isAnnotated(method, anno, true))
+        .findFirst().orElse(null);
+      if (annotation == null) {
         return;
       }
       final PsiType returnType = method.getReturnType();
@@ -68,20 +83,11 @@ public class BeforeClassOrAfterClassIsPublicStaticVoidNoArgInspectionBase extend
       }
 
       final PsiParameterList parameterList = method.getParameterList();
-      if (parameterList.getParametersCount() != 0 ||
-          !returnType.equals(PsiType.VOID) ||
-          !method.hasModifierProperty(PsiModifier.PUBLIC) ||
-          !method.hasModifierProperty(PsiModifier.STATIC)) {
-        registerMethodError(method, "Change signature of \'" +
-                                    PsiFormatUtil.formatMethod(method, PsiSubstitutor.EMPTY,
-                                                               PsiFormatUtil.SHOW_NAME |
-                                                               PsiFormatUtil.SHOW_MODIFIERS |
-                                                               PsiFormatUtil.SHOW_PARAMETERS |
-                                                               PsiFormatUtil.SHOW_TYPE,
-                                                               PsiFormatUtil.SHOW_TYPE) +
-                                    "\' to \'public static void " +
-                                    method.getName() +
-                                    "()\'");
+      boolean junit4Annotation = isJunit4Annotation(annotation);
+      if (junit4Annotation && (parameterList.getParametersCount() != 0 || !method.hasModifierProperty(PsiModifier.PUBLIC)) ||
+          !returnType.equals(PsiType.VOID) || 
+          !method.hasModifierProperty(PsiModifier.STATIC) && (junit4Annotation || !TestUtils.testInstancePerClass(targetClass))) {
+        registerMethodError(method, method, annotation);
       }
     }
   }

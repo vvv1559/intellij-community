@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,7 +20,6 @@ import com.intellij.psi.*;
 import com.intellij.psi.tree.IElementType;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.psi.util.TypeConversionUtil;
-import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.plugins.groovy.GroovyBundle;
 import org.jetbrains.plugins.groovy.codeInspection.BaseInspection;
@@ -45,12 +44,6 @@ import org.jetbrains.plugins.groovy.lang.psi.util.PsiUtil;
  * @author Maxim.Medvedev
  */
 public class GroovyUncheckedAssignmentOfMemberOfRawTypeInspection extends BaseInspection {
-  @Override
-  @Nls
-  @NotNull
-  public String getGroupDisplayName() {
-    return ASSIGNMENT_ISSUES;
-  }
 
   @Override
   protected String buildErrorString(Object... args) {
@@ -70,16 +63,9 @@ public class GroovyUncheckedAssignmentOfMemberOfRawTypeInspection extends BaseIn
     return new Visitor();
   }
 
-  @Override
-  @Nls
-  @NotNull
-  public String getDisplayName() {
-    return "Unchecked assignment from members of raw type";
-  }
-
   private static class Visitor extends BaseInspectionVisitor {
     @Override
-    public void visitReturnStatement(GrReturnStatement returnStatement) {
+    public void visitReturnStatement(@NotNull GrReturnStatement returnStatement) {
       final GrExpression value = returnStatement.getReturnValue();
       if (value != null) {
         final PsiType type = value.getType();
@@ -104,7 +90,7 @@ public class GroovyUncheckedAssignmentOfMemberOfRawTypeInspection extends BaseIn
     }
 
     @Override
-    public void visitNamedArgument(GrNamedArgument argument) {
+    public void visitNamedArgument(@NotNull GrNamedArgument argument) {
       final GrArgumentLabel label = argument.getLabel();
       if (label != null) {
         PsiType expectedType = label.getExpectedArgumentType();
@@ -126,7 +112,7 @@ public class GroovyUncheckedAssignmentOfMemberOfRawTypeInspection extends BaseIn
     }
 
     @Override
-    public void visitVariable(GrVariable variable) {
+    public void visitVariable(@NotNull GrVariable variable) {
       PsiType varType = variable.getType();
       GrExpression initializer = variable.getInitializerGroovy();
       if (initializer != null) {

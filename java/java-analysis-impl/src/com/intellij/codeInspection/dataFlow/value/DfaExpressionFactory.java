@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,8 +15,10 @@
  */
 package com.intellij.codeInspection.dataFlow.value;
 
+import com.intellij.codeInsight.AnnotationUtil;
 import com.intellij.codeInspection.dataFlow.DfaPsiUtil;
 import com.intellij.codeInspection.dataFlow.Nullness;
+import com.intellij.codeInspection.dataFlow.SpecialField;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.util.Condition;
 import com.intellij.openapi.util.Conditions;
@@ -24,7 +26,9 @@ import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.*;
 import com.intellij.psi.impl.JavaConstantExpressionEvaluator;
+import com.intellij.psi.impl.light.LightVariableBuilder;
 import com.intellij.psi.util.PropertyUtil;
+import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.psi.util.PsiUtil;
 import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NotNull;
@@ -69,7 +73,6 @@ public class DfaExpressionFactory {
       return getExpressionDfaValue(((PsiParenthesizedExpression)expression).getExpression());
     }
 
-    PsiType type = expression.getType();
     if (expression instanceof PsiArrayAccessExpression) {
       PsiExpression arrayExpression = ((PsiArrayAccessExpression)expression).getArrayExpression();
       DfaValue qualifier = getExpressionDfaValue(arrayExpression);
@@ -79,6 +82,7 @@ public class DfaExpressionFactory {
           return myFactory.getVarFactory().createVariableValue(indexVar, expression.getType(), false, (DfaVariableValue)qualifier);
         }
       }
+      PsiType type = expression.getType();
       if (type != null) {
         return myFactory.createTypeValue(type, DfaPsiUtil.getElementNullability(type, null));
       }
@@ -101,11 +105,11 @@ public class DfaExpressionFactory {
     }
 
     final Object value = JavaConstantExpressionEvaluator.computeConstantExpression(expression, false);
-    if (value != null && type != null) {
-      if (value instanceof String) {
-        return myFactory.createTypeValue(type, Nullness.NOT_NULL); // Non-null string literal.
+    if (value != null) {
+      PsiType type = expression.getType();
+      if (type != null) {
+        return myFactory.getConstFactory().createFromValue(value, type, null);
       }
-      return myFactory.getConstFactory().createFromValue(value, type, null);
     }
 
     if (expression instanceof PsiThisExpression) {
@@ -131,7 +135,11 @@ public class DfaExpressionFactory {
         if (constValue != null) return constValue;
       }
 
-      if (DfaValueFactory.isEffectivelyUnqualified(refExpr)) {
+      if (DfaValueFactory.isEffectivelyUnqualified(refExpr) || isStaticFinalConstantWithoutInitializationHacks(var)) {
+        if (isFieldDereferenceBeforeInitialization(refExpr)) {
+          return myFactory.getConstFactory().getNull();
+        }
+
         return myFactory.getVarFactory().createVariableValue(var, refExpr.getType(), false, null);
       }
 
@@ -143,6 +151,26 @@ public class DfaExpressionFactory {
 
     PsiType type = refExpr.getType();
     return myFactory.createTypeValue(type, DfaPsiUtil.getElementNullability(type, var));
+  }
+
+  private static boolean isStaticFinalConstantWithoutInitializationHacks(PsiModifierListOwner var) {
+    if (var instanceof PsiField && var.hasModifierProperty(PsiModifier.FINAL) && var.hasModifierProperty(PsiModifier.STATIC)) {
+      PsiClass containingClass = ((PsiField)var).getContainingClass();
+      if (containingClass != null && !System.class.getName().equals(containingClass.getQualifiedName())) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private static boolean isFieldDereferenceBeforeInitialization(PsiReferenceExpression ref) {
+    PsiField placeField = PsiTreeUtil.getParentOfType(ref, PsiField.class, true, PsiClass.class, PsiLambdaExpression.class);
+    if (placeField == null) return false;
+
+    PsiElement target = ref.resolve();
+    return target instanceof PsiField &&
+           placeField.getContainingClass() == ((PsiField)target).getContainingClass() &&
+           ((PsiField)target).getInitializer() == null;
   }
 
   @Nullable
@@ -158,6 +186,14 @@ public class DfaExpressionFactory {
           return method;
         }
       }
+      for (SpecialField sf : SpecialField.values()) {
+        if (sf.isMyAccessor(method)) {
+          return sf.getCanonicalOwner(null, ((PsiMethod)target).getContainingClass());
+        }
+      }
+      if (AnnotationUtil.findAnnotation(method.getContainingClass(), "javax.annotation.concurrent.Immutable") != null) {
+        return method;
+      }
     }
     return null;
   }
@@ -166,15 +202,9 @@ public class DfaExpressionFactory {
   private PsiVariable getArrayIndexVariable(@Nullable PsiExpression indexExpression) {
     Object constant = JavaConstantExpressionEvaluator.computeConstantExpression(indexExpression, false);
     if (constant instanceof Integer && ((Integer)constant).intValue() >= 0) {
-      PsiVariable mockVar = myMockIndices.get(constant);
-      if (mockVar == null) {
-        mockVar = JavaPsiFacade.getElementFactory(indexExpression.getProject()).createField("$array$index$" + constant, PsiType.INT);
-        myMockIndices.put((Integer)constant, mockVar);
-      }
-      return mockVar;
+      return myMockIndices
+        .computeIfAbsent((Integer)constant, k -> new LightVariableBuilder<>("$array$index$" + k, PsiType.INT, indexExpression));
     }
     return null;
   }
-
-
 }

@@ -25,12 +25,6 @@ import org.jetbrains.annotations.NotNull;
 
 import java.util.List;
 
-/**
- * Created by IntelliJ IDEA.
- * User: Alexey.Ivanov
- * Date: 20.02.2010
- * Time: 15:49:35
- */
 public class ConvertDictCompQuickFix implements LocalQuickFix {
   @NotNull
   @Override
@@ -57,20 +51,20 @@ public class ConvertDictCompQuickFix implements LocalQuickFix {
       final PyElementGenerator elementGenerator = PyElementGenerator.getInstance(project);
       assert keyValueExpression.getValue() != null;
 
-      final List<ComprehensionComponent> components = expression.getComponents();
+      final List<PyComprehensionComponent> components = expression.getComponents();
       final StringBuilder replacement = new StringBuilder("dict([(" + keyValueExpression.getKey().getText() + ", " +
                                                             keyValueExpression.getValue().getText() + ")");
       int slashNum = 1;
-      for (ComprehensionComponent component : components) {
-        if (component instanceof ComprhForComponent) {
+      for (PyComprehensionComponent component : components) {
+        if (component instanceof PyComprehensionForComponent) {
           replacement.append("for ");
-          replacement.append(((ComprhForComponent)component).getIteratorVariable().getText());
+          replacement.append(((PyComprehensionForComponent)component).getIteratorVariable().getText());
           replacement.append(" in ");
-          replacement.append(((ComprhForComponent)component).getIteratedList().getText());
+          replacement.append(((PyComprehensionForComponent)component).getIteratedList().getText());
           replacement.append(" ");
         }
-        if (component instanceof ComprhIfComponent) {
-          final PyExpression test = ((ComprhIfComponent)component).getTest();
+        if (component instanceof PyComprehensionIfComponent) {
+          final PyExpression test = ((PyComprehensionIfComponent)component).getTest();
           if (test != null) {
             replacement.append("if ");
             replacement.append(test.getText());

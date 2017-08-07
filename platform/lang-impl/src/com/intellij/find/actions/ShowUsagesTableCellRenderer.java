@@ -16,12 +16,10 @@
 
 package com.intellij.find.actions;
 
+import com.intellij.openapi.fileEditor.impl.EditorTabbedContainer;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.psi.PsiFile;
-import com.intellij.psi.PsiManager;
 import com.intellij.psi.search.SearchScope;
-import com.intellij.ui.FileColorManager;
 import com.intellij.ui.GuiUtils;
 import com.intellij.ui.SimpleColoredComponent;
 import com.intellij.ui.SimpleTextAttributes;
@@ -37,6 +35,7 @@ import com.intellij.usages.impl.UsageViewManagerImpl;
 import com.intellij.usages.rules.UsageInFile;
 import com.intellij.util.ObjectUtils;
 import com.intellij.util.ui.EmptyIcon;
+import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NotNull;
 
@@ -105,7 +104,8 @@ class ShowUsagesTableCellRenderer implements TableCellRenderer {
     panel.setBackground(panelBackground);
     panel.setForeground(panelForeground);
 
-    boolean isEnabled = !myUsageView.isOriginUsage(usage);
+    // greying the current usage you originated your "find usages" from is turned off by @nik orders
+    boolean isEnabled = true;//!myUsageView.isOriginUsage(usage);
     if (!isEnabled) {
       fg = UIUtil.getLabelDisabledForeground();
     }
@@ -126,7 +126,7 @@ class ShowUsagesTableCellRenderer implements TableCellRenderer {
         else if (column == 2) {
           Icon icon = presentation.getIcon();
           textChunks.setIcon(icon == null ? EmptyIcon.ICON_16 : icon);
-          textChunks.append("").appendTextPadding(16 + 5);
+          textChunks.append("").appendTextPadding(JBUI.scale(16 + 5));
           for (int i = 1; i < text.length; i++) {
             TextChunk chunk = text[i];
             textChunks.append(chunk.getText(), getAttributes(isSelected, fileBgColor, bg, fg, chunk));
@@ -221,11 +221,8 @@ class ShowUsagesTableCellRenderer implements TableCellRenderer {
       VirtualFile virtualFile = usage instanceof UsageInFile ? ((UsageInFile)usage).getFile() : null;
       if (virtualFile != null) {
         Project project = myUsageView.getProject();
-        PsiFile psiFile = PsiManager.getInstance(project).findFile(virtualFile);
-        if (psiFile != null && psiFile.isValid()) {
-          final Color color = FileColorManager.getInstance(project).getRendererBackground(psiFile);
-          if (color != null) fileBgColor = color;
-        }
+        Color color = EditorTabbedContainer.calcTabColor(project, virtualFile);
+        if (color != null) fileBgColor = color;
       }
     }
     return fileBgColor;

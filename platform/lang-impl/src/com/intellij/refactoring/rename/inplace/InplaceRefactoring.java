@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -35,13 +35,13 @@ import com.intellij.openapi.command.CommandProcessor;
 import com.intellij.openapi.command.WriteCommandAction;
 import com.intellij.openapi.command.impl.FinishMarkAction;
 import com.intellij.openapi.command.impl.StartMarkAction;
+import com.intellij.openapi.command.undo.UndoUtil;
 import com.intellij.openapi.diagnostic.Logger;
-import com.intellij.openapi.editor.Document;
-import com.intellij.openapi.editor.Editor;
-import com.intellij.openapi.editor.RangeMarker;
-import com.intellij.openapi.editor.ScrollType;
+import com.intellij.openapi.editor.*;
 import com.intellij.openapi.editor.colors.EditorColors;
 import com.intellij.openapi.editor.colors.EditorColorsManager;
+import com.intellij.openapi.editor.ex.EditorEx;
+import com.intellij.openapi.editor.ex.util.EditorUtil;
 import com.intellij.openapi.editor.impl.EditorImpl;
 import com.intellij.openapi.editor.markup.RangeHighlighter;
 import com.intellij.openapi.editor.markup.TextAttributes;
@@ -49,6 +49,7 @@ import com.intellij.openapi.fileEditor.FileEditor;
 import com.intellij.openapi.fileEditor.FileEditorManager;
 import com.intellij.openapi.fileEditor.OpenFileDescriptor;
 import com.intellij.openapi.fileEditor.TextEditor;
+import com.intellij.openapi.fileTypes.FileType;
 import com.intellij.openapi.keymap.Keymap;
 import com.intellij.openapi.keymap.KeymapManager;
 import com.intellij.openapi.keymap.KeymapUtil;
@@ -72,10 +73,12 @@ import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.refactoring.RefactoringActionHandler;
 import com.intellij.refactoring.RefactoringBundle;
 import com.intellij.refactoring.util.CommonRefactoringUtil;
+import com.intellij.ui.DottedBorder;
 import com.intellij.ui.awt.RelativePoint;
 import com.intellij.ui.popup.PopupFactoryImpl;
 import com.intellij.util.CommonProcessors;
 import com.intellij.util.Query;
+import com.intellij.util.containers.NotNullList;
 import com.intellij.util.containers.Stack;
 import com.intellij.util.ui.PositionTracker;
 import org.jetbrains.annotations.NonNls;
@@ -84,14 +87,11 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.TestOnly;
 
 import javax.swing.*;
+import javax.swing.border.LineBorder;
 import java.awt.*;
 import java.util.*;
 import java.util.List;
 
-/**
- * User: anna
- * Date: 1/11/12
- */
 public abstract class InplaceRefactoring {
   protected static final Logger LOG = Logger.getInstance("#com.intellij.refactoring.rename.inplace.VariableInplaceRenamer");
   @NonNls protected static final String PRIMARY_VARIABLE_NAME = "PrimaryVariable";
@@ -208,7 +208,7 @@ public abstract class InplaceRefactoring {
     myEditor.putUserData(INPLACE_RENAMER, this);
     ourRenamersStack.push(this);
 
-    final List<Pair<PsiElement, TextRange>> stringUsages = new ArrayList<>();
+    final List<Pair<PsiElement, TextRange>> stringUsages = new NotNullList<>();
     collectAdditionalElementsToRename(stringUsages);
     return buildTemplateAndStart(refs, stringUsages, scope, containingFile);
   }
@@ -243,7 +243,7 @@ public abstract class InplaceRefactoring {
     return null;
   }
 
-  protected abstract void collectAdditionalElementsToRename(final List<Pair<PsiElement, TextRange>> stringUsages);
+  protected abstract void collectAdditionalElementsToRename(@NotNull List<Pair<PsiElement, TextRange>> stringUsages);
 
   protected abstract boolean shouldSelectAll();
 
@@ -364,8 +364,8 @@ public abstract class InplaceRefactoring {
   }
 
   protected void beforeTemplateStart() {
-    myCaretRangeMarker = myEditor.getDocument()
-          .createRangeMarker(new TextRange(myEditor.getCaretModel().getOffset(), myEditor.getCaretModel().getOffset()));
+    myCaretRangeMarker =
+      myEditor.getDocument().createRangeMarker(myEditor.getCaretModel().getOffset(), myEditor.getCaretModel().getOffset());
     myCaretRangeMarker.setGreedyToLeft(true);
     myCaretRangeMarker.setGreedyToRight(true);
   }
@@ -392,7 +392,8 @@ public abstract class InplaceRefactoring {
     template.setToShortenLongNames(false);
     template.setToReformat(false);
     myHighlighters = new ArrayList<>();
-    topLevelEditor.getCaretModel().moveToOffset(rangeMarker.getStartOffset());
+    int targetOffset = rangeMarker.getStartOffset();
+    topLevelEditor.getCaretModel().moveToLogicalPosition(topLevelEditor.offsetToLogicalPosition(targetOffset).leanForward(true)); // to the right of parameter hint, if any
 
     TemplateManager.getInstance(myProject).startTemplate(topLevelEditor, template, templateListener);
     restoreOldCaretPositionAndSelection(offset);
@@ -427,7 +428,8 @@ public abstract class InplaceRefactoring {
   private void restoreOldCaretPositionAndSelection(final int offset) {
     //move to old offset
     Runnable runnable = () -> {
-      myEditor.getCaretModel().moveToOffset(restoreCaretOffset(offset));
+      int targetOffset = restoreCaretOffset(offset);
+      myEditor.getCaretModel().moveToLogicalPosition(myEditor.offsetToLogicalPosition(targetOffset).leanForward(true)); // to the right of parameter hint, if any
       restoreSelection();
     };
 
@@ -484,6 +486,32 @@ public abstract class InplaceRefactoring {
   @Nullable
   protected PsiElement getNameIdentifier() {
     return myElementToRename instanceof PsiNameIdentifierOwner ? ((PsiNameIdentifierOwner)myElementToRename).getNameIdentifier() : null;
+  }
+
+  public static EditorEx createPreviewComponent(Project project, FileType languageFileType) {
+    Document document = EditorFactory.getInstance().createDocument("");
+    UndoUtil.disableUndoFor(document);
+    EditorEx previewEditor = (EditorEx)EditorFactory.getInstance().createEditor(document, project, languageFileType, true);
+    previewEditor.setOneLineMode(true);
+    final EditorSettings settings = previewEditor.getSettings();
+    settings.setAdditionalLinesCount(0);
+    settings.setAdditionalColumnsCount(1);
+    settings.setRightMarginShown(false);
+    settings.setFoldingOutlineShown(false);
+    settings.setLineNumbersShown(false);
+    settings.setLineMarkerAreaShown(false);
+    settings.setIndentGuidesShown(false);
+    settings.setVirtualSpace(false);
+    previewEditor.setHorizontalScrollbarVisible(false);
+    previewEditor.setVerticalScrollbarVisible(false);
+    previewEditor.setCaretEnabled(false);
+    settings.setLineCursorWidth(1);
+
+    final Color bg = previewEditor.getColorsScheme().getColor(EditorColors.CARET_ROW_COLOR);
+    previewEditor.setBackgroundColor(bg);
+    previewEditor.setBorder(BorderFactory.createCompoundBorder(new DottedBorder(Color.gray), new LineBorder(bg, 2)));
+
+    return previewEditor;
   }
 
   @Nullable
@@ -769,11 +797,16 @@ public abstract class InplaceRefactoring {
   public static boolean canStartAnotherRefactoring(Editor editor, Project project, RefactoringActionHandler handler, PsiElement... element) {
     final InplaceRefactoring inplaceRefactoring = getActiveInplaceRenamer(editor);
     return StartMarkAction.canStart(project) == null ||
-           (inplaceRefactoring != null && element.length == 1 && inplaceRefactoring.startsOnTheSameElement(handler, element[0]));
+           (inplaceRefactoring != null && inplaceRefactoring.startsOnTheSameElements(editor, handler, element));
   }
 
   public static InplaceRefactoring getActiveInplaceRenamer(Editor editor) {
     return editor != null ? editor.getUserData(INPLACE_RENAMER) : null;
+  }
+
+  protected boolean startsOnTheSameElements(Editor editor, RefactoringActionHandler handler,
+                                            PsiElement[] element) {
+    return element.length == 1 && startsOnTheSameElement(handler, element[0]);
   }
 
   protected boolean startsOnTheSameElement(RefactoringActionHandler handler, PsiElement element) {
@@ -802,6 +835,7 @@ public abstract class InplaceRefactoring {
         myEditor.putUserData(PopupFactoryImpl.ANCHOR_POPUP_POSITION, null);
       }
     });
+    EditorUtil.disposeWithEditor(myEditor, myBalloon);
     myEditor.getScrollingModel().scrollToCaret(ScrollType.MAKE_VISIBLE);
     final JBPopupFactory popupFactory = JBPopupFactory.getInstance();
     myBalloon.show(new PositionTracker<Balloon>(myEditor.getContentComponent()) {
@@ -840,7 +874,7 @@ public abstract class InplaceRefactoring {
     public void beforeTemplateFinished(final TemplateState templateState, Template template) {
       try {
         final TextResult value = templateState.getVariableValue(PRIMARY_VARIABLE_NAME);
-        myInsertedName = value != null ? value.toString() : null;
+        myInsertedName = value != null ? value.toString().trim() : null;
 
         TextRange range = templateState.getCurrentVariableRange();
         final int currentOffset = myEditor.getCaretModel().getOffset();

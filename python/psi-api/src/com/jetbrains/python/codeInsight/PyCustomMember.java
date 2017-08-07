@@ -110,7 +110,7 @@ public class PyCustomMember extends UserDataHolderBase {
     return this;
   }
 
-  public PyCustomMember resolvesToClass(String classQName) {
+  public PyCustomMember resolvesToClass(@NotNull final String classQName) {
     myPsiPath = new PyPsiPath.ToClassQName(classQName);
     return this;
   }
@@ -203,6 +203,9 @@ public class PyCustomMember extends UserDataHolderBase {
       return resolveTarget;
     }
     if (resolveTarget != null || targetClass != null) {
+      if (targetClass == null && resolveTarget instanceof PyClass) {
+        targetClass = (PyClass)resolveTarget;
+      }
       return new MyInstanceElement(targetClass, context, resolveTarget);
     }
     return null;

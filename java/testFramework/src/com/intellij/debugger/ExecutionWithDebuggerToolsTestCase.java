@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,7 +21,6 @@ import com.intellij.debugger.engine.evaluation.EvaluateException;
 import com.intellij.debugger.engine.evaluation.TextWithImportsImpl;
 import com.intellij.debugger.engine.events.DebuggerCommandImpl;
 import com.intellij.debugger.engine.events.SuspendContextCommandImpl;
-import com.intellij.debugger.impl.DebuggerManagerImpl;
 import com.intellij.debugger.impl.PositionUtil;
 import com.intellij.debugger.impl.PrioritizedTask;
 import com.intellij.debugger.impl.SynchronizationBasedSemaphore;
@@ -49,6 +48,8 @@ import com.intellij.util.lang.CompoundRuntimeException;
 import com.intellij.util.ui.UIUtil;
 import com.sun.jdi.Method;
 import com.sun.jdi.ThreadReference;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.java.debugger.breakpoints.properties.JavaMethodBreakpointProperties;
 
 import javax.swing.*;
 import java.util.ArrayList;
@@ -82,10 +83,33 @@ public abstract class ExecutionWithDebuggerToolsTestCase extends ExecutionTestCa
 
   protected String readValue(String comment, String valueName) {
     int valueStart = comment.indexOf(valueName);
-    if (valueStart == -1) return null;
+    if (valueStart == -1) {
+      return null;
+    }
 
-    int valueEnd = comment.indexOf(')', valueStart);
-    return comment.substring(valueStart + valueName.length() + 1, valueEnd);
+    valueStart += valueName.length();
+    return comment.substring(valueStart + 1, findMatchingParenthesis(comment, valueStart));
+  }
+
+  private static int findMatchingParenthesis(String input, int startPos) {
+    int depth = 0;
+    while (startPos < input.length()) {
+      switch (input.charAt(startPos)) {
+        case '(':
+          depth++;
+          break;
+        case ')':
+          if (depth == 1) {
+            return startPos;
+          }
+          else {
+            depth--;
+          }
+          break;
+      }
+      startPos++;
+    }
+    return -1;
   }
 
   protected void resume(SuspendContextImpl context) {
@@ -115,8 +139,12 @@ public abstract class ExecutionWithDebuggerToolsTestCase extends ExecutionTestCa
 
   @Override
   protected void tearDown() throws Exception {
-    ThreadTracker.awaitThreadTerminationWithParentParentGroup("JDI main", 100, TimeUnit.SECONDS);
+    ThreadTracker.awaitJDIThreadsTermination(100, TimeUnit.SECONDS);
     try {
+      myDebugProcess = null;
+      myPauseScriptListener = null;
+      myRatherLaterRequests.clear();
+      myScriptRunnables.clear();
       super.tearDown();
     }
     finally {
@@ -127,6 +155,7 @@ public abstract class ExecutionWithDebuggerToolsTestCase extends ExecutionTestCa
   protected void throwExceptionsIfAny() {
     synchronized (myException) {
       CompoundRuntimeException.throwIfNotEmpty(myException);
+      myException.clear();
     }
   }
 
@@ -194,7 +223,7 @@ public abstract class ExecutionWithDebuggerToolsTestCase extends ExecutionTestCa
             if (pausedContext != null) {
               debugProcess.getManagerThread().schedule(new SuspendContextCommandImpl(pausedContext) {
                 @Override
-                public void contextAction() throws Exception {
+                public void contextAction(@NotNull SuspendContextImpl suspendContext) throws Exception {
                   paused(pausedContext);
                 }
               });
@@ -213,11 +242,18 @@ public abstract class ExecutionWithDebuggerToolsTestCase extends ExecutionTestCa
     println("frameProxy(" + frameIndex + ") = " + method, ProcessOutputTypes.SYSTEM);
   }
 
+  private static String toDisplayableString(SourcePosition sourcePosition) {
+    int line = sourcePosition.getLine();
+    if (line >= 0) {
+      line++;
+    }
+    return sourcePosition.getFile().getVirtualFile().getName() + ":" + line;
+  }
+
   protected void printContext(final StackFrameContext context) {
     ApplicationManager.getApplication().runReadAction(() -> {
       if (context.getFrameProxy() != null) {
-        SourcePosition sourcePosition = PositionUtil.getSourcePosition(context);
-        println(sourcePosition.getFile().getVirtualFile().getName() + ":" + sourcePosition.getLine(), ProcessOutputTypes.SYSTEM);
+        println(toDisplayableString(PositionUtil.getSourcePosition(context)), ProcessOutputTypes.SYSTEM);
       }
       else {
         println("Context thread is null", ProcessOutputTypes.SYSTEM);
@@ -238,10 +274,7 @@ public abstract class ExecutionWithDebuggerToolsTestCase extends ExecutionTestCa
           + text.subSequence(offset, Math.min(offset + 20, text.length())) + "]");
         }
 
-        println(sourcePosition.getFile().getVirtualFile().getName()
-                + ":" + sourcePosition.getLine()
-                + positionText,
-                ProcessOutputTypes.SYSTEM);
+        println(toDisplayableString(sourcePosition) + positionText, ProcessOutputTypes.SYSTEM);
       }
       else {
         println("Context thread is null", ProcessOutputTypes.SYSTEM);
@@ -252,7 +285,7 @@ public abstract class ExecutionWithDebuggerToolsTestCase extends ExecutionTestCa
   protected void invokeRatherLater(SuspendContextImpl context, final Runnable runnable) {
     invokeRatherLater(new SuspendContextCommandImpl(context) {
       @Override
-      public void contextAction() throws Exception {
+      public void contextAction(@NotNull SuspendContextImpl suspendContext) throws Exception {
         DebuggerInvocationUtil.invokeLater(myProject, runnable);
       }
     });
@@ -273,7 +306,7 @@ public abstract class ExecutionWithDebuggerToolsTestCase extends ExecutionTestCa
       request.myDebugProcess.getManagerThread().schedule(new SuspendContextCommandImpl(
           ((SuspendContextCommandImpl)request.myDebuggerCommand).getSuspendContext()) {
           @Override
-          public void contextAction() throws Exception {
+          public void contextAction(@NotNull SuspendContextImpl suspendContext) throws Exception {
             pumpDebuggerThread(request);
           }
 
@@ -304,12 +337,7 @@ public abstract class ExecutionWithDebuggerToolsTestCase extends ExecutionTestCa
     }
     else {
       if (!SwingUtilities.isEventDispatchThread()) {
-        UIUtil.invokeAndWaitIfNeeded(new Runnable() {
-          @Override
-          public void run() {
-            pumpSwingThread();
-          }
-        });
+        UIUtil.invokeAndWaitIfNeeded((Runnable)() -> pumpSwingThread());
       }
       else {
         SwingUtilities.invokeLater(() -> pumpSwingThread());
@@ -355,33 +383,41 @@ public abstract class ExecutionWithDebuggerToolsTestCase extends ExecutionTestCa
 
   public void createBreakpoints(final PsiFile file) {
     Runnable runnable = () -> {
-      BreakpointManager breakpointManager = DebuggerManagerImpl.getInstanceEx(myProject).getBreakpointManager();
+      BreakpointManager breakpointManager = DebuggerManagerEx.getInstanceEx(myProject).getBreakpointManager();
       Document document = PsiDocumentManager.getInstance(myProject).getDocument(file);
+      String text = document.getText();
       int offset = -1;
-      for (; ;) {
-        offset = document.getText().indexOf("Breakpoint!", offset + 1);
+      while (true) {
+        offset = text.indexOf("Breakpoint!", offset + 1);
         if (offset == -1) break;
 
         int commentLine = document.getLineNumber(offset);
 
-        String comment = document.getText().substring(document.getLineStartOffset(commentLine), document.getLineEndOffset(commentLine));
+        String comment = text.substring(document.getLineStartOffset(commentLine), document.getLineEndOffset(commentLine));
 
         Breakpoint breakpoint;
 
-        if (comment.indexOf("Method") != -1) {
+        if (comment.contains("Method")) {
           breakpoint = breakpointManager.addMethodBreakpoint(document, commentLine + 1);
           if (breakpoint != null) {
             println("MethodBreakpoint created at " + file.getVirtualFile().getName() + ":" + (commentLine + 2),
                     ProcessOutputTypes.SYSTEM);
+
+            String emulated = readValue(comment, "Emulated");
+            if (emulated != null) {
+              ((JavaMethodBreakpointProperties)breakpoint.getXBreakpoint().getProperties()).EMULATED = Boolean.valueOf(emulated);
+              println("Emulated = " + emulated, ProcessOutputTypes.SYSTEM);
+            }
+
           }
         }
-        else if (comment.indexOf("Field") != -1) {
+        else if (comment.contains("Field")) {
           breakpoint = breakpointManager.addFieldBreakpoint(document, commentLine + 1, readValue(comment, "Field"));
           if (breakpoint != null) {
             println("FieldBreakpoint created at " + file.getVirtualFile().getName() + ":" + (commentLine + 2), ProcessOutputTypes.SYSTEM);
           }
         }
-        else if (comment.indexOf("Exception") != -1) {
+        else if (comment.contains("Exception")) {
           breakpoint = breakpointManager.addExceptionBreakpoint(readValue(comment, "Exception"), "");
           if (breakpoint != null) {
             println("ExceptionBreakpoint created at " + file.getVirtualFile().getName() + ":" + (commentLine + 2),
@@ -393,6 +429,11 @@ public abstract class ExecutionWithDebuggerToolsTestCase extends ExecutionTestCa
           if (breakpoint != null) {
             println("LineBreakpoint created at " + file.getVirtualFile().getName() + ":" + (commentLine + 2), ProcessOutputTypes.SYSTEM);
           }
+        }
+
+        if (breakpoint == null) {
+          LOG.error("Unable to set a breakpoint at line " + (commentLine + 1));
+          continue;
         }
 
         String suspendPolicy = readValue(comment, "suspendPolicy");
@@ -407,6 +448,13 @@ public abstract class ExecutionWithDebuggerToolsTestCase extends ExecutionTestCa
           breakpoint.setCondition(new TextWithImportsImpl(CodeFragmentKind.EXPRESSION, condition));
           println("Condition = " + condition, ProcessOutputTypes.SYSTEM);
         }
+
+        String logExpression = readValue(comment, "LogExpression");
+        if (logExpression != null) {
+          breakpoint.getXBreakpoint().setLogExpression(logExpression);
+          println("LogExpression = " + logExpression, ProcessOutputTypes.SYSTEM);
+        }
+
         String passCount = readValue(comment, "Pass count");
         if (passCount != null) {
           breakpoint.setCountFilterEnabled(true);

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,6 +22,7 @@ import org.gradle.api.file.FileVisitDetails
 import org.gradle.api.java.archives.Manifest
 import org.gradle.plugins.ear.Ear
 import org.gradle.plugins.ear.EarPlugin
+import org.gradle.util.GradleVersion
 import org.jetbrains.annotations.NotNull
 import org.jetbrains.annotations.Nullable
 import org.jetbrains.plugins.gradle.model.ear.EarConfiguration
@@ -41,20 +42,21 @@ import org.jetbrains.plugins.gradle.tooling.util.SourceSetCachedFinder
 class EarModelBuilderImpl implements ModelBuilderService {
 
   private static final String APP_DIR_PROPERTY = "appDirName"
-  private SourceSetCachedFinder mySourceSetFinder = null;
+  private SourceSetCachedFinder mySourceSetFinder = null
+  private static is4OrBetter = GradleVersion.current().baseVersion >= GradleVersion.version("4.0")
 
   @Override
-  public boolean canBuild(String modelName) {
+  boolean canBuild(String modelName) {
     return EarConfiguration.name.equals(modelName)
   }
 
   @Nullable
   @Override
-  public Object buildAll(String modelName, Project project) {
+  Object buildAll(String modelName, Project project) {
     final EarPlugin earPlugin = project.plugins.findPlugin(EarPlugin)
     if (earPlugin == null) return null
 
-    if(mySourceSetFinder == null) mySourceSetFinder = new SourceSetCachedFinder(project);
+    if(mySourceSetFinder == null) mySourceSetFinder = new SourceSetCachedFinder(project)
 
     final String appDirName = !project.hasProperty(APP_DIR_PROPERTY) ?
                               "src/main/application" : String.valueOf(project.property(APP_DIR_PROPERTY))
@@ -95,8 +97,8 @@ class EarModelBuilderImpl implements ModelBuilderService {
           })
         }
         catch (Exception e) {
-          ErrorMessageBuilder builderError = getErrorMessageBuilder(project, e);
-          project.getLogger().error(builderError.build());
+          ErrorMessageBuilder builderError = getErrorMessageBuilder(project, e)
+          project.getLogger().error(builderError.build())
         }
 
         earModel.resources = earResources
@@ -108,11 +110,21 @@ class EarModelBuilderImpl implements ModelBuilderService {
           earModel.deploymentDescriptor = writer.toString()
         }
 
+        earModel.archivePath = earTask.archivePath
+
         Manifest manifest = earTask.manifest
         if (manifest != null) {
-          def writer = new StringWriter()
-          manifest.writeTo(writer)
-          earModel.manifestContent = writer.toString()
+          if(is4OrBetter) {
+            if(manifest instanceof org.gradle.api.java.archives.internal.ManifestInternal) {
+              ByteArrayOutputStream baos = new ByteArrayOutputStream()
+              manifest.writeTo(baos)
+              earModel.manifestContent = baos.toString(manifest.contentCharset)
+            }
+          } else {
+            def writer = new StringWriter()
+            manifest.writeTo(writer)
+            earModel.manifestContent = writer.toString()
+          }
         }
 
         earModels.add(earModel)
@@ -124,7 +136,7 @@ class EarModelBuilderImpl implements ModelBuilderService {
 
   @NotNull
   @Override
-  public ErrorMessageBuilder getErrorMessageBuilder(@NotNull Project project, @NotNull Exception e) {
+  ErrorMessageBuilder getErrorMessageBuilder(@NotNull Project project, @NotNull Exception e) {
     ErrorMessageBuilder.create(
       project, e, "JEE project import errors"
     ).withDescription("Ear Artifacts may not be configured properly")

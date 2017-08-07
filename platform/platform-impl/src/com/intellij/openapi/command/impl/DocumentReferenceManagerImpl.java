@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,19 +23,20 @@ import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.util.Key;
 import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.openapi.vfs.VirtualFileAdapter;
 import com.intellij.openapi.vfs.VirtualFileEvent;
+import com.intellij.openapi.vfs.VirtualFileListener;
 import com.intellij.openapi.vfs.VirtualFileManager;
 import com.intellij.openapi.vfs.newvfs.NewVirtualFile;
 import com.intellij.reference.SoftReference;
+import com.intellij.util.containers.NotNullList;
 import com.intellij.util.containers.WeakKeyWeakValueHashMap;
 import com.intellij.util.containers.WeakValueHashMap;
 import com.intellij.util.io.fs.FilePath;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.TestOnly;
 
 import java.lang.ref.Reference;
 import java.lang.ref.WeakReference;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -49,14 +50,8 @@ public class DocumentReferenceManagerImpl extends DocumentReferenceManager imple
   private final Map<FilePath, DocumentReference> myDeletedFilePathToRef = new WeakValueHashMap<>();
 
   @Override
-  @NotNull
-  public String getComponentName() {
-    return getClass().getSimpleName();
-  }
-
-  @Override
   public void initComponent() {
-    VirtualFileManager.getInstance().addVirtualFileListener(new VirtualFileAdapter() {
+    VirtualFileManager.getInstance().addVirtualFileListener(new VirtualFileListener() {
       @Override
       public void fileCreated(@NotNull VirtualFileEvent event) {
         VirtualFile f = event.getFile();
@@ -70,7 +65,7 @@ public class DocumentReferenceManagerImpl extends DocumentReferenceManager imple
       @Override
       public void beforeFileDeletion(@NotNull VirtualFileEvent event) {
         VirtualFile f = event.getFile();
-        f.putUserData(DELETED_FILES, collectDeletedFiles(f, new ArrayList<>()));
+        f.putUserData(DELETED_FILES, collectDeletedFiles(f, new NotNullList<>()));
       }
 
       @Override
@@ -91,7 +86,8 @@ public class DocumentReferenceManagerImpl extends DocumentReferenceManager imple
     });
   }
 
-  private static List<VirtualFile> collectDeletedFiles(VirtualFile f, List<VirtualFile> files) {
+  @NotNull
+  private static List<VirtualFile> collectDeletedFiles(@NotNull VirtualFile f, @NotNull List<VirtualFile> files) {
     if (!(f instanceof NewVirtualFile)) return files;
 
     if (!f.isDirectory()) {
@@ -103,10 +99,6 @@ public class DocumentReferenceManagerImpl extends DocumentReferenceManager imple
       }
     }
     return files;
-  }
-
-  @Override
-  public void disposeComponent() {
   }
 
   @NotNull
@@ -154,4 +146,11 @@ public class DocumentReferenceManagerImpl extends DocumentReferenceManager imple
   private static void assertInDispatchThread() {
     ApplicationManager.getApplication().assertIsDispatchThread();
   }
+
+  @TestOnly
+  public void cleanupForNextTest() {
+    myDeletedFilePathToRef.clear();
+    myDocToRef.clear();
+  }
+
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2008-2016 Bas Leijdekkers
+ * Copyright 2008-2017 Bas Leijdekkers
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,11 +21,11 @@ import com.intellij.codeInspection.ProblemHighlightType;
 import com.intellij.openapi.project.Project;
 import com.intellij.psi.*;
 import com.intellij.psi.util.PsiTreeUtil;
-import com.intellij.util.IncorrectOperationException;
 import com.siyeh.InspectionGadgetsBundle;
 import com.siyeh.ig.BaseInspection;
 import com.siyeh.ig.BaseInspectionVisitor;
 import com.siyeh.ig.InspectionGadgetsFix;
+import com.siyeh.ig.psiutils.MethodUtils;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -54,23 +54,16 @@ public class UnnecessarySuperQualifierInspection extends BaseInspection implemen
     return new UnnecessarySuperQualifierFix();
   }
 
-  private static class UnnecessarySuperQualifierFix
-    extends InspectionGadgetsFix {
+  private static class UnnecessarySuperQualifierFix extends InspectionGadgetsFix {
     @Override
     @NotNull
     public String getFamilyName() {
-      return getName();
-    }
-    @Override
-    @NotNull
-    public String getName() {
       return InspectionGadgetsBundle.message(
         "unnecessary.super.qualifier.quickfix");
     }
 
     @Override
-    protected void doFix(Project project, ProblemDescriptor descriptor)
-      throws IncorrectOperationException {
+    protected void doFix(Project project, ProblemDescriptor descriptor) {
       final PsiElement element = descriptor.getPsiElement();
       element.delete();
     }
@@ -135,6 +128,10 @@ public class UnnecessarySuperQualifierInspection extends BaseInspection implemen
     private static boolean hasUnnecessarySuperQualifier(PsiMethodCallExpression methodCallExpression) {
       final PsiMethod superMethod = methodCallExpression.resolveMethod();
       if (superMethod == null) {
+        return false;
+      }
+      final PsiClass aClass = PsiTreeUtil.getParentOfType(methodCallExpression, PsiClass.class);
+      if (MethodUtils.isOverriddenInHierarchy(superMethod, aClass)) {
         return false;
       }
       // check that super.m() and m() resolve to the same method

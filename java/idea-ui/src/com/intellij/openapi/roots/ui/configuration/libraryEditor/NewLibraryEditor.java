@@ -21,16 +21,18 @@ import com.intellij.openapi.roots.impl.libraries.LibraryEx;
 import com.intellij.openapi.roots.impl.libraries.LibraryImpl;
 import com.intellij.openapi.roots.libraries.LibraryProperties;
 import com.intellij.openapi.roots.libraries.LibraryType;
-import com.intellij.openapi.roots.ui.LightFilePointer;
-import com.intellij.openapi.vfs.VfsUtil;
 import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.openapi.vfs.impl.LightFilePointer;
 import com.intellij.util.ArrayUtil;
 import com.intellij.util.containers.MultiMap;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.*;
+import java.util.function.BiConsumer;
+import java.util.function.BiFunction;
+import java.util.function.Function;
 
 /**
  * @author nik
@@ -42,6 +44,7 @@ public class NewLibraryEditor extends LibraryEditorBase {
   private final JarDirectories myJarDirectories = new JarDirectories();
   private LibraryType myType;
   private LibraryProperties myProperties;
+  private boolean myKeepInvalidUrls = true;
 
   public NewLibraryEditor() {
     this(null, null);
@@ -52,6 +55,14 @@ public class NewLibraryEditor extends LibraryEditorBase {
     myProperties = properties;
     myRoots = new MultiMap<>();
     myExcludedRoots = new LinkedHashSet<>();
+  }
+
+  public boolean isKeepInvalidUrls() {
+    return myKeepInvalidUrls;
+  }
+
+  public void setKeepInvalidUrls(boolean keepInvalidUrls) {
+    myKeepInvalidUrls = keepInvalidUrls;
   }
 
   @Override
@@ -116,7 +127,7 @@ public class NewLibraryEditor extends LibraryEditorBase {
       }
       result.add(file);
     }
-    return VfsUtil.toVirtualFileArray(result);
+    return VfsUtilCore.toVirtualFileArray(result);
   }
 
   @Override
@@ -149,6 +160,7 @@ public class NewLibraryEditor extends LibraryEditorBase {
     myExcludedRoots.add(new LightFilePointer(url));
   }
 
+  @Override
   public void removeExcludedRoot(@NotNull String url) {
     myExcludedRoots.remove(new LightFilePointer(url));
   }
@@ -204,33 +216,48 @@ public class NewLibraryEditor extends LibraryEditorBase {
 
   public void applyTo(LibraryEx.ModifiableModelEx model) {
     model.setProperties(myProperties);
-    for (OrderRootType type : myRoots.keySet()) {
-      for (LightFilePointer pointer : myRoots.get(type)) {
-        if (!myJarDirectories.contains(type, pointer.getUrl())) {
-          model.addRoot(pointer.getUrl(), type);
+    exportRoots(model::getUrls, model::isValid, model::removeRoot, model::addRoot, model::addJarDirectory);
+  }
+
+
+  public void applyTo(LibraryEditorBase editor) {
+    editor.setProperties(myProperties);
+    exportRoots(editor::getUrls, editor::isValid, editor::removeRoot, editor::addRoot, editor::addJarDirectory);
+  }
+
+  private void exportRoots(
+    final Function<OrderRootType, String[]> getUrls,
+    final BiFunction<String, OrderRootType, Boolean> isValid,
+    final BiConsumer<String, OrderRootType> removeRoot,
+    final BiConsumer<String, OrderRootType> addRoot,
+    final TriConsumer<String, Boolean, OrderRootType> addJarDir) {
+
+    // first, clean the target container optionally preserving invalid paths
+    for (OrderRootType type : OrderRootType.getAllTypes()) {
+      for (String url : getUrls.apply(type)) {
+        if (!myKeepInvalidUrls || isValid.apply(url, type)) {
+          removeRoot.accept(url, type);
         }
       }
     }
-    for (OrderRootType rootType : myJarDirectories.getRootTypes()) {
-      for (String url : myJarDirectories.getDirectories(rootType)) {
-        model.addJarDirectory(url, myJarDirectories.isRecursive(rootType, url), rootType);
+
+    // apply editor's state to the target container
+    for (OrderRootType type : myRoots.keySet()) {
+      for (LightFilePointer pointer : myRoots.get(type)) {
+        if (!myJarDirectories.contains(type, pointer.getUrl())) {
+          addRoot.accept(pointer.getUrl(), type);
+        }
+      }
+    }
+    for (OrderRootType type : myJarDirectories.getRootTypes()) {
+      for (String url : myJarDirectories.getDirectories(type)) {
+        addJarDir.accept(url, myJarDirectories.isRecursive(type, url), type);
       }
     }
   }
 
-  public void applyTo(LibraryEditorBase editor) {
-    editor.setProperties(myProperties);
-    for (OrderRootType type : myRoots.keySet()) {
-      for (LightFilePointer pointer : myRoots.get(type)) {
-        if (!myJarDirectories.contains(type, pointer.getUrl())) {
-          editor.addRoot(pointer.getUrl(), type);
-        }
-      }
-    }
-    for (OrderRootType rootType : myJarDirectories.getRootTypes()) {
-      for (String url : myJarDirectories.getDirectories(rootType)) {
-        editor.addJarDirectory(url, myJarDirectories.isRecursive(rootType, url), rootType);
-      }
-    }
+  @FunctionalInterface
+  private interface TriConsumer<T, U, P> {
+    void accept(T t, U u, P p);
   }
 }

@@ -15,12 +15,12 @@
  */
 package com.intellij.ide.actions;
 
+import com.intellij.ide.IdeBundle;
 import com.intellij.ide.impl.ProjectUtil;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.CommonDataKeys;
 import com.intellij.openapi.actionSystem.Presentation;
-import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.module.ModuleManager;
 import com.intellij.openapi.project.DumbAware;
 import com.intellij.openapi.project.Project;
@@ -33,12 +33,8 @@ public class CloseProjectAction extends AnAction implements DumbAware {
     Project project = e.getProject();
     assert project != null;
 
-    // later because some perverted components do their dispose in invoke later, so they need to be executed first.
-    /** @see EditorTextField#releaseEditor() */
-    ApplicationManager.getApplication().invokeLater(() -> {
-      ProjectUtil.closeAndDispose(project);
-      WelcomeFrame.showIfNoProjectOpened();
-    }, project.getDisposed());
+    ProjectUtil.closeAndDispose(project);
+    WelcomeFrame.showIfNoProjectOpened();
   }
 
   @Override
@@ -47,10 +43,10 @@ public class CloseProjectAction extends AnAction implements DumbAware {
     Project project = event.getData(CommonDataKeys.PROJECT);
     presentation.setEnabled(project != null);
     if (ProjectAttachProcessor.canAttachToProject() && project != null && ModuleManager.getInstance(project).getModules().length > 1) {
-      presentation.setText("Close Pro_jects in Current Window");
+      presentation.setText(IdeBundle.message("action.close.projects.in.current.window"));
     }
     else {
-      presentation.setText("Close Pro_ject");
+      presentation.setText(IdeBundle.message("action.close.project"));
     }
   }
 }

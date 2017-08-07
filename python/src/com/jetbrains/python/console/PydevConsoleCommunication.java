@@ -29,11 +29,13 @@ import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.util.Function;
 import com.intellij.util.WaitFor;
+import com.intellij.util.containers.ContainerUtil;
 import com.intellij.xdebugger.XSourcePosition;
 import com.intellij.xdebugger.frame.XValueChildrenList;
 import com.jetbrains.python.console.parsing.PythonConsoleData;
 import com.jetbrains.python.console.pydev.*;
 import com.jetbrains.python.debugger.*;
+import com.jetbrains.python.debugger.containerview.PyViewNumericContainerAction;
 import com.jetbrains.python.debugger.pydev.GetVariableCommand;
 import com.jetbrains.python.debugger.pydev.ProtocolParser;
 import org.apache.xmlrpc.WebServer;
@@ -42,7 +44,6 @@ import org.apache.xmlrpc.XmlRpcHandler;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.io.IOException;
 import java.net.MalformedURLException;
 import java.util.*;
 
@@ -101,6 +102,10 @@ public class PydevConsoleCommunication extends AbstractConsoleCommunication impl
 
   private boolean myExecuting;
   private PythonDebugConsoleCommunication myDebugCommunication;
+  private boolean myNeedsMore = false;
+
+  private PythonConsoleView myConsoleView;
+  private List<PyFrameListener> myFrameListeners = ContainerUtil.createLockFreeCopyOnWriteList();
 
   /**
    * Initializes the xml-rpc communication.
@@ -110,6 +115,10 @@ public class PydevConsoleCommunication extends AbstractConsoleCommunication impl
    * @throws MalformedURLException
    */
   public PydevConsoleCommunication(Project project, int port, Process process, int clientPort) throws Exception {
+    this(project, null, port, process, clientPort);
+  }
+
+  public PydevConsoleCommunication(Project project, String host, int port, Process process, int clientPort) throws Exception {
     super(project);
 
     //start the server that'll handle input requests
@@ -118,7 +127,7 @@ public class PydevConsoleCommunication extends AbstractConsoleCommunication impl
     myWebServer.addHandler("$default", this);
     this.myWebServer.start();
 
-    this.myClient = new PydevXmlRpcClient(process, port);
+    this.myClient = new PydevXmlRpcClient(process, host, port);
   }
 
   public boolean handshake() throws XmlRpcException {
@@ -137,7 +146,7 @@ public class PydevConsoleCommunication extends AbstractConsoleCommunication impl
    */
   public synchronized void close() {
     if (this.myClient != null) {
-      new Task.Backgroundable(myProject, "Close console communication", true) {
+      new Task.Backgroundable(myProject, "Close Console Communication", true) {
         @Override
         public void run(@NotNull ProgressIndicator indicator) {
           try {
@@ -184,6 +193,10 @@ public class PydevConsoleCommunication extends AbstractConsoleCommunication impl
     else if ("NotifyAboutMagic".equals(method)) {
       return execNotifyAboutMagic(params);
     }
+    else if ("ShowConsole".equals(method)) {
+      myConsoleView.setConsoleEnabled(true);
+      return "";
+    }
     else {
       throw new UnsupportedOperationException();
     }
@@ -227,6 +240,7 @@ public class PydevConsoleCommunication extends AbstractConsoleCommunication impl
   }
 
   private Object execNotifyFinished(boolean more) {
+    myNeedsMore = more;
     setExecuting(false);
     notifyCommandExecuted(more);
     return true;
@@ -326,7 +340,7 @@ public class PydevConsoleCommunication extends AbstractConsoleCommunication impl
     if (waitingForInput) {
       return "Unable to get description: waiting for input.";
     }
-    return myClient.execute(GET_DESCRIPTION, new Object[]{text}).toString();
+    return myClient.execute(GET_DESCRIPTION, new Object[]{text}, 5000).toString();
   }
 
   /**
@@ -438,6 +452,10 @@ public class PydevConsoleCommunication extends AbstractConsoleCommunication impl
             }
           }
         }
+        if (nextResponse.more) {
+          myNeedsMore = true;
+          notifyCommandExecuted(true);
+        }
         onResponseReceived.fun(nextResponse);
       }, "Waiting for REPL response", true, myProject);
     }
@@ -456,6 +474,10 @@ public class PydevConsoleCommunication extends AbstractConsoleCommunication impl
   @Override
   public boolean isExecuting() {
     return myExecuting;
+  }
+
+  public boolean needsMore() {
+    return myNeedsMore;
   }
 
   @Override
@@ -613,6 +635,14 @@ public class PydevConsoleCommunication extends AbstractConsoleCommunication impl
     throw new PyDebuggerException("pydevconsole failed to execute connectToDebugger", exception);
   }
 
+  @Override
+  public void notifyCommandExecuted(boolean more) {
+    super.notifyCommandExecuted(more);
+    for (PyFrameListener listener : myFrameListeners) {
+      listener.frameChanged();
+    }
+  }
+
   private static void checkError(Object ret) throws PyDebuggerException {
     if (ret instanceof Object[] && ((Object[])ret).length == 1) {
       throw new PyDebuggerException(((Object[])ret)[0].toString());
@@ -641,19 +671,6 @@ public class PydevConsoleCommunication extends AbstractConsoleCommunication impl
       super(port);
     }
 
-    @Override
-    public synchronized void shutdown() {
-      try {
-        if (serverSocket != null) {
-          serverSocket.close();
-        }
-      }
-      catch (IOException e) {
-        //pass
-      }
-      super.shutdown();
-    }
-
     public boolean waitForTerminate() {
       if (listener != null) {
         return new WaitFor(10000) {
@@ -665,5 +682,19 @@ public class PydevConsoleCommunication extends AbstractConsoleCommunication impl
       }
       return true;
     }
+  }
+
+  public void setConsoleView(PythonConsoleView consoleView) {
+    myConsoleView = consoleView;
+  }
+
+  @Override
+  public void showNumericContainer(PyDebugValue value) {
+    PyViewNumericContainerAction.showNumericViewer(myProject, value);
+  }
+
+  @Override
+  public void addFrameListener(@NotNull PyFrameListener listener) {
+    myFrameListeners.add(listener);
   }
 }

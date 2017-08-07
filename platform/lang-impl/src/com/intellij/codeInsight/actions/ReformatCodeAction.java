@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -35,8 +35,6 @@ import com.intellij.openapi.vfs.ReadonlyStatusHandler;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.VirtualFileFilter;
 import com.intellij.psi.*;
-import com.intellij.psi.search.GlobalSearchScope;
-import com.intellij.psi.search.LocalSearchScope;
 import com.intellij.psi.search.SearchScope;
 import com.intellij.psi.util.PsiUtilCore;
 import org.jetbrains.annotations.NonNls;
@@ -44,7 +42,8 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.TestOnly;
 
-import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 import java.util.regex.PatternSyntaxException;
 
 public class ReformatCodeAction extends AnAction implements DumbAware {
@@ -53,6 +52,9 @@ public class ReformatCodeAction extends AnAction implements DumbAware {
   private static final @NonNls String HELP_ID = "editing.codeReformatting";
   protected static ReformatFilesOptions myTestOptions;
 
+  public ReformatCodeAction() {
+    setEnabledInModalContext(true);
+  }
 
   @Override
   public void actionPerformed(AnActionEvent event) {
@@ -224,35 +226,23 @@ public class ReformatCodeAction extends AnAction implements DumbAware {
       return;
     }
 
-    processor.addFileFilter(new VirtualFileFilter() {
-      @Override
-      public boolean accept(@NotNull VirtualFile file) {
-        if (scope instanceof LocalSearchScope) {
-          return ((LocalSearchScope)scope).isInScope(file);
-        }
-        if (scope instanceof GlobalSearchScope) {
-          return ((GlobalSearchScope)scope).contains(file);
-        }
-
-        return false;
-      }
-    });
+    processor.addFileFilter(scope::contains);
   }
 
   public static void registerFileMaskFilter(@NotNull AbstractLayoutCodeProcessor processor, @Nullable String fileTypeMask) {
     if (fileTypeMask == null)
       return;
 
-    final Condition<String> patternCondition = getFileTypeMaskPattern(fileTypeMask);
+    final Condition<CharSequence> patternCondition = getFileTypeMaskPattern(fileTypeMask);
     processor.addFileFilter(new VirtualFileFilter() {
         @Override
         public boolean accept(@NotNull VirtualFile file) {
-          return patternCondition.value(file.getName());
+          return patternCondition.value(file.getNameSequence());
         }
       });
   }
 
-  private static Condition<String> getFileTypeMaskPattern(@Nullable String mask) {
+  private static Condition<CharSequence> getFileTypeMaskPattern(@Nullable String mask) {
     try {
       return FindInProjectUtil.createFileMaskCondition(mask);
     } catch (PatternSyntaxException e) {
@@ -262,14 +252,12 @@ public class ReformatCodeAction extends AnAction implements DumbAware {
   }
 
   public static PsiFile[] convertToPsiFiles(final VirtualFile[] files,Project project) {
-    final PsiManager manager = PsiManager.getInstance(project);
-    final ArrayList<PsiFile> result = new ArrayList<>();
-    for (VirtualFile virtualFile : files) {
-      final PsiFile psiFile = manager.findFile(virtualFile);
-      if (psiFile != null) result.add(psiFile);
-    }
-    return PsiUtilCore.toPsiFileArray(result);
+    PsiManager psiManager = PsiManager.getInstance(project);
+    List<PsiFile> list = PsiUtilCore.toPsiFiles(psiManager, Arrays.asList(files));
+    return PsiUtilCore.toPsiFileArray(list);
   }
+
+
 
   @Override
   public void update(AnActionEvent event){
@@ -373,7 +361,7 @@ public class ReformatCodeAction extends AnAction implements DumbAware {
   }
 
   @TestOnly
-  protected static void setTestOptions(ReformatFilesOptions options) {
+  public static void setTestOptions(ReformatFilesOptions options) {
     myTestOptions = options;
   }
 

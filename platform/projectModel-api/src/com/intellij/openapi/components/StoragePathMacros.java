@@ -39,7 +39,6 @@ public class StoragePathMacros {
    * Points to the application-level options root directory.
    * @deprecated Not required anymore. See {@link State#storages()}. In short: specify relative path instead (without macro).
    */
-  @SuppressWarnings("unused")
   @Deprecated
   public static final String APP_CONFIG = "$APP_CONFIG$";
 
@@ -52,14 +51,13 @@ public class StoragePathMacros {
   /**
    * @deprecated Not required anymore. See {@link State#storages()}.
    */
-  @SuppressWarnings("unused")
   @Deprecated
   public static final String PROJECT_CONFIG_DIR = "$PROJECT_CONFIG_DIR$";
 
   /**
    * {@link Project#getWorkspaceFile() Workspace} file key.
    * <p/>
-   * <code>'Workspace file'</code> holds settings that are local to a particular environment and should not be shared with another
+   * {@code 'Workspace file'} holds settings that are local to a particular environment and should not be shared with another
    * team members.
    */
   @NonNls @NotNull public static final String WORKSPACE_FILE = "$WORKSPACE_FILE$";

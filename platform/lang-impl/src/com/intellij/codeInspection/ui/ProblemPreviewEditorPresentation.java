@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,102 +15,104 @@
  */
 package com.intellij.codeInspection.ui;
 
-import com.intellij.codeInspection.CommonProblemDescriptor;
 import com.intellij.codeInspection.ProblemDescriptorBase;
 import com.intellij.diff.tools.util.FoldingModelSupport;
 import com.intellij.diff.util.DiffDrawUtil;
+import com.intellij.openapi.application.WriteAction;
+import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.FoldRegion;
 import com.intellij.openapi.editor.ScrollType;
-import com.intellij.openapi.editor.ex.DocumentEx;
 import com.intellij.openapi.editor.ex.EditorEx;
 import com.intellij.openapi.editor.markup.HighlighterLayer;
+import com.intellij.openapi.util.Segment;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.psi.PsiDocumentManager;
 import com.intellij.psi.PsiElement;
 import com.intellij.usageView.UsageInfo;
 import com.intellij.usages.impl.UsagePreviewPanel;
+import org.jetbrains.annotations.NotNull;
 
 import java.util.*;
 import java.util.stream.Collectors;
 
-/**
- * @author Dmitry Batkovich
- */
-public class ProblemPreviewEditorPresentation {
+class ProblemPreviewEditorPresentation {
   private final static int VIEW_ADDITIONAL_OFFSET = 4;
 
-  private final EditorEx myEditor;
-  private final InspectionResultsView myView;
-  private final SortedSet<PreviewEditorFoldingRegion> myFoldedRegions = new TreeSet<>(Comparator.comparing(x -> x.startLine));
-  private final DocumentEx myDocument;
+  static void setupFoldingsForNonProblemRanges(@NotNull EditorEx editor, @NotNull InspectionResultsView view) {
+    final Document doc = editor.getDocument();
+    PsiDocumentManager documentManager = PsiDocumentManager.getInstance(view.getProject());
+    if (documentManager.isUncommited(doc)) {
+      WriteAction.run(() -> documentManager.commitDocument(doc));
+    }
+    final SortedSet<PreviewEditorFoldingRegion> foldingRegions = new TreeSet<>(Comparator.comparing(x -> x.startLine));
+    foldingRegions.add(new PreviewEditorFoldingRegion(0, doc.getLineCount()));
+    List<UsageInfo> usages = Arrays.stream(view.getTree().getAllValidSelectedDescriptors())
+      .filter(ProblemDescriptorBase.class::isInstance)
+      .map(ProblemDescriptorBase.class::cast)
+      .map(d -> {
+        final PsiElement psi = d.getPsiElement();
+        if (psi == null) {
+          return null;
+        }
+        final TextRange range = d.getTextRangeInElement();
+        return range == null ? new UsageInfo(psi) : new UsageInfo(psi, range.getStartOffset(), range.getEndOffset());
+      })
+      .collect(Collectors.toList());
 
-  public ProblemPreviewEditorPresentation(EditorEx editor, InspectionResultsView view) {
-    myEditor = editor;
-    myView = view;
-    myDocument = editor.getDocument();
-    myFoldedRegions.add(new PreviewEditorFoldingRegion(0, myDocument.getLineCount()));
-    appendFoldings(view.getTree().getAllValidSelectedDescriptors());
+    boolean isUpdated = false;
+    for (UsageInfo usage : usages) {
+      if (usage == null) {
+        return;
+      }
+      isUpdated |= makeVisible(foldingRegions, usage.getSegment(), doc);
+    }
+    if (isUpdated) {
+      setupFoldings(editor, foldingRegions);
+    }
+
+    highlightProblems(editor, view, usages);
+  }
+
+  private static void highlightProblems(EditorEx editor, InspectionResultsView view, List<UsageInfo> usages) {
+    List<UsageInfo> validUsages = usages.stream().filter(Objects::nonNull).collect(Collectors.toList());
+    PsiDocumentManager.getInstance(view.getProject()).performLaterWhenAllCommitted(() -> {
+      if (!editor.isDisposed()) {
+        view.invalidate();
+        view.validate();
+        UsagePreviewPanel.highlight(validUsages, editor, view.getProject(), false, HighlighterLayer.SELECTION);
+        if (validUsages.size() == 1) {
+          final PsiElement element = validUsages.get(0).getElement();
+          if (element != null) {
+            final Document document = editor.getDocument();
+            final int offset = Math.min(element.getTextRange().getEndOffset() + VIEW_ADDITIONAL_OFFSET,
+                                        document.getLineEndOffset(document.getLineNumber(element.getTextRange().getEndOffset())));
+            editor.getScrollingModel().scrollTo(editor.offsetToLogicalPosition(offset), ScrollType.CENTER);
+            return;
+          }
+        }
+        editor.getScrollingModel().scrollTo(editor.offsetToLogicalPosition(0), ScrollType.CENTER_UP);
+      }
+    });
   }
 
   private static boolean inRegion(int position, PreviewEditorFoldingRegion range) {
     return range.startLine <= position && range.endLine > position;
   }
 
-  private void appendFoldings(CommonProblemDescriptor[] descriptors) {
-    final boolean[] isUpdated = new boolean[]{false};
-    final boolean[] allValid = new boolean[]{true};
-    final List<UsageInfo> elements = Arrays.stream(descriptors)
-      .filter(ProblemDescriptorBase.class::isInstance)
-      .map(ProblemDescriptorBase.class::cast)
-      .map(ProblemDescriptorBase::getPsiElement)
-      .filter(e -> {
-        final boolean isValid = e != null && e.isValid();
-        allValid[0] &= isValid;
-        return isValid;
-      })
-      .peek((e) -> isUpdated[0] |= appendFoldings(e.getTextRange()))
-      .map(UsageInfo::new)
-      .collect(Collectors.toList());
-    if (!allValid[0]) return;
-
-    if (isUpdated[0] && descriptors.length > 1) {
-      updateFoldings();
-    }
-
-    PsiDocumentManager.getInstance(myView.getProject()).performLaterWhenAllCommitted(() -> {
-      if (!myEditor.isDisposed()) {
-        myView.invalidate();
-        myView.validate();
-        UsagePreviewPanel.highlight(elements, myEditor, myView.getProject(), false, HighlighterLayer.SELECTION);
-        if (elements.size() == 1) {
-          final PsiElement element = elements.get(0).getElement();
-          if (element != null) {
-            final DocumentEx document = myEditor.getDocument();
-            final int offset = Math.min(element.getTextRange().getEndOffset() + VIEW_ADDITIONAL_OFFSET,
-                                        document.getLineEndOffset(document.getLineNumber(element.getTextRange().getEndOffset())));
-            myEditor.getScrollingModel().scrollTo(myEditor.offsetToLogicalPosition(offset), ScrollType.CENTER);
-            return;
-          }
-        }
-        myEditor.getScrollingModel().scrollTo(myEditor.offsetToLogicalPosition(0), ScrollType.CENTER_UP);
-      }
-    });
-  }
-
-  private void updateFoldings() {
-    myEditor.getFoldingModel().runBatchFoldingOperation(() -> {
-      myEditor.getFoldingModel().clearFoldRegions();
-      myEditor.getMarkupModel().removeAllHighlighters();
-      for (PreviewEditorFoldingRegion region : myFoldedRegions) {
+  private static void setupFoldings(EditorEx editor, SortedSet<PreviewEditorFoldingRegion> foldedRegions) {
+    editor.getFoldingModel().runBatchFoldingOperation(() -> {
+      editor.getFoldingModel().clearFoldRegions();
+      editor.getMarkupModel().removeAllHighlighters();
+      for (PreviewEditorFoldingRegion region : foldedRegions) {
         if (region.endLine - region.startLine > 1) {
-          FoldRegion currentRegion = FoldingModelSupport.addFolding(myEditor,
+          FoldRegion currentRegion = FoldingModelSupport.addFolding(editor,
                                                                     region.startLine,
                                                                     region.endLine,
                                                                     false);
           if (currentRegion != null) {
-            DiffDrawUtil.createLineSeparatorHighlighter(myEditor,
-                                                        myDocument.getLineStartOffset(region.startLine),
-                                                        myDocument.getLineEndOffset(region.endLine - 1),
+            DiffDrawUtil.createLineSeparatorHighlighter(editor,
+                                                        editor.getDocument().getLineStartOffset(region.startLine),
+                                                        editor.getDocument().getLineEndOffset(region.endLine - 1),
                                                         () -> currentRegion.isValid() && !currentRegion.isExpanded());
           }
         }
@@ -118,34 +120,35 @@ public class ProblemPreviewEditorPresentation {
     });
   }
 
-  private boolean appendFoldings(TextRange toShowRange) {
+  private static boolean makeVisible(SortedSet<PreviewEditorFoldingRegion> foldingRegions, Segment toShowRange, Document document) {
+    if (toShowRange == null) return false;
     boolean isUpdated = false;
-    final int startLine = Math.max(0, myDocument.getLineNumber(toShowRange.getStartOffset()) - 1);
-    final int endLine = Math.min(myDocument.getLineCount(), myDocument.getLineNumber(toShowRange.getEndOffset()) + 2);
-    for (PreviewEditorFoldingRegion range : new ArrayList<>(myFoldedRegions)) {
+    final int startLine = Math.max(0, document.getLineNumber(toShowRange.getStartOffset()) - 1);
+    final int endLine = Math.min(document.getLineCount(), document.getLineNumber(toShowRange.getEndOffset()) + 2);
+    for (PreviewEditorFoldingRegion range : new ArrayList<>(foldingRegions)) {
       final boolean startInRegion = inRegion(startLine, range);
       final boolean endInRegion = inRegion(endLine, range);
       if (startInRegion && endInRegion) {
-        myFoldedRegions.remove(range);
+        foldingRegions.remove(range);
         if (range.startLine != startLine) {
-          myFoldedRegions.add(new PreviewEditorFoldingRegion(range.startLine, startLine));
+          foldingRegions.add(new PreviewEditorFoldingRegion(range.startLine, startLine));
         }
         if (endLine != range.endLine) {
-          myFoldedRegions.add(new PreviewEditorFoldingRegion(endLine, range.endLine));
+          foldingRegions.add(new PreviewEditorFoldingRegion(endLine, range.endLine));
         }
         return true;
       }
       if (startInRegion) {
-        myFoldedRegions.remove(range);
+        foldingRegions.remove(range);
         if (range.startLine != startLine) {
-          myFoldedRegions.add(new PreviewEditorFoldingRegion(range.startLine, startLine));
+          foldingRegions.add(new PreviewEditorFoldingRegion(range.startLine, startLine));
         }
         isUpdated = true;
       }
       if (endInRegion) {
-        myFoldedRegions.remove(range);
+        foldingRegions.remove(range);
         if (endLine != range.endLine) {
-          myFoldedRegions.add(new PreviewEditorFoldingRegion(endLine, range.endLine));
+          foldingRegions.add(new PreviewEditorFoldingRegion(endLine, range.endLine));
         }
         return true;
       }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,10 +16,8 @@
 package com.jetbrains.python.inspections;
 
 import com.jetbrains.python.fixtures.PyTestCase;
+import com.jetbrains.python.psi.LanguageLevel;
 
-/**
- * User: ktisha
- */
 public class PyClassHasNoInitInspectionTest extends PyTestCase {
 
   public void testClass() {
@@ -54,8 +52,22 @@ public class PyClassHasNoInitInspectionTest extends PyTestCase {
     doTest();
   }
 
+  // PY-24436
+  public void testAInheritsBAndBInheritsImportedAWithDunderInit() {
+    runWithLanguageLevel(LanguageLevel.PYTHON30, this::doMultiFileTest);
+  }
+
   private void doTest() {
     myFixture.configureByFile("inspections/PyClassHasNoInitInspection/" + getTestName(true) + ".py");
+    myFixture.enableInspections(PyClassHasNoInitInspection.class);
+    myFixture.checkHighlighting(false, false, true);
+  }
+
+  private void doMultiFileTest() {
+    final String folderPath = "inspections/PyClassHasNoInitInspection/" + getTestName(false) + "/";
+
+    myFixture.copyDirectoryToProject(folderPath, "");
+    myFixture.configureFromTempProjectFile("a.py");
     myFixture.enableInspections(PyClassHasNoInitInspection.class);
     myFixture.checkHighlighting(false, false, true);
   }

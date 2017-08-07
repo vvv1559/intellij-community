@@ -59,7 +59,7 @@ public class CompletionAutoPopupHandler extends TypedHandlerDelegate {
       return Result.STOP;
     }
 
-    if (Character.isLetter(charTyped) || charTyped == '_') {
+    if (Character.isLetterOrDigit(charTyped) || charTyped == '_') {
       AutoPopupController.getInstance(project).scheduleAutoPopup(editor);
       return Result.STOP;
     }
@@ -90,7 +90,7 @@ public class CompletionAutoPopupHandler extends TypedHandlerDelegate {
     }
     Editor newEditor = InjectedLanguageUtil.getEditorForInjectedLanguageNoCommit(topLevelEditor, topLevelFile);
     try {
-      new CodeCompletionHandlerBase(completionType, false, autopopup, false).invokeCompletion(project, newEditor, time, false, restart);
+      CodeCompletionHandlerBase.createHandler(completionType, false, autopopup, false).invokeCompletion(project, newEditor, time, false, restart);
     }
     catch (IndexNotReadyException ignored) {
     }
@@ -100,7 +100,6 @@ public class CompletionAutoPopupHandler extends TypedHandlerDelegate {
    * @deprecated
    * @see AutoPopupController#runTransactionWithEverythingCommitted(Project, Runnable)
    */
-  @SuppressWarnings("unused")
   @Deprecated
   public static void runLaterWithCommitted(@NotNull final Project project, final Document document, @NotNull final Runnable runnable) {
     AutoPopupController.runTransactionWithEverythingCommitted(project, runnable);

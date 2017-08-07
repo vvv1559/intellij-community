@@ -22,10 +22,6 @@ import com.intellij.openapi.project.Project;
 import com.intellij.psi.PsiAnnotation;
 import org.jetbrains.annotations.NotNull;
 
-/**
-* User: anna
-* Date: 2/22/13
-*/
 class ChangeNullableDefaultsFix implements LocalQuickFix {
   private final NullableNotNullManager myManager;
   private final String myNotNullName;
@@ -45,14 +41,13 @@ class ChangeNullableDefaultsFix implements LocalQuickFix {
 
   @NotNull
   @Override
-  public String getName() {
+  public String getFamilyName() {
     return "Make \"" + (myNotNullName != null ? myNotNullName : myNullableName) + "\" default annotation";
   }
 
-  @NotNull
   @Override
-  public String getFamilyName() {
-    return getName();
+  public boolean startInWriteAction() {
+    return false;
   }
 
   @Override

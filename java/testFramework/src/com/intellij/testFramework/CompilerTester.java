@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,7 +16,6 @@
 package com.intellij.testFramework;
 
 import com.intellij.compiler.CompilerTestUtil;
-import com.intellij.openapi.application.AccessToken;
 import com.intellij.openapi.application.Result;
 import com.intellij.openapi.application.WriteAction;
 import com.intellij.openapi.command.WriteCommandAction;
@@ -48,6 +47,9 @@ import org.junit.Assert;
 import javax.swing.*;
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -103,14 +105,10 @@ public class CompilerTester {
   }
 
   public void deleteClassFile(final String className) throws IOException {
-    AccessToken token = WriteAction.start();
-    try {
-        //noinspection ConstantConditions
-        touch(JavaPsiFacade.getInstance(getProject()).findClass(className, GlobalSearchScope.allScope(getProject())).getContainingFile().getVirtualFile());
-    }
-    finally {
-      token.finish();
-    }
+    WriteAction.run(() -> {
+      //noinspection ConstantConditions
+      touch(JavaPsiFacade.getInstance(getProject()).findClass(className, GlobalSearchScope.allScope(getProject())).getContainingFile().getVirtualFile());
+    });
   }
 
   @Nullable
@@ -174,7 +172,7 @@ public class CompilerTester {
     return runCompiler(callback -> CompilerManager.getInstance(getProject()).compile(files, callback));
   }
 
-  private List<CompilerMessage> runCompiler(final Consumer<ErrorReportingCallback> runnable) {
+  public List<CompilerMessage> runCompiler(final Consumer<CompileStatusNotification> runnable) {
     final Semaphore semaphore = new Semaphore();
     semaphore.down();
 
@@ -188,10 +186,10 @@ public class CompilerTester {
       PlatformTestUtil.saveProject(getProject());
       CompilerTestUtil.saveApplicationSettings();
       for (Module module : myModules) {
-        File ioFile = new File(module.getModuleFilePath());
-        if (!ioFile.exists()) {
+        Path ioFile = Paths.get(module.getModuleFilePath());
+        if (!Files.exists(ioFile)) {
           getProject().save();
-          assert ioFile.exists() : "File does not exist: " + ioFile.getPath();
+          assert Files.exists(ioFile) : "File does not exist: " + ioFile.toString();
         }
       }
       runnable.consume(callback);
@@ -234,7 +232,7 @@ public class CompilerTester {
             final String text = message.getMessage();
             if (category != CompilerMessageCategory.INFORMATION ||
                 !(text.contains("Compilation completed successfully") ||
-                  text.startsWith("Using javac") ||
+                  text.contains("used to compile") ||
                   text.startsWith("Using Groovy-Eclipse"))) {
               myMessages.add(message);
             }

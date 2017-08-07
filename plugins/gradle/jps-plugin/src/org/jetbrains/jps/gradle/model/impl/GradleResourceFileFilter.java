@@ -56,25 +56,28 @@ public class GradleResourceFileFilter implements FileFilter {
   }
 
   private Spec<RelativePath> getAsSpec() {
-    return Specs.and(getAsIncludeSpec(true), Specs.not(getAsExcludeSpec(true)));
+    return Specs.intersect(getAsIncludeSpec(true), Specs.negate(getAsExcludeSpec(true)));
   }
 
   private Spec<RelativePath> getAsExcludeSpec(boolean caseSensitive) {
-    Collection<String> allExcludes = new LinkedHashSet<String>(myFilePattern.excludes);
-    List<Spec<RelativePath>> matchers = new ArrayList<Spec<RelativePath>>();
+    Collection<String> allExcludes = new LinkedHashSet<>(myFilePattern.excludes);
+    List<Spec<RelativePath>> matchers = new ArrayList<>();
     for (String exclude : allExcludes) {
       Spec<RelativePath> patternMatcher = PatternMatcherFactory.getPatternMatcher(false, caseSensitive, exclude);
       matchers.add(patternMatcher);
     }
-    return Specs.or(false, matchers);
+    if (matchers.isEmpty()) {
+      return Specs.satisfyNone();
+    }
+    return Specs.union(matchers);
   }
 
   private Spec<RelativePath> getAsIncludeSpec(boolean caseSensitive) {
-    List<Spec<RelativePath>> matchers = new ArrayList<Spec<RelativePath>>();
+    List<Spec<RelativePath>> matchers = new ArrayList<>();
     for (String include : myFilePattern.includes) {
       Spec<RelativePath> patternMatcher = PatternMatcherFactory.getPatternMatcher(true, caseSensitive, include);
       matchers.add(patternMatcher);
     }
-    return Specs.or(true, matchers);
+    return Specs.union(matchers);
   }
 }

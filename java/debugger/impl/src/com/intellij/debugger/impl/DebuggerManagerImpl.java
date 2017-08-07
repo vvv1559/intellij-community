@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -142,16 +142,16 @@ public class DebuggerManagerImpl extends DebuggerManagerEx implements Persistent
     myDispatcher.removeListener(listener);
   }
 
-  public DebuggerManagerImpl(Project project, StartupManager startupManager, EditorColorsManager colorsManager) {
+  public DebuggerManagerImpl(Project project, StartupManager startupManager) {
     myProject = project;
     myBreakpointManager = new BreakpointManager(myProject, startupManager, this);
     if (!project.isDefault()) {
-      colorsManager.addEditorColorsListener(new EditorColorsListener() {
+      project.getMessageBus().connect().subscribe(EditorColorsManager.TOPIC, new EditorColorsListener() {
         @Override
         public void globalSchemeChange(EditorColorsScheme scheme) {
           getBreakpointManager().updateBreakpointsUI();
         }
-      }, project);
+      });
     }
   }
 
@@ -159,10 +159,7 @@ public class DebuggerManagerImpl extends DebuggerManagerEx implements Persistent
   @Override
   public DebuggerSession getSession(DebugProcess process) {
     ApplicationManager.getApplication().assertIsDispatchThread();
-    for (final DebuggerSession debuggerSession : getSessions()) {
-      if (process == debuggerSession.getProcess()) return debuggerSession;
-    }
-    return null;
+    return getSessions().stream().filter(debuggerSession -> process == debuggerSession.getProcess()).findFirst().orElse(null);
   }
 
   @NotNull
@@ -172,18 +169,6 @@ public class DebuggerManagerImpl extends DebuggerManagerEx implements Persistent
       final Collection<DebuggerSession> values = mySessions.values();
       return values.isEmpty() ? Collections.emptyList() : new ArrayList<>(values);
     }
-  }
-
-  @Override
-  public void disposeComponent() {
-  }
-
-  @Override
-  public void initComponent() {
-  }
-
-  @Override
-  public void projectClosed() {
   }
 
   @Override
@@ -246,11 +231,12 @@ public class DebuggerManagerImpl extends DebuggerManagerEx implements Persistent
       processHandler.addProcessListener(new ProcessAdapter() {
         @Override
         public void processWillTerminate(ProcessEvent event, boolean willBeDestroyed) {
-          final DebugProcessImpl debugProcess = getDebugProcess(event.getProcessHandler());
+          ProcessHandler processHandler = event.getProcessHandler();
+          final DebugProcessImpl debugProcess = getDebugProcess(processHandler);
           if (debugProcess != null) {
             // if current thread is a "debugger manager thread", stop will execute synchronously
             // it is KillableColoredProcessHandler responsibility to terminate VM
-            debugProcess.stop(willBeDestroyed && !(event.getProcessHandler() instanceof KillableColoredProcessHandler));
+            debugProcess.stop(willBeDestroyed && !(processHandler instanceof KillableColoredProcessHandler && ((KillableColoredProcessHandler)processHandler).shouldKillProcessSoftly()));
 
             // wait at most 10 seconds: the problem is that debugProcess.stop() can hang if there are troubles in the debuggee
             // if processWillTerminate() is called from AWT thread debugProcess.waitFor() will block it and the whole app will hang
@@ -379,16 +365,6 @@ public class DebuggerManagerImpl extends DebuggerManagerEx implements Persistent
     myCustomPositionManagerFactories.remove(factory);
   }
 
-  private static boolean hasWhitespace(String string) {
-    int length = string.length();
-    for (int i = 0; i < length; i++) {
-      if (Character.isWhitespace(string.charAt(i))) {
-        return true;
-      }
-    }
-    return false;
-  }
-
   /* Remoting */
   private static void checkTargetJPDAInstalled(JavaParameters parameters) throws ExecutionException {
     final Sdk jdk = parameters.getJdk();
@@ -396,13 +372,14 @@ public class DebuggerManagerImpl extends DebuggerManagerEx implements Persistent
       throw new ExecutionException(DebuggerBundle.message("error.jdk.not.specified"));
     }
     final JavaSdkVersion version = JavaSdk.getInstance().getVersion(jdk);
-    String versionString = jdk.getVersionString();
     if (version == JavaSdkVersion.JDK_1_0 || version == JavaSdkVersion.JDK_1_1) {
+      String versionString = jdk.getVersionString();
       throw new ExecutionException(DebuggerBundle.message("error.unsupported.jdk.version", versionString));
     }
     if (SystemInfo.isWindows && version == JavaSdkVersion.JDK_1_2) {
       final VirtualFile homeDirectory = jdk.getHomeDirectory();
       if (homeDirectory == null || !homeDirectory.isValid()) {
+        String versionString = jdk.getVersionString();
         throw new ExecutionException(DebuggerBundle.message("error.invalid.jdk.home", versionString));
       }
       //noinspection HardCodedStringLiteral
@@ -481,7 +458,7 @@ public class DebuggerManagerImpl extends DebuggerManagerEx implements Persistent
       debuggeeRunProperties += ",suspend=n,server=y";
     }
 
-    if (hasWhitespace(debuggeeRunProperties)) {
+    if (StringUtil.containsWhitespaces(debuggeeRunProperties)) {
       debuggeeRunProperties = "\"" + debuggeeRunProperties + "\"";
     }
     final String _debuggeeRunProperties = debuggeeRunProperties;

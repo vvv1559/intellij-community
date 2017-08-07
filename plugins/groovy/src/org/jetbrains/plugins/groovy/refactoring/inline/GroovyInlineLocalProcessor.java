@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -52,6 +52,7 @@ import org.jetbrains.plugins.groovy.refactoring.introduce.GrIntroduceHandlerBase
 import java.util.ArrayList;
 import java.util.BitSet;
 import java.util.Collection;
+import java.util.List;
 
 /**
  * @author Max Medvedev
@@ -106,7 +107,7 @@ public class GroovyInlineLocalProcessor extends BaseRefactoringProcessor {
   @Override
   protected UsageInfo[] findUsages() {
     final Instruction[] controlFlow = mySettings.getFlow();
-    final ArrayList<BitSet> writes = ControlFlowUtils.inferWriteAccessMap(controlFlow, myLocal);
+    final List<BitSet> writes = ControlFlowUtils.inferWriteAccessMap(controlFlow, myLocal);
     
     ArrayList<UsageInfo> toInline = new ArrayList<>();
     collectRefs(myLocal, controlFlow, writes, mySettings.getWriteInstructionNumber(), toInline);
@@ -125,7 +126,7 @@ public class GroovyInlineLocalProcessor extends BaseRefactoringProcessor {
   
   private static void collectRefs(final GrVariable variable,
                                   Instruction[] flow,
-                                  final ArrayList<BitSet> writes,
+                                  final List<BitSet> writes,
                                   final int writeInstructionNumber,
                                   final ArrayList<UsageInfo> toInline) {
     for (Instruction instruction : flow) {
@@ -161,7 +162,7 @@ public class GroovyInlineLocalProcessor extends BaseRefactoringProcessor {
             writeInstructionNumber == -1 && prev.cardinality() == 0) {
           ((GrAnonymousClassDefinition)element).acceptChildren(new GroovyRecursiveElementVisitor() {
             @Override
-            public void visitField(GrField field) {
+            public void visitField(@NotNull GrField field) {
               GrExpression initializer = field.getInitializerGroovy();
               if (initializer != null) {
                 Instruction[] flow = new ControlFlowBuilder(field.getProject()).buildControlFlow(initializer);
@@ -170,7 +171,7 @@ public class GroovyInlineLocalProcessor extends BaseRefactoringProcessor {
             }
 
             @Override
-            public void visitMethod(GrMethod method) {
+            public void visitMethod(@NotNull GrMethod method) {
               GrOpenBlock block = method.getBlock();
               if (block != null) {
                 Instruction[] flow = block.getControlFlow();
@@ -179,7 +180,7 @@ public class GroovyInlineLocalProcessor extends BaseRefactoringProcessor {
             }
 
             @Override
-            public void visitClassInitializer(GrClassInitializer initializer) {
+            public void visitClassInitializer(@NotNull GrClassInitializer initializer) {
               GrOpenBlock block = initializer.getBlock();
               Instruction[] flow = block.getControlFlow();
               collectRefs(variable, flow, ControlFlowUtils.inferWriteAccessMap(flow, variable), -1, toInline);

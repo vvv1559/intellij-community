@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,11 +16,13 @@
 package com.jetbrains.python;
 
 import com.google.common.collect.ImmutableList;
-import com.jetbrains.python.documentation.PythonDocumentationProvider;
+import com.jetbrains.python.codeInsight.stdlib.PyNamedTupleType;
+import com.jetbrains.python.documentation.docstrings.DocStringFormat;
 import com.jetbrains.python.fixtures.PyTestCase;
 import com.jetbrains.python.psi.LanguageLevel;
 import com.jetbrains.python.psi.PyExpression;
 import com.jetbrains.python.psi.impl.PythonLanguageLevelPusher;
+import com.jetbrains.python.psi.types.PyClassLikeType;
 import com.jetbrains.python.psi.types.PyClassType;
 import com.jetbrains.python.psi.types.PyType;
 import com.jetbrains.python.psi.types.TypeEvalContext;
@@ -65,9 +67,9 @@ public class PyTypeTest extends PyTestCase {
   public void testBinaryExprType() {
     doTest("int",
            "expr = 1 + 2");
-    doTest("Union[str, unicode]",
+    doTest("str",
            "expr = '1' + '2'");
-    doTest("Union[str, unicode]",
+    doTest("str",
            "expr = '%s' % ('a')");
     doTest("List[int]",
            "expr = [1] + [2]");
@@ -134,20 +136,6 @@ public class PyTypeTest extends PyTestCase {
   public void testUnicodeLiteral() {  // PY-1427
     doTest("unicode",
            "expr = u'foo'");
-  }
-
-  // TODO: uncomment when we have a mock SDK for Python 3.x
-  // PY-1427
-  @SuppressWarnings("unused")
-  public void _testBytesLiteral() {  // PY-1427
-    PythonLanguageLevelPusher.setForcedLanguageLevel(myFixture.getProject(), LanguageLevel.PYTHON30);
-    try {
-      doTest("bytes",
-             "expr = b'foo'");
-    }
-    finally {
-      PythonLanguageLevelPusher.setForcedLanguageLevel(myFixture.getProject(), null);
-    }
   }
 
   public void testPropertyType() {
@@ -324,6 +312,90 @@ public class PyTypeTest extends PyTestCase {
            "        expr = x\n");
   }
 
+  // PY-20679
+  public void testIsInstanceViaTrue() {
+    doTest("str",
+           "a = None\n" +
+           "if isinstance(a, str) is True:\n" +
+           "    expr = a\n" +
+           "raise TypeError('Invalid type')");
+
+    doTest("str",
+           "a = None\n" +
+           "if True is isinstance(a, str):\n" +
+           "    expr = a\n" +
+           "raise TypeError('Invalid type')");
+  }
+
+  // PY-20679
+  public void testIsInstanceViaFalse() {
+    doTest("str",
+           "a = None\n" +
+           "if isinstance(a, str) is not False:\n" +
+           "    expr = a\n" +
+           "raise TypeError('Invalid type')");
+
+    doTest("str",
+           "a = None\n" +
+           "if False is not isinstance(a, str):\n" +
+           "    expr = a\n" +
+           "raise TypeError('Invalid type')");
+
+    doTest("str",
+           "a = None\n" +
+           "if not isinstance(a, str) is False:\n" +
+           "    expr = a\n" +
+           "raise TypeError('Invalid type')");
+
+    doTest("str",
+           "a = None\n" +
+           "if not False is isinstance(a, str):\n" +
+           "    expr = a\n" +
+           "raise TypeError('Invalid type')");
+  }
+
+  // PY-20679
+  public void testNotIsInstanceViaTrue() {
+    doTest("str",
+           "a = None\n" +
+           "if not isinstance(a, str) is True:\n" +
+           "    raise TypeError('Invalid type')\n" +
+           "expr = a");
+
+    doTest("str",
+           "a = None\n" +
+           "if not True is isinstance(a, str):\n" +
+           "    raise TypeError('Invalid type')\n" +
+           "expr = a");
+
+    doTest("str",
+           "a = None\n" +
+           "if isinstance(a, str) is not True:\n" +
+           "    raise TypeError('Invalid type')\n" +
+           "expr = a");
+
+    doTest("str",
+           "a = None\n" +
+           "if True is not isinstance(a, str):\n" +
+           "    raise TypeError('Invalid type')\n" +
+           "expr = a");
+  }
+
+  // PY-20679
+  public void testNotIsInstanceViaFalse() {
+    doTest("str",
+           "a = None\n" +
+           "if isinstance(a, str) is False:\n" +
+           "    raise TypeError('Invalid type')\n" +
+           "expr = a");
+
+    doTest("str",
+           "a = None\n" +
+           "if False is isinstance(a, str):\n" +
+           "    raise TypeError('Invalid type')\n" +
+           "expr = a");
+  }
+
   // PY-4279
   public void testFieldReassignment() {
     doTest("C1",
@@ -391,7 +463,7 @@ public class PyTypeTest extends PyTestCase {
   }
 
   public void testPropertyOfUnionType() {
-    doTest("int", "def f():\n" +
+    doTest("Optional[int]", "def f():\n" +
                   "    '''\n" +
                   "    :rtype: int or slice\n" +
                   "    '''\n" +
@@ -465,7 +537,7 @@ public class PyTypeTest extends PyTestCase {
   }
 
   public void testGeneratorFunctionType() {
-    doTest("__generator[str, Any, int]",
+    doTest("Generator[str, Any, int]",
            "def f():\n" +
            "    yield 'foo'\n" +
            "    return 0\n" +
@@ -480,7 +552,7 @@ public class PyTypeTest extends PyTestCase {
 
   // PY-7021
   public void testGeneratorComprehensionType() {
-    doTest("__generator[str, Any, None]", "expr = (str(x) for x in range(10))\n");
+    doTest("Generator[str, Any, None]", "expr = (str(x) for x in range(10))\n");
   }
 
   // PY-7021
@@ -816,6 +888,80 @@ public class PyTypeTest extends PyTestCase {
            "  expr, foo = xs\n");
   }
 
+  // PY-19826
+  public void testListFromTuple() {
+    doTest("List[Union[str, int]]",
+           "expr = list(('1', 2, 3))");
+  }
+
+  public void testDictFromTuple() {
+    doTest("Dict[Union[str, int], Union[str, int]]",
+           "expr = dict((('1', 1), (2, 2), (3, '3')))");
+  }
+
+  public void testSetFromTuple() {
+    doTest("Set[Union[str, int]]",
+           "expr = set(('1', 2, 3))");
+  }
+
+  public void testTupleFromTuple() {
+    doTest("Tuple[str, int, int]",
+           "expr = tuple(('1', 2, 3))");
+  }
+
+  public void testTupleFromList() {
+    doTest("Tuple[Union[str, int], ...]",
+           "expr = tuple(['1', 2, 3])");
+  }
+
+  public void testTupleFromDict() {
+    doTest("Tuple[Union[str, int], ...]",
+           "expr = tuple({'1': 'a', 2: 'b', 3: 4})");
+  }
+
+  public void testTupleFromSet() {
+    doTest("Tuple[Union[str, int], ...]",
+           "expr = tuple({'1', 2, 3})");
+  }
+
+  public void testHomogeneousTupleSubstitution() {
+    runWithLanguageLevel(
+      LanguageLevel.PYTHON35,
+      () -> {
+        myFixture.copyDirectoryToProject("typing", "");
+
+        doTest("Tuple[int, ...]",
+               "from typing import TypeVar, Tuple\n" +
+               "T = TypeVar('T')\n" +
+               "def foo(i: T) -> Tuple[T, ...]:\n" +
+               "    pass\n" +
+               "expr = foo(5)");
+      }
+    );
+  }
+
+  public void testHeterogeneousTupleSubstitution() {
+    doTest("tuple[int, int]",
+           "def foo(i):\n" +
+           "    \"\"\"\n" +
+           "    :type i: T\n" +
+           "    :rtype: tuple[T, T]\n" +
+           "    \"\"\"\n" +
+           "    pass\n" +
+           "expr = foo(5)");
+  }
+
+  public void testUnknownTupleSubstitution() {
+    doTest("tuple",
+           "def foo(i):\n" +
+           "    \"\"\"\n" +
+           "    :type i: T\n" +
+           "    :rtype: tuple\n" +
+           "    \"\"\"\n" +
+           "    pass\n" +
+           "expr = foo(5)");
+  }
+
   public void testTupleIterationType() {
     doTest("Union[int, str]",
            "xs = (1, 'a')\n" +
@@ -1001,6 +1147,23 @@ public class PyTypeTest extends PyTestCase {
            "expr = f\n");
   }
 
+  // PY-20832
+  public void testStructuralTypeWithDunderIter() {
+    doTest("{__iter__}",
+           "def expand(values1):\n" +
+           "    for a in values1:\n" +
+           "        print(a)\n" +
+           "    expr = values1\n");
+  }
+
+  // PY-20833
+  public void testStructuralTypeWithDunderLen() {
+    doTest("{__len__}",
+           "def expand(values1):\n" +
+           "    a = len(values1)\n" +
+           "    expr = values1\n");
+  }
+
   // PY-16267
   public void testGenericField() {
     doTest("str",
@@ -1066,21 +1229,6 @@ public class PyTypeTest extends PyTestCase {
                     "    expr = foo\n");
   }
 
-  // PY-18427
-  public void testConditionalTypeInDocstring() {
-    doTest("Union[str, int]",
-           "if something:\n" +
-           "    Type = int\n" +
-           "else:\n" +
-           "    Type = str\n" +
-           "\n" +
-           "def f(expr):\n" +
-           "    '''\n" +
-           "    :type expr: Type\n" +
-           "    '''\n" +
-           "    pass\n");
-  }
-
   // PY-18254
   public void testFunctionTypeCommentInStubs() {
     doMultiFileTest("MyClass",
@@ -1103,6 +1251,992 @@ public class PyTypeTest extends PyTestCase {
            TypeEvalContext.userInitiated(expr.getProject(), expr.getContainingFile()));
   }
 
+  // PY-20063
+  public void testIteratedSetElement() {
+    doTest("int",
+           "xs = {1}\n" +
+           "for expr in xs:\n" +
+           "    print(expr)");
+  }
+
+  public void testIsNotNone() {
+    doTest("int",
+           "def test_1(self, c):\n" +
+           "    x = 1 if c else None\n" +
+           "    if x is not None:\n" +
+           "        expr = x\n");
+
+    doTest("int",
+           "def test_1(self, c):\n" +
+           "    x = 1 if c else None\n" +
+           "    if None is not x:\n" +
+           "        expr = x\n");
+
+    doTest("int",
+           "def test_1(self, c):\n" +
+           "    x = 1 if c else None\n" +
+           "    if not x is None:\n" +
+           "        expr = x\n");
+
+    doTest("int",
+           "def test_1(self, c):\n" +
+           "    x = 1 if c else None\n" +
+           "    if not None is x:\n" +
+           "        expr = x\n");
+  }
+
+  public void testIsNone() {
+    doTest("None",
+           "def test_1(self, c):\n" +
+           "    x = 1 if c else None\n" +
+           "    if x is None:\n" +
+           "        expr = x\n");
+
+    doTest("None",
+           "def test_1(self, c):\n" +
+           "    x = 1 if c else None\n" +
+           "    if None is x:\n" +
+           "        expr = x\n");
+  }
+
+  public void testAnyIsNone() {
+    doTest("None",
+           "def test_1(c):\n" +
+           "  if c is None:\n" +
+           "    expr = c\n");
+  }
+
+  public void testElseAfterIsNotNone() {
+    doTest("None",
+           "def test_1(self, c):\n" +
+           "    x = 1 if c else None\n" +
+           "    if x is not None:\n" +
+           "        print(x)\n" +
+           "    else:\n" +
+           "        expr = x\n");
+
+    doTest("None",
+           "def test_1(self, c):\n" +
+           "    x = 1 if c else None\n" +
+           "    if None is not x:\n" +
+           "        print(x)\n" +
+           "    else:\n" +
+           "        expr = x\n");
+
+    doTest("None",
+           "def test_1(self, c):\n" +
+           "    x = 1 if c else None\n" +
+           "    if not x is None:\n" +
+           "        print(x)\n" +
+           "    else:\n" +
+           "        expr = x\n");
+
+    doTest("None",
+           "def test_1(self, c):\n" +
+           "    x = 1 if c else None\n" +
+           "    if not None is x:\n" +
+           "        print(x)\n" +
+           "    else:\n" +
+           "        expr = x\n");
+  }
+
+  public void testElseAfterIsNone() {
+    doTest("int",
+           "def test_1(self, c):\n" +
+           "    x = 1 if c else None\n" +
+           "    if x is None:\n" +
+           "        print(x)\n" +
+           "    else:\n" +
+           "        expr = x\n");
+
+    doTest("int",
+           "def test_1(self, c):\n" +
+           "    x = 1 if c else None\n" +
+           "    if None is x:\n" +
+           "        print(x)\n" +
+           "    else:\n" +
+           "        expr = x\n");
+  }
+
+  public void testElseAfterAnyIsNone() {
+    doTest("Any",
+           "def test_1(c):\n" +
+           "  if c is None:\n" +
+           "    print(c)\n" +
+           "  else:\n" +
+           "    expr = c\n");
+  }
+
+  // PY-21897
+  public void testElseAfterIfReferenceStatement() {
+    doTest("Any",
+           "def test(a):\n" +
+           "  if a:\n" +
+           "    print(a)\n" +
+           "  else:\n" +
+           "    expr = a\n");
+  }
+
+  public void testHeterogeneousListLiteral() {
+    doTest("List[Union[str, int]]", "expr = ['1', 1, 1]");
+
+    doTest("List[Union[Union[str, int], Any]]", "expr = ['1', 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]");
+  }
+
+  public void testHeterogeneousSetLiteral() {
+    doTest("Set[Union[str, int]]", "expr = {'1', 1, 1}");
+
+    doTest("Set[Union[Union[str, int], Any]]", "expr = {'1', 1, 1, 1, 1, 1, 1, 1, 1, 1, 1}");
+  }
+
+  public void testHeterogeneousDictLiteral() {
+    doTest("Dict[Union[str, int], Union[str, int]]", "expr = {'1': 1, 1: '1', 1: 1}");
+
+    doTest("Dict[Union[Union[str, int], Any], Union[Union[str, int], Any]]",
+           "expr = {'1': 1, 1: '1', 1: 1, 1: 1, 1: 1, 1: 1, 1: 1, 1: 1, 1: 1, 1: 1, 1: 1}");
+  }
+
+  public void testHeterogeneousTupleLiteral() {
+    doTest("Tuple[str, int, int]", "expr = ('1', 1, 1)");
+
+    doTest("Tuple[str, int, int, int, int, int, int, int, int, int, int]", "expr = ('1', 1, 1, 1, 1, 1, 1, 1, 1, 1, 1)");
+  }
+
+  // PY-20818
+  public void testIsInstanceForSuperclass() {
+    doTest("B",
+           "class A:\n" +
+           "    pass\n" +
+           "class B(A):\n" +
+           "    def foo(self):\n" +
+           "        pass\n" +
+           "def test():\n" +
+           "    b = B()\n" +
+           "    assert(isinstance(b, A))\n" +
+           "    expr = b\n");
+  }
+
+  // PY-20794
+  public void testIterateOverPureList() {
+    doTest("Any",
+           "l = None  # type: list\n" +
+           "for expr in l:\n" +
+           "    print(expr)\n");
+  }
+
+  // PY-20794
+  public void testIterateOverDictValueWithDefaultValue() {
+    doTest("Any",
+           "d = None  # type: dict\n" +
+           "for expr in d.get('field', []):\n" +
+           "    print(expr['id'])\n");
+  }
+
+  // PY-20797
+  // TODO: Enable after switching to collections stub from Typeshed
+  public void _testValueOfEmptyDefaultDict() {
+    doTest("list",
+           "from collections import defaultdict\n" +
+           "expr = defaultdict(lambda: [])['x']\n");
+  }
+
+  // PY-8473
+  public void testCopyDotCopy() {
+    doMultiFileTest("A",
+                    "import copy\n" +
+                    "class A(object):\n" +
+                    "    pass\n" +
+                    "expr = copy.copy(A())\n");
+  }
+
+  // PY-8473
+  public void testCopyDotDeepCopy() {
+    doMultiFileTest("A",
+                    "import copy\n" +
+                    "class A(object):\n" +
+                    "    pass\n" +
+                    "expr = copy.deepcopy(A())\n");
+  }
+
+  // PY-21083
+  public void testFloatFromhex() {
+    doTest("float",
+           "expr = float.fromhex(\"0.5\")");
+  }
+
+  // PY-13159
+  public void testAbsAbstractProperty() {
+    doTest("str",
+           "import abc\n" +
+           "class D:\n" +
+           "    @abc.abstractproperty\n" +
+           "    def foo(self):\n" +
+           "        return 'foo'\n" +
+           "expr = D().foo");
+  }
+
+  public void testAbsAbstractPropertyWithFrom() {
+    doTest("str",
+           "from abc import abstractproperty\n" +
+           "class D:\n" +
+           "    @abstractproperty\n" +
+           "    def foo(self):\n" +
+           "        return 'foo'\n" +
+           "expr = D().foo");
+  }
+
+  // TODO: enable this test when properties will be calculated with TypeEvalContext
+  public void ignoredTestAbsAbstractPropertyWithAs() {
+    doTest("str",
+           "from abc import abstractproperty as ap\n" +
+           "class D:\n" +
+           "    @ap\n" +
+           "    def foo(self):\n" +
+           "        return 'foo'\n" +
+           "expr = D().foo");
+  }
+
+  // PY-20409
+  public void testGetFromDictWithDefaultNoneValue() {
+    doTest("Optional[Any]",
+           "d = {}\n" +
+           "expr = d.get(\"abc\", None)");
+  }
+
+  // PY-20757
+  public void testMinOrNone() {
+    doTest("Optional[Any]",
+           "def get_value(v):\n" +
+           "    if v:\n" +
+           "        return min(v)\n" +
+           "    else:\n" +
+           "        return None\n" +
+           "expr = get_value([])");
+  }
+
+  // PY-21350
+  public void testBuiltinInput() {
+    doTest("Any",
+           "expr = input()");
+  }
+
+  // PY-21350
+  public void testBuiltinRawInput() {
+    doTest("str",
+           "expr = raw_input()");
+  }
+
+  // PY-19723
+  public void testPositionalArgs() {
+    doTest("Tuple[int, ...]",
+           "def foo(*args):\n" +
+           "    \"\"\"\n" +
+           "    :type args: int\n" +
+           "    \"\"\"\n" +
+           "    expr = args");
+  }
+
+  // PY-19723
+  public void testKeywordArgs() {
+    doTest("Dict[str, int]",
+           "def foo(**kwargs):\n" +
+           "    \"\"\"\n" +
+           "    :type kwargs: int\n" +
+           "    \"\"\"\n" +
+           "    expr = kwargs");
+  }
+
+  // PY-19723
+  public void testIterateOverKeywordArgs() {
+    doTest("str",
+           "def foo(**kwargs):\n" +
+           "    for expr in kwargs:\n" +
+           "        pass");
+  }
+
+  // PY-19723
+  public void testTypeVarSubstitutionInPositionalArgs() {
+    doTest("int",
+           "def foo(*args):" +
+           "  \"\"\"\n" +
+           "  :type args: T\n" +
+           "  :rtype: T\n" +
+           "  \"\"\"\n" +
+           "  pass\n" +
+           "expr = foo(1)");
+  }
+
+  // PY-19723
+  public void testTypeVarSubstitutionInHeterogeneousPositionalArgs() {
+    doTest("Union[int, str]",
+           "def foo(*args):" +
+           "  \"\"\"\n" +
+           "  :type args: T\n" +
+           "  :rtype: T\n" +
+           "  \"\"\"\n" +
+           "  pass\n" +
+           "expr = foo(1, \"2\")");
+  }
+
+  // PY-19723
+  public void testTypeVarSubstitutionInKeywordArgs() {
+    doTest("int",
+           "def foo(**kwargs):" +
+           "  \"\"\"\n" +
+           "  :type kwargs: T\n" +
+           "  :rtype: T\n" +
+           "  \"\"\"\n" +
+           "  pass\n" +
+           "expr = foo(a=1)");
+  }
+
+  // PY-19723
+  public void testTypeVarSubstitutionInHeterogeneousKeywordArgs() {
+    doTest("Union[int, str]",
+           "def foo(**kwargs):" +
+           "  \"\"\"\n" +
+           "  :type kwargs: T\n" +
+           "  :rtype: T\n" +
+           "  \"\"\"\n" +
+           "  pass\n" +
+           "expr = foo(a=1, b=\"2\")");
+  }
+
+  // PY-21474
+  public void testReassigningOptionalListWithDefaultValue() {
+    doTest("Union[List[str], list]",
+           "def x(things):\n" +
+           "    \"\"\"\n" +
+           "    :type things: None | list[str]\n" +
+           "    \"\"\"\n" +
+           "    expr = things if things else []");
+  }
+
+  public void testMinResult() {
+    doTest("int",
+           "expr = min(1, 2, 3)");
+  }
+
+  public void testMaxResult() {
+    doTest("int",
+           "expr = max(1, 2, 3)");
+  }
+
+  // PY-21692
+  public void testSumResult() {
+    doTest("int",
+           "expr = sum([1, 2, 3])");
+  }
+
+  // PY-21994
+  public void testOptionalAfterIfNot() {
+    doTest("List[int]",
+           "def bug(foo):\n" +
+           "    \"\"\"\n" +
+           "    Args:\n" +
+           "        foo (list[int]|None): an optional list of ints \n" +
+           "    \"\"\"\n" +
+           "    if not foo:\n" +
+           "        return None\n" +
+           "    expr = foo");
+  }
+
+  // PY-22037
+  public void testAncestorPropertyReturnsSelf() {
+    doTest("Child",
+           "class Master(object):\n" +
+           "    @property\n" +
+           "    def me(self):\n" +
+           "        return self\n" +
+           "class Child(Master):\n" +
+           "    pass\n" +
+           "child = Child()\n" +
+           "expr = child.me");
+  }
+
+  // PY-22181
+  public void testIterationOverIterableWithSeparateIterator() {
+    doTest("int",
+           "class AIter(object):\n" +
+           "    def next(self):\n" +
+           "        return 5\n" +
+           "class A(object):\n" +
+           "    def __iter__(self):\n" +
+           "        return AIter()\n" +
+           "a = A()\n" +
+           "for expr in a:\n" +
+           "    print(expr)");
+  }
+
+  public void testImportedPropertyResult() {
+    doMultiFileTest("Any",
+                    "from .temporary import get_class\n" +
+                    "class Example:\n" +
+                    "    def __init__(self):\n" +
+                    "        expr = self.ins_class\n" +
+                    "    @property\n" +
+                    "    def ins_class(self):\n" +
+                    "        return get_class()");
+  }
+
+  // PY-7322
+  public void testNamedTupleParameterInDocString() {
+    doTest("Point",
+           "from collections import namedtuple\n" +
+           "Point = namedtuple('Point', ('x', 'y'))\n" +
+           "def takes_a_point(point):\n" +
+           "    \"\"\"\n" +
+           "    :type point: Point\n" +
+           "    \"\"\"\n" +
+           "    expr = point");
+  }
+
+  // PY-22919
+  public void testMaxListKnownElements() {
+    doTest("int",
+           "expr = max([1, 2, 3])");
+  }
+
+  // PY-22919
+  public void testMaxListUnknownElements() {
+    doTest("Any",
+           "l = []\n" +
+           "expr = max(l)");
+  }
+
+  public void testWithAsType() {
+    doTest("Union[A, B]",
+           "from typing import Union\n" +
+           "\n" +
+           "class A(object):\n" +
+           "    def __enter__(self):\n" +
+           "        return self\n" +
+           "\n" +
+           "class B(object):\n" +
+           "    def __enter__(self):\n" +
+           "        return self\n" +
+           "\n" +
+           "def f(x):\n" +
+           "    # type: (Union[A, B]) -> None\n" +
+           "    with x as expr:\n" +
+           "        pass");
+  }
+
+  // PY-23634
+  public void testMinListKnownElements() {
+    doTest("int",
+           "expr = min([1, 2, 3])");
+  }
+
+  // PY-23634
+  public void testMinListUnknownElements() {
+    doTest("Any",
+           "l = []\n" +
+           "expr = min(l)");
+  }
+
+  // PY-21906
+  public void testSOFOnTransitiveNamedTupleFields() {
+    final PyExpression expression = parseExpr("from collections import namedtuple\n" +
+                                              "class C:\n" +
+                                              "    FIELDS = ('a', 'b')\n" +
+                                              "FIELDS = C.FIELDS\n" +
+                                              "expr = namedtuple('Tup', FIELDS)");
+
+    getTypeEvalContexts(expression).forEach(context -> context.getType(expression));
+  }
+
+  // PY-22971
+  public void testFirstOverloadAndImplementationInClass() {
+    runWithLanguageLevel(
+      LanguageLevel.PYTHON35,
+      () -> doTest("int",
+                   "from typing import overload\n" +
+                   "class A:\n" +
+                   "    @overload\n" +
+                   "    def foo(self, value: int) -> int:\n" +
+                   "        pass\n" +
+                   "    @overload\n" +
+                   "    def foo(self, value: str) -> str:\n" +
+                   "        pass\n" +
+                   "    def foo(self, value):\n" +
+                   "        return None\n" +
+                   "expr = A().foo(5)")
+    );
+  }
+
+  // PY-22971
+  public void testTopLevelFirstOverloadAndImplementation() {
+    runWithLanguageLevel(
+      LanguageLevel.PYTHON35,
+      () -> doTest("int",
+                   "from typing import overload\n" +
+                   "@overload\n" +
+                   "def foo(value: int) -> int:\n" +
+                   "    pass\n" +
+                   "@overload\n" +
+                   "def foo(value: str) -> str:\n" +
+                   "    pass\n" +
+                   "def foo(value):\n" +
+                   "    return None\n" +
+                   "expr = foo(5)")
+    );
+  }
+
+  // PY-22971
+  public void testFirstOverloadAndImplementationInImportedClass() {
+    runWithLanguageLevel(
+      LanguageLevel.PYTHON35,
+      () -> doMultiFileTest("int",
+                            "from b import A\n" +
+                            "expr = A().foo(5)")
+    );
+  }
+
+  // PY-22971
+  public void testFirstOverloadAndImplementationInImportedModule() {
+    runWithLanguageLevel(
+      LanguageLevel.PYTHON35,
+      () -> doMultiFileTest("int",
+                            "from b import foo\n" +
+                            "expr = foo(5)")
+    );
+  }
+
+  // PY-22971
+  public void testSecondOverloadAndImplementationInClass() {
+    runWithLanguageLevel(
+      LanguageLevel.PYTHON35,
+      () -> doTest("str",
+                   "from typing import overload\n" +
+                   "class A:\n" +
+                   "    @overload\n" +
+                   "    def foo(self, value: int) -> int:\n" +
+                   "        pass\n" +
+                   "    @overload\n" +
+                   "    def foo(self, value: str) -> str:\n" +
+                   "        pass\n" +
+                   "    def foo(self, value):\n" +
+                   "        return None\n" +
+                   "expr = A().foo(\"5\")")
+    );
+  }
+
+  // PY-22971
+  public void testTopLevelSecondOverloadAndImplementation() {
+    runWithLanguageLevel(
+      LanguageLevel.PYTHON35,
+      () -> doTest("str",
+                   "from typing import overload\n" +
+                   "@overload\n" +
+                   "def foo(value: int) -> int:\n" +
+                   "    pass\n" +
+                   "@overload\n" +
+                   "def foo(value: str) -> str:\n" +
+                   "    pass\n" +
+                   "def foo(value):\n" +
+                   "    return None\n" +
+                   "expr = foo(\"5\")")
+    );
+  }
+
+  // PY-22971
+  public void testSecondOverloadAndImplementationInImportedClass() {
+    runWithLanguageLevel(
+      LanguageLevel.PYTHON35,
+      () -> doMultiFileTest("str",
+                            "from b import A\n" +
+                            "expr = A().foo(\"5\")")
+    );
+  }
+
+  // PY-22971
+  public void testSecondOverloadAndImplementationInImportedModule() {
+    runWithLanguageLevel(
+      LanguageLevel.PYTHON35,
+      () -> doMultiFileTest("str",
+                            "from b import foo\n" +
+                            "expr = foo(\"5\")")
+    );
+  }
+
+  // PY-22971
+  public void testNotMatchedOverloadsAndImplementationInClass() {
+    runWithLanguageLevel(
+      LanguageLevel.PYTHON35,
+      () -> doTest("Union[int, str]",
+                   "from typing import overload\n" +
+                   "class A:\n" +
+                   "    @overload\n" +
+                   "    def foo(self, value: int) -> int:\n" +
+                   "        pass\n" +
+                   "    @overload\n" +
+                   "    def foo(self, value: str) -> str:\n" +
+                   "        pass\n" +
+                   "    def foo(self, value):\n" +
+                   "        return None\n" +
+                   "expr = A().foo(object())")
+    );
+  }
+
+  // PY-22971
+  public void testTopLevelNotMatchedOverloadsAndImplementation() {
+    runWithLanguageLevel(
+      LanguageLevel.PYTHON35,
+      () -> doTest("Union[int, str]",
+                   "from typing import overload\n" +
+                   "@overload\n" +
+                   "def foo(value: int) -> int:\n" +
+                   "    pass\n" +
+                   "@overload\n" +
+                   "def foo(value: str) -> str:\n" +
+                   "    pass\n" +
+                   "def foo(value):\n" +
+                   "    return None\n" +
+                   "expr = foo(object())")
+    );
+  }
+
+  // PY-22971
+  public void testNotMatchedOverloadsAndImplementationInImportedClass() {
+    runWithLanguageLevel(
+      LanguageLevel.PYTHON35,
+      () -> doMultiFileTest("Union[int, str]",
+                            "from b import A\n" +
+                            "expr = A().foo(object())")
+    );
+  }
+
+  // PY-22971
+  public void testNotMatchedOverloadsAndImplementationInImportedModule() {
+    runWithLanguageLevel(
+      LanguageLevel.PYTHON35,
+      () -> doMultiFileTest("Union[int, str]",
+                            "from b import foo\n" +
+                            "expr = foo(object())")
+    );
+  }
+
+  // PY-24383
+  public void testSubscriptionOnWeakType() {
+    doTest("Union[int, Any]",
+           "foo = bar() if 42 != 42 else [1, 2, 3, 4]\n" +
+           "expr = foo[0]");
+  }
+
+  // PY-24364
+  public void testReassignedParameter() {
+    doTest("(entries: Any) -> Generator[Any, Any, None]",
+           "def resort(entries):\n" +
+           "    entries = list(entries)\n" +
+           "    entries.sort(reverse=True)\n" +
+           "    for entry in entries:\n" +
+           "        yield entry\n" +
+           "expr = resort");
+  }
+
+  public void testIsSubclass() {
+    doTest("Type[A]",
+           "class A: pass\n" +
+           "def foo(cls):\n" +
+           "    if issubclass(cls, A):\n" +
+           "        expr = cls");
+  }
+
+  public void testIsSubclassWithTupleOfTypeObjects() {
+    doTest("Type[Union[A, B]]",
+           "class A: pass\n" +
+           "class B: pass\n" +
+           "def foo(cls):\n" +
+           "    if issubclass(cls, (A, B)):\n" +
+           "        expr = cls");
+  }
+
+  // PY-24323
+  public void testMethodQualifiedWithUnknownGenericsInstance() {
+    doTest("(object: Any) -> int",
+           "my_list = []\n" +
+           "expr = my_list.count");
+  }
+
+  // PY-24323
+  public void testMethodQualifiedWithKnownGenericsInstance() {
+    doTest("(object: int) -> int",
+           "my_list = [1, 2, 2, 3, 3]\n" +
+           "expr = my_list.count");
+  }
+
+  public void testConstructingGenericClassWithNotFilledGenericValue() {
+    doTest("MyIterator",
+           "from typing import Iterator\n" +
+           "class MyIterator(Iterator[]):\n" +
+           "    def __init__(self) -> None:\n" +
+           "        self.other = \"other\"\n" +
+           "expr = MyIterator()");
+  }
+
+  // PY-24923
+  public void testEmptyNumpyFunctionDocstring() {
+    runWithDocStringFormat(DocStringFormat.NUMPY, () ->
+      doTest("Any",
+             "def f(param):\n" +
+             "    \"\"\"\"\"\"\n" +
+             "    expr = param"));
+  }
+
+  // PY-24923
+  public void testEmptyNumpyClassDocstring() {
+    runWithDocStringFormat(DocStringFormat.NUMPY, () ->
+      doTest("Any",
+             "class C:\n" +
+             "    \"\"\"\"\"\"\n" +
+             "    def __init__(self, param):\n" +
+             "        expr = param"));
+  }
+
+  // PY-21175
+  public void testNoneTypeFilteredOutByConditionalAssignment() {
+    doTest("List[int]",
+           "xs = None\n" +
+           "if xs is None:\n" +
+           "    xs = [1, 2, 3]\n" +
+           "expr = xs\n");
+  }
+
+  // PY-21175
+  public void testAnyAddedByConditionalDefinition() {
+    doTest("Union[str, Any]",
+           "def f(x, y):\n" +
+           "    if x:\n" +
+           "        var = y\n" +
+           "    else:\n" +
+           "        var = 'foo'\n" +
+           "    expr = var");
+  }
+
+  // PY-21626
+  public void testNestedConflictingIsNoneChecksInitialAny() {
+    doTest("Optional[Any]",
+           "def f(x):\n" +
+           "    if x is None:\n" +
+           "        if x is not None:\n" +
+           "            pass\n" +
+           "    expr = x");
+  }
+
+  // PY-21626
+  public void testNestedConflictingIsNoneChecksInitialKnown() {
+    doTest("Optional[str]",
+           "x = 'foo'\n" +
+           "if x is None:\n" +
+           "    if x is not None:\n" +
+           "        pass\n" +
+           "expr = x");
+  }
+
+  // PY-21175
+  public void testLazyAttributeInitialization() {
+    doTest("int",
+           "class C:\n" +
+           "    def __init__(self):\n" +
+           "        self.attr = None\n" +
+           "    \n" +
+           "    def m(self):\n" +
+           "        if self.attr is None:\n" +
+           "            self.attr = 42\n" +
+           "        expr = self.attr");
+  }
+
+  // PY-21175
+  public void testAssignmentToAttributeOfCallResultWithNameOfLocalVariable() {
+    doTest("int",
+           "def f(g):\n" +
+           "    x = 42\n" +
+           "    if True:\n" +
+           "        g().x = 'foo'\n" +
+           "    expr = x");
+  }
+
+  public void testTypingNTInheritor() {
+    runWithLanguageLevel(
+      LanguageLevel.PYTHON36,
+      () -> {
+        final PyExpression definition = parseExpr("from typing import NamedTuple\n" +
+                                                   "class User(NamedTuple):\n" +
+                                                   "    name: str\n" +
+                                                   "    level: int = 0\n" +
+                                                   "expr = User");
+
+        for (TypeEvalContext context : getTypeEvalContexts(definition)) {
+          final PyType type = context.getType(definition);
+          assertInstanceOf(type, PyClassType.class);
+
+          final List<PyClassLikeType> superClassTypes = ((PyClassType)type).getSuperClassTypes(context);
+          assertEquals(1, superClassTypes.size());
+
+          assertInstanceOf(superClassTypes.get(0), PyClassType.class);
+        }
+
+        final PyExpression instance = parseExpr("from typing import NamedTuple\n" +
+                                                   "class User(NamedTuple):\n" +
+                                                   "    name: str\n" +
+                                                   "    level: int = 0\n" +
+                                                   "expr = User(\"name\")");
+
+        for (TypeEvalContext context : getTypeEvalContexts(instance)) {
+          final PyType type = context.getType(instance);
+          assertInstanceOf(type, PyClassType.class);
+
+          final List<PyClassLikeType> superClassTypes = ((PyClassType)type).getSuperClassTypes(context);
+          assertEquals(1, superClassTypes.size());
+
+          assertInstanceOf(superClassTypes.get(0), PyClassType.class);
+        }
+      }
+    );
+  }
+
+  public void testTypingNTTarget() {
+    runWithLanguageLevel(
+      LanguageLevel.PYTHON36,
+      () -> {
+        final PyExpression definition = parseExpr("from typing import NamedTuple\n" +
+                                                  "User = NamedTuple(\"User\", name=str, level=int)\n" +
+                                                  "expr = User");
+
+        for (TypeEvalContext context : getTypeEvalContexts(definition)) {
+          assertInstanceOf(context.getType(definition), PyNamedTupleType.class);
+        }
+
+        final PyExpression instance = parseExpr("from typing import NamedTuple\n" +
+                                                  "User = NamedTuple(\"User\", name=str, level=int)\n" +
+                                                  "expr = User(\"name\")");
+
+        for (TypeEvalContext context : getTypeEvalContexts(instance)) {
+          assertInstanceOf(context.getType(instance), PyNamedTupleType.class);
+        }
+      }
+    );
+  }
+
+  public void testCollectionsNTInheritor() {
+    runWithLanguageLevel(
+      LanguageLevel.PYTHON36,
+      () -> {
+        final PyExpression definition = parseExpr("from collections import namedtuple\n" +
+                                                  "class User(namedtuple(\"User\", \"name level\")):\n" +
+                                                  "    pass\n" +
+                                                  "expr = User");
+
+        for (TypeEvalContext context : getTypeEvalContexts(definition)) {
+          final PyType type = context.getType(definition);
+          assertInstanceOf(type, PyClassType.class);
+
+          final List<PyClassLikeType> superClassTypes = ((PyClassType)type).getSuperClassTypes(context);
+          assertEquals(1, superClassTypes.size());
+
+          assertInstanceOf(superClassTypes.get(0), PyNamedTupleType.class);
+        }
+
+        final PyExpression instance = parseExpr("from collections import namedtuple\n" +
+                                                  "class User(namedtuple(\"User\", \"name level\")):\n" +
+                                                  "    pass\n" +
+                                                  "expr = User('MrRobot')");
+
+        for (TypeEvalContext context : getTypeEvalContexts(instance)) {
+          final PyType type = context.getType(instance);
+          assertInstanceOf(type, PyClassType.class);
+
+          final List<PyClassLikeType> superClassTypes = ((PyClassType)type).getSuperClassTypes(context);
+          assertEquals(1, superClassTypes.size());
+
+          assertInstanceOf(superClassTypes.get(0), PyNamedTupleType.class);
+        }
+      }
+    );
+  }
+
+  public void testCollectionsNTTarget() {
+    runWithLanguageLevel(
+      LanguageLevel.PYTHON36,
+      () -> {
+        final PyExpression definition = parseExpr("from collections import namedtuple\n" +
+                                                  "User = namedtuple(\"User\", \"name level\")\n" +
+                                                  "expr = User");
+
+        for (TypeEvalContext context : getTypeEvalContexts(definition)) {
+          assertInstanceOf(context.getType(definition), PyNamedTupleType.class);
+        }
+
+        final PyExpression instance = parseExpr("from collections import namedtuple\n" +
+                                                  "User = namedtuple(\"User\", \"name level\")\n" +
+                                                  "expr = User('MrRobot')");
+
+        for (TypeEvalContext context : getTypeEvalContexts(instance)) {
+          assertInstanceOf(context.getType(instance), PyNamedTupleType.class);
+        }
+      }
+    );
+  }
+
+  // PY-25157
+  public void testFunctionWithDifferentNamedTuplesAsParameterAndReturnTypes() {
+    runWithLanguageLevel(
+      LanguageLevel.PYTHON35,
+      () -> doTest("(a: MyType1) -> MyType2",
+                   "from collections import namedtuple\n" +
+                   "MyType1 = namedtuple('MyType1', 'x y')\n" +
+                   "MyType2 = namedtuple('MyType2', 'x y')\n" +
+                   "def foo(a: MyType1) -> MyType2:\n" +
+                   "    pass\n" +
+                   "expr = foo")
+    );
+  }
+
+  // PY-25346
+  public void testTypingNTInheritorField() {
+    runWithLanguageLevel(
+      LanguageLevel.PYTHON36,
+      () -> {
+        doTest("int",
+               "from typing import NamedTuple\n" +
+               "class User(NamedTuple):\n" +
+               "    name: str\n" +
+               "    level: int = 0\n" +
+               "expr = User(\"name\").level");
+      }
+    );
+  }
+
+  // PY-25346
+  public void testTypingNTTargetField() {
+    runWithLanguageLevel(
+      LanguageLevel.PYTHON36,
+      () -> {
+        doTest("int",
+               "from typing import NamedTuple\n" +
+               "User = NamedTuple(\"User\", name=str, level=int)\n" +
+               "expr = User(\"name\").level");
+      }
+    );
+  }
+
+  // PY-18791
+  public void testCallOnProperty() {
+    runWithLanguageLevel(
+      LanguageLevel.PYTHON35,
+      () -> doTest("Iterator[int]",
+                   "from typing import Iterator, Callable\n" +
+                   "class Foo:\n" +
+                   "    def iterate(self) -> Iterator[int]:\n" +
+                   "        pass\n" +
+                   "    @property\n" +
+                   "    def foo(self) -> Callable[[], Iterator[int]]:\n" +
+                   "        return self.iterate\n" +
+                   "expr = Foo().foo()")
+    );
+  }
+
   private static List<TypeEvalContext> getTypeEvalContexts(@NotNull PyExpression element) {
     return ImmutableList.of(TypeEvalContext.codeAnalysis(element.getProject(), element.getContainingFile()).withTracing(),
                             TypeEvalContext.userInitiated(element.getProject(), element.getContainingFile()).withTracing());
@@ -1115,9 +2249,7 @@ public class PyTypeTest extends PyTestCase {
   }
 
   private static void doTest(final String expectedType, final PyExpression expr, final TypeEvalContext context) {
-    PyType actual = context.getType(expr);
-    final String actualType = PythonDocumentationProvider.getTypeName(actual, context);
-    assertEquals(expectedType, actualType);
+    assertType(expectedType, expr, context);
   }
 
   private void doTest(@NotNull final String expectedType, @NotNull final String text) {
@@ -1127,9 +2259,7 @@ public class PyTypeTest extends PyTestCase {
   private static void checkTypes(@NotNull String expectedType, @Nullable PyExpression expr) {
     assertNotNull(expr);
     for (TypeEvalContext context : getTypeEvalContexts(expr)) {
-      final PyType actual = context.getType(expr);
-      final String actualType = PythonDocumentationProvider.getTypeName(actual, context);
-      assertEquals("Failed in " + context, expectedType, actualType);
+      assertType(expectedType, expr, context);
     }
   }
 

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,10 +17,12 @@ package com.jetbrains.python.psi.impl;
 
 import com.google.common.base.Preconditions;
 import com.intellij.lang.ASTNode;
+import com.intellij.lang.injection.InjectedLanguageManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.module.Module;
-import com.intellij.openapi.util.Couple;
+import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
+import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.*;
 import com.intellij.psi.stubs.StubElement;
 import com.intellij.psi.tree.IElementType;
@@ -28,6 +30,7 @@ import com.intellij.psi.tree.TokenSet;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.psi.util.PsiUtilCore;
 import com.intellij.psi.util.QualifiedName;
+import com.intellij.util.ObjectUtils;
 import com.intellij.util.containers.ContainerUtil;
 import com.jetbrains.python.PyTokenTypes;
 import com.jetbrains.python.psi.*;
@@ -36,6 +39,7 @@ import org.jetbrains.annotations.Nullable;
 
 import java.lang.reflect.Array;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
 
@@ -73,7 +77,7 @@ public class PyPsiUtils {
    */
   @Nullable
   public static PsiElement getPrevNonWhitespaceSibling(@Nullable PsiElement element) {
-    return PsiTreeUtil.skipSiblingsBackward(element, PsiWhiteSpace.class);
+    return PsiTreeUtil.skipWhitespacesBackward(element);
   }
 
   /**
@@ -93,7 +97,7 @@ public class PyPsiUtils {
     if (!strict && !(start instanceof PsiWhiteSpace || start instanceof PsiComment)) {
       return start;
     }
-    return PsiTreeUtil.skipSiblingsBackward(start, PsiWhiteSpace.class, PsiComment.class);
+    return PsiTreeUtil.skipWhitespacesAndCommentsBackward(start);
   }
 
   /**
@@ -110,11 +114,11 @@ public class PyPsiUtils {
    */
   @Nullable
   public static PsiElement getNextNonWhitespaceSibling(@Nullable PsiElement element) {
-    return PsiTreeUtil.skipSiblingsForward(element, PsiWhiteSpace.class);
+    return PsiTreeUtil.skipWhitespacesForward(element);
   }
 
   /**
-   * Finds first non-whitespace sibling after given PSI element but stops at first whitespace containing line feed.  
+   * Finds first non-whitespace sibling after given PSI element but stops at first whitespace containing line feed.
    */
   @Nullable
   public static PsiElement getNextNonWhitespaceSiblingOnSameLine(@NotNull PsiElement element) {
@@ -130,7 +134,7 @@ public class PyPsiUtils {
     }
     return null;
   }
-  
+
   /**
    * Finds first non-whitespace sibling after given AST node.
    */
@@ -148,7 +152,7 @@ public class PyPsiUtils {
     if (!strict && !(start instanceof PsiWhiteSpace || start instanceof PsiComment)) {
       return start;
     }
-    return PsiTreeUtil.skipSiblingsForward(start, PsiWhiteSpace.class, PsiComment.class);
+    return PsiTreeUtil.skipWhitespacesAndCommentsForward(start);
   }
 
   /**
@@ -359,15 +363,9 @@ public class PyPsiUtils {
     final PsiFile file = element.getContainingFile();
     if (file instanceof PyExpressionCodeFragment) {
       final PsiElement context = file.getContext();
-      if (LOG.isDebugEnabled()) {
-        LOG.debug("PyPsiUtil.getRealContext(" + element + ") is called. Returned " + context + ". Element inside code fragment");
-      }
       return context != null ? context : element;
     }
     else {
-      if (LOG.isDebugEnabled()) {
-        LOG.debug("PyPsiUtil.getRealContext(" + element + ") is called. Returned " + element + ".");
-      }
       return element;
     }
   }
@@ -397,35 +395,34 @@ public class PyPsiUtils {
    * @param element element comments should be adjacent to
    * @return described range or {@code null} if there are no such comments
    */
-  @Nullable
-  public static Couple<PsiComment> getPrecedingComments(@NotNull PsiElement element) {
-    PsiComment firstComment = null, lastComment = null;
-    overComments:
+  @NotNull
+  public static List<PsiComment> getPrecedingComments(@NotNull PsiElement element) {
+    return getPrecedingComments(element, true);
+  }
+
+  @NotNull
+  public static List<PsiComment> getPrecedingComments(@NotNull PsiElement element, boolean stopAtBlankLine) {
+    final ArrayList<PsiComment> result = new ArrayList<>();
     while (true) {
       int newLinesCount = 0;
       for (element = element.getPrevSibling(); element instanceof PsiWhiteSpace; element = element.getPrevSibling()) {
         newLinesCount += StringUtil.getLineBreakCount(element.getText());
-        if (newLinesCount > 1) {
-          break overComments;
-        }
       }
-      if (element instanceof PsiComment) {
-        if (lastComment == null) {
-          lastComment = (PsiComment)element;
-        }
-        firstComment = (PsiComment)element;
-      }
-      else {
+      if ((stopAtBlankLine && newLinesCount > 1) || !(element instanceof PsiComment)) {
         break;
       }
+      else {
+        result.add((PsiComment)element);
+      }
     }
-    return lastComment == null ? null : Couple.of(firstComment, lastComment);
+    Collections.reverse(result);
+    return result;
   }
 
   @NotNull
-  static <T, U extends PsiElement> List<T> collectStubChildren(U e,
-                                                               final StubElement<U> stub, final IElementType elementType,
-                                                               final Class<T> itemClass) {
+  static <T, U extends PsiElement> List<T> collectStubChildren(@NotNull U e,
+                                                               @Nullable StubElement<U> stub,
+                                                               @NotNull IElementType elementType) {
     final List<T> result = new ArrayList<>();
     if (stub != null) {
       final List<StubElement> children = stub.getChildrenStubs();
@@ -553,13 +550,13 @@ public class PyPsiUtils {
     return expr instanceof PyQualifiedExpression ? ((PyQualifiedExpression)expr).asQualifiedName() : null;
   }
 
-  @Nullable
+  @NotNull
   public static PyExpression getFirstQualifier(@NotNull PyQualifiedExpression expr) {
-    final List<PyExpression> expressions = unwindQualifiers(expr);
-    if (!expressions.isEmpty()) {
-      return expressions.get(0);
+    final PyExpression qualifier = expr.getQualifier();
+    if (qualifier instanceof PyQualifiedExpression) {
+      return getFirstQualifier((PyQualifiedExpression)qualifier);
     }
-    return null;
+    return expr;
   }
 
   @NotNull
@@ -579,32 +576,26 @@ public class PyPsiUtils {
 
   @Nullable
   protected static QualifiedName asQualifiedName(@NotNull PyQualifiedExpression expr) {
-    return fromReferenceChain(unwindQualifiers(expr));
-  }
-
-  @NotNull
-  private static List<PyExpression> unwindQualifiers(@NotNull final PyQualifiedExpression expr) {
-    final List<PyExpression> path = new LinkedList<>();
-    PyQualifiedExpression e = expr;
-    while (e != null) {
-      path.add(0, e);
-      final PyExpression q = e.getQualifier();
-      e = q instanceof PyQualifiedExpression ? (PyQualifiedExpression)q : null;
+    final List<String> path = new LinkedList<>();
+    final String firstName = expr.getReferencedName();
+    if (firstName == null) {
+      return null;
     }
-    return path;
-  }
-
-  @Nullable
-  private static QualifiedName fromReferenceChain(@NotNull List<PyExpression> components) {
-    final List<String> componentNames = new ArrayList<>(components.size());
-    for (PyExpression component : components) {
-      final String refName = (component instanceof PyQualifiedExpression) ? ((PyQualifiedExpression)component).getReferencedName() : null;
-      if (refName == null) {
+    path.add(firstName);
+    PyExpression qualifier = expr.getQualifier();
+    while (qualifier != null) {
+      final PyReferenceExpression qualifierReference = ObjectUtils.tryCast(qualifier, PyReferenceExpression.class);
+      if (qualifierReference == null) {
         return null;
       }
-      componentNames.add(refName);
+      final String qualifierName = qualifierReference.getReferencedName();
+      if (qualifierName == null) {
+        return null;
+      }
+      path.add(0, qualifierName);
+      qualifier = qualifierReference.getQualifier();
     }
-    return QualifiedName.fromComponents(componentNames);
+    return QualifiedName.fromComponents(path);
   }
 
   /**
@@ -621,12 +612,27 @@ public class PyPsiUtils {
     Preconditions.checkArgument(!module.isDisposed(), String.format("Module %s is disposed", module));
   }
 
-  @NotNull
+  @Nullable
   public static PsiFileSystemItem getFileSystemItem(@NotNull PsiElement element) {
     if (element instanceof PsiFileSystemItem) {
       return (PsiFileSystemItem)element;
     }
     return element.getContainingFile();
+  }
+
+  @Nullable
+  public static String getContainingFilePath(@NotNull PsiElement element) {
+    final VirtualFile file;
+    if (element instanceof PsiFileSystemItem) {
+      file = ((PsiFileSystemItem)element).getVirtualFile();
+    }
+    else {
+      file = element.getContainingFile().getVirtualFile();
+    }
+    if (file != null) {
+      return FileUtil.toSystemDependentName(file.getPath());
+    }
+    return null;
   }
 
   private static abstract class TopLevelVisitor extends PyRecursiveElementVisitor {
@@ -644,5 +650,23 @@ public class PyPsiUtils {
     }
 
     protected abstract void checkAddElement(PsiElement node);
+  }
+
+  /**
+   * Returns text of the given PSI element. Unlike obvious {@link PsiElement#getText()} this method unescapes text of the element if latter
+   * belongs to injected code fragment using {@link InjectedLanguageManager#getUnescapedText(PsiElement)}.
+   *
+   * @param element PSI element which text is needed
+   * @return text of the element with any host escaping removed
+   */
+  @NotNull
+  public static String getElementTextWithoutHostEscaping(@NotNull PsiElement element) {
+    final InjectedLanguageManager manager = InjectedLanguageManager.getInstance(element.getProject());
+    if (manager.isInjectedFragment(element.getContainingFile())) {
+      return manager.getUnescapedText(element);
+    }
+    else {
+      return element.getText();
+    }
   }
 }

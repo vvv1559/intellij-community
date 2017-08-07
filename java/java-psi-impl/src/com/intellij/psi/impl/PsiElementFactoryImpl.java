@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -70,12 +70,7 @@ public class PsiElementFactoryImpl extends PsiJavaParserFacadeImpl implements Ps
 
   public PsiElementFactoryImpl(final PsiManagerEx manager) {
     super(manager);
-    manager.registerRunnableToRunOnChange(new Runnable() {
-      @Override
-      public void run() {
-        myCachedObjectType.clear();
-      }
-    });
+    manager.registerRunnableToRunOnChange(() -> myCachedObjectType.clear());
   }
 
   @NotNull
@@ -226,7 +221,7 @@ public class PsiElementFactoryImpl extends PsiJavaParserFacadeImpl implements Ps
       throw new IncorrectOperationException("Cannot create field with type \"null\".");
     }
 
-    @NonNls final String text = "class _Dummy_ { private " + type.getCanonicalText(true) + " " + name + "; }";
+    @NonNls final String text = "class _Dummy_ { private " + GenericsUtil.getVariableTypeByExpressionType(type).getCanonicalText(true) + " " + name + "; }";
     final PsiJavaFile aFile = createDummyJavaFile(text);
     final PsiClass[] classes = aFile.getClasses();
     if (classes.length < 1) {
@@ -250,8 +245,8 @@ public class PsiElementFactoryImpl extends PsiJavaParserFacadeImpl implements Ps
       throw new IncorrectOperationException("Cannot create method with type \"null\".");
     }
 
-    final String canonicalText = returnType.getCanonicalText(true);
-    final PsiJavaFile aFile = createDummyJavaFile("class _Dummy_ { public " + canonicalText + " " + name + "() {} }");
+    final String canonicalText = GenericsUtil.getVariableTypeByExpressionType(returnType).getCanonicalText(true);
+    final PsiJavaFile aFile = createDummyJavaFile("class _Dummy_ { public " + canonicalText + " " + name + "() {\n} }");
     final PsiClass[] classes = aFile.getClasses();
     if (classes.length < 1) {
       throw new IncorrectOperationException("Class was not created. Method name: " + name + "; return type: " + canonicalText);
@@ -268,7 +263,7 @@ public class PsiElementFactoryImpl extends PsiJavaParserFacadeImpl implements Ps
   @NotNull
   @Override
   public PsiMethod createMethod(@NotNull @NonNls String name, PsiType returnType, PsiElement context) throws IncorrectOperationException {
-    return createMethodFromText("public " + returnType.getCanonicalText(true) + " " + name + "() {}", context);
+    return createMethodFromText("public " + GenericsUtil.getVariableTypeByExpressionType(returnType).getCanonicalText(true) + " " + name + "() {}", context);
   }
 
   @NotNull
@@ -362,7 +357,7 @@ public class PsiElementFactoryImpl extends PsiJavaParserFacadeImpl implements Ps
   public PsiSubstitutor createRawSubstitutor(@NotNull final PsiTypeParameterListOwner owner) {
     Map<PsiTypeParameter, PsiType> substitutorMap = null;
     for (PsiTypeParameter parameter : PsiUtil.typeParametersIterable(owner)) {
-      if (substitutorMap == null) substitutorMap = new HashMap<PsiTypeParameter, PsiType>();
+      if (substitutorMap == null) substitutorMap = new HashMap<>();
       substitutorMap.put(parameter, null);
     }
     return PsiSubstitutorImpl.createSubstitutor(substitutorMap);
@@ -373,7 +368,7 @@ public class PsiElementFactoryImpl extends PsiJavaParserFacadeImpl implements Ps
   public PsiSubstitutor createRawSubstitutor(@NotNull final PsiSubstitutor baseSubstitutor, @NotNull final PsiTypeParameter[] typeParameters) {
     Map<PsiTypeParameter, PsiType> substitutorMap = null;
     for (PsiTypeParameter parameter : typeParameters) {
-      if (substitutorMap == null) substitutorMap = new HashMap<PsiTypeParameter, PsiType>();
+      if (substitutorMap == null) substitutorMap = new HashMap<>();
       substitutorMap.put(parameter, null);
     }
     return PsiSubstitutorImpl.createSubstitutor(substitutorMap).putAll(baseSubstitutor);
@@ -641,7 +636,7 @@ public class PsiElementFactoryImpl extends PsiJavaParserFacadeImpl implements Ps
     PsiDeclarationStatement statement = (PsiDeclarationStatement)createStatementFromText(text, context);
 
     PsiVariable variable = (PsiVariable)statement.getDeclaredElements()[0];
-    replace(variable.getTypeElement(), createTypeElement(type), text);
+    replace(variable.getTypeElement(), createTypeElement(GenericsUtil.getVariableTypeByExpressionType(type)), text);
 
     boolean generateFinalLocals = JavaCodeStyleSettingsFacade.getInstance(myManager.getProject()).isGenerateFinalLocals();
     PsiUtil.setModifierProperty(variable, PsiModifier.FINAL, generateFinalLocals);
@@ -679,6 +674,16 @@ public class PsiElementFactoryImpl extends PsiJavaParserFacadeImpl implements Ps
   public PsiAnnotation createAnnotationFromText(@NotNull final String annotationText, @Nullable final PsiElement context) throws IncorrectOperationException {
     final PsiAnnotation psiAnnotation = super.createAnnotationFromText(annotationText, context);
     GeneratedMarkerVisitor.markGenerated(psiAnnotation);
+    return psiAnnotation;
+  }
+
+  public PsiAnnotation createAnnotationFromText(@NotNull final String annotationText,
+                                                @Nullable final PsiElement context,
+                                                boolean markGenerated) throws IncorrectOperationException {
+    final PsiAnnotation psiAnnotation = super.createAnnotationFromText(annotationText, context);
+    if (markGenerated) {
+      GeneratedMarkerVisitor.markGenerated(psiAnnotation);
+    }
     return psiAnnotation;
   }
 

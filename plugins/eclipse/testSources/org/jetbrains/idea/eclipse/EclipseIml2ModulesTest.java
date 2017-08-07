@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,16 +14,11 @@
  * limitations under the License.
  */
 
-/*
- * User: anna
- * Date: 28-Nov-2008
- */
 package org.jetbrains.idea.eclipse;
 
 import org.jetbrains.annotations.NotNull;
 
 public class EclipseIml2ModulesTest extends Eclipse2ModulesTest {
-
   @Override
   protected String getTestPath() {
     return "iml";

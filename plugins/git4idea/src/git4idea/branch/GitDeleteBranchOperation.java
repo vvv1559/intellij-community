@@ -20,17 +20,19 @@ import com.intellij.notification.Notification;
 import com.intellij.notification.NotificationAction;
 import com.intellij.notification.NotificationType;
 import com.intellij.openapi.actionSystem.AnActionEvent;
-import com.intellij.openapi.components.ServiceManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.Task;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Key;
+import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.vcs.VcsException;
 import com.intellij.openapi.vcs.VcsNotifier;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.MultiMap;
+import com.intellij.vcs.log.Hash;
 import git4idea.GitCommit;
+import git4idea.GitLocalBranch;
 import git4idea.commands.*;
 import git4idea.config.GitVersionSpecialty;
 import git4idea.history.GitHistoryUtils;
@@ -45,7 +47,6 @@ import java.util.regex.Pattern;
 
 import static com.intellij.dvcs.DvcsUtil.getShortRepositoryName;
 import static com.intellij.openapi.vcs.VcsNotifier.STANDARD_NOTIFICATION;
-import static com.intellij.util.ObjectUtils.assertNotNull;
 import static com.intellij.util.containers.ContainerUtil.exists;
 
 /**
@@ -75,9 +76,19 @@ class GitDeleteBranchOperation extends GitBranchOperation {
     myNotifier = VcsNotifier.getInstance(myProject);
     myTrackedBranches = groupByTrackedBranchName(branchName, repositories);
     myUnmergedToBranches = ContainerUtil.newHashMap();
-    myDeletedBranchTips = Maps.toMap(repositories, (GitRepository repo) -> {
+    myDeletedBranchTips = ContainerUtil.map2MapNotNull(repositories, (GitRepository repo) -> {
       GitBranchesCollection branches = repo.getBranches();
-      return assertNotNull(branches.getHash(assertNotNull(branches.findLocalBranch(myBranchName)))).asString();
+      GitLocalBranch branch = branches.findLocalBranch(myBranchName);
+      if (branch == null) {
+        LOG.error("Couldn't find branch by name " + myBranchName + " in " + repo);
+        return null;
+      }
+      Hash hash = branches.getHash(branch);
+      if (hash == null) {
+        LOG.error("Couldn't find hash for branch " + branch + " in " + repo);
+        return null;
+      }
+      return Pair.create(repo, hash.asString());
     });
   }
 
@@ -260,7 +271,7 @@ class GitDeleteBranchOperation extends GitBranchOperation {
         history.put(repository, getUnmergedCommits(repository, unmergedInfo.myTipOfDeletedUnmergedBranch, unmergedInfo.myBaseBranch));
       }
       else {
-        history.put(repository, Collections.<GitCommit>emptyList());
+        history.put(repository, Collections.emptyList());
       }
     }
     Map<GitRepository, String> baseBranches = Maps.asMap(unmergedBranches.keySet(), it -> unmergedBranches.get(it).myBaseBranch);
@@ -337,7 +348,7 @@ class GitDeleteBranchOperation extends GitBranchOperation {
     new Task.Backgroundable(myProject, "Deleting Remote Branch " + myBranchName + "...") {
       @Override
       public void run(@NotNull ProgressIndicator indicator) {
-        GitBrancher brancher = ServiceManager.getService(getProject(), GitBrancher.class);
+        GitBrancher brancher = GitBrancher.getInstance(getProject());
         for (String remoteBranch : myTrackedBranches.keySet()) {
           brancher.deleteRemoteBranch(remoteBranch, new ArrayList<>(myTrackedBranches.get(remoteBranch)));
         }

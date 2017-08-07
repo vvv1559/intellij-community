@@ -16,7 +16,6 @@
 package com.intellij.codeInsight.daemon.impl.analysis;
 
 import com.intellij.application.options.XmlSettings;
-import com.intellij.codeInsight.FileModificationService;
 import com.intellij.codeInsight.completion.ExtendedTagInsertHandler;
 import com.intellij.codeInsight.daemon.XmlErrorMessages;
 import com.intellij.codeInsight.daemon.impl.ShowAutoImportPass;
@@ -28,6 +27,7 @@ import com.intellij.codeInspection.LocalQuickFix;
 import com.intellij.codeInspection.ProblemDescriptor;
 import com.intellij.javaee.ExternalResourceManager;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.WriteAction;
 import com.intellij.openapi.command.CommandProcessor;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Editor;
@@ -114,12 +114,6 @@ public class CreateNSDeclarationIntentionFix implements HintAction, LocalQuickFi
 
   @Override
   @NotNull
-  public String getName() {
-    return getFamilyName();
-  }
-
-  @Override
-  @NotNull
   public String getFamilyName() {
     return getText();
   }
@@ -162,8 +156,6 @@ public class CreateNSDeclarationIntentionFix implements HintAction, LocalQuickFi
 
   @Override
   public void invoke(@NotNull final Project project, final Editor editor, final PsiFile file) throws IncorrectOperationException {
-    if (!FileModificationService.getInstance().prepareFileForWrite(file)) return;
-
     final PsiElement element = myElement.retrieve();
     if (element == null) return;
     XmlFile xmlFile = getFile();
@@ -346,7 +338,10 @@ public class CreateNSDeclarationIntentionFix implements HintAction, LocalQuickFi
         createPopup().
         showInBestPositionFor(editor);
     } else {
-      onSelection.doSomethingWithGivenStringToProduceXmlAttributeNowPlease(namespacesToChooseFrom.length == 0 ? "" : namespacesToChooseFrom[0]);
+      WriteAction.run(() -> {
+        String attrName = namespacesToChooseFrom.length == 0 ? "" : namespacesToChooseFrom[0];
+        onSelection.doSomethingWithGivenStringToProduceXmlAttributeNowPlease(attrName);
+      });
     }
   }
 

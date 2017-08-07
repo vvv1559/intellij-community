@@ -15,18 +15,19 @@
  */
 package com.intellij.ui.components;
 
+import com.intellij.notification.Notification;
+import com.intellij.notification.NotificationGroup;
+import com.intellij.notification.NotificationType;
 import com.intellij.openapi.ui.TypingTarget;
 import com.intellij.openapi.util.SystemInfo;
-import com.intellij.openapi.util.registry.Registry;
 import com.intellij.ui.components.JBScrollPane.Alignment;
 import com.intellij.ui.table.JBTable;
-import com.intellij.util.ui.ComponentWithEmptyText;
-import com.intellij.util.ui.JBSwingUtilities;
-import com.intellij.util.ui.StatusText;
-import com.intellij.util.ui.UIUtil;
+import com.intellij.util.MethodInvocator;
+import com.intellij.util.ui.*;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
+import javax.swing.Timer;
 import javax.swing.border.AbstractBorder;
 import javax.swing.border.Border;
 import javax.swing.plaf.TreeUI;
@@ -36,12 +37,23 @@ import java.awt.*;
 import java.awt.event.ContainerEvent;
 import java.awt.event.ContainerListener;
 
+import static com.intellij.util.ui.JBUI.emptyInsets;
+
 public class JBViewport extends JViewport implements ZoomableViewport {
+  private static final MethodInvocator ourCanUseWindowBlitterMethod = new MethodInvocator(JViewport.class, "canUseWindowBlitter");
+  private static final MethodInvocator ourGetPaintManagerMethod = new MethodInvocator(RepaintManager.class, "getPaintManager");
+  private static final MethodInvocator ourGetUseTrueDoubleBufferingMethod = new MethodInvocator(JRootPane.class, "getUseTrueDoubleBuffering");
+
+  private static final NotificationGroup NOTIFICATION_GROUP = NotificationGroup.logOnlyGroup("scrolling-capabilities-debug");
+  private static final int NOTIFICATION_TIMEOUT = 1500;
+
+  private Notification myPreviousNotification;
+
   private static final ViewportLayout ourLayoutManager = new ViewportLayout() {
 
     @Override
     public void layoutContainer(Container parent) {
-      if (parent instanceof JViewport && Registry.is("ide.scroll.new.layout")) {
+      if (parent instanceof JViewport) {
         JViewport viewport = (JViewport)parent;
         Component view = viewport.getView();
         if (view != null) {
@@ -53,38 +65,7 @@ public class JBViewport extends JViewport implements ZoomableViewport {
             super.layoutContainer(parent);
           }
         }
-        return;
       }
-      JBViewport viewport = (JBViewport)parent;
-      Component view = viewport.getView();
-      JBScrollPane scrollPane = UIUtil.getParentOfType(JBScrollPane.class, parent);
-      // do not force viewport size on editor component, e.g. EditorTextField and LanguageConsole
-      if (view == null || scrollPane == null || view instanceof TypingTarget) {
-        super.layoutContainer(parent);
-        return;
-      }
-
-      Dimension size = doSuperLayoutContainer(viewport);
-
-      Dimension visible = viewport.getExtentSize();
-      if (scrollPane.getHorizontalScrollBarPolicy() == ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER) {
-        size.width = visible.width;
-      }
-      if (scrollPane.getVerticalScrollBarPolicy() == ScrollPaneConstants.VERTICAL_SCROLLBAR_NEVER) {
-        size.height = visible.height;
-      }
-      viewport.setViewSize(size);
-    }
-
-    private Dimension doSuperLayoutContainer(JBViewport viewport) {
-      try {
-        viewport.mySaveTempViewSize = true;
-        super.layoutContainer(viewport);
-      }
-      finally {
-        viewport.mySaveTempViewSize = false;
-      }
-      return viewport.myTempViewSize;
     }
   };
 
@@ -93,8 +74,6 @@ public class JBViewport extends JViewport implements ZoomableViewport {
 
   private ZoomingDelegate myZoomer;
 
-  private Dimension myTempViewSize;
-  private boolean mySaveTempViewSize;
   private volatile boolean myBackgroundRequested; // avoid cyclic references
 
   public JBViewport() {
@@ -120,9 +99,107 @@ public class JBViewport extends JViewport implements ZoomableViewport {
   }
 
   @Override
+  public void setViewPosition(Point p) {
+    if (ScrollSettings.isDebugEnabled() && !p.equals(getViewPosition()) && !isInsideLogToolWindow()) {
+      checkScrollingCapabilities();
+    }
+    super.setViewPosition(p);
+  }
+
+  // A heuristic to detect whether this viewport belongs to the "Event Log" tool window (which we use for output)
+  private boolean isInsideLogToolWindow() {
+    Container parent1 = getParent();
+    if (parent1 instanceof JScrollPane) {
+      Container parent2 = parent1.getParent();
+      if (parent2 instanceof JPanel) {
+        Container parent3 = parent2.getParent();
+        if (parent3 instanceof JPanel) {
+          return parent3.getClass().getName().startsWith("com.intellij.notification.EventLogToolWindowFactory");
+        }
+      }
+    }
+
+    return false;
+  }
+
+  // Checks whether blit-accelerated scrolling is feasible, and if so, checks whether true double buffering is available.
+  private void checkScrollingCapabilities() {
+    if (myPreviousNotification == null || myPreviousNotification.isExpired()) {
+      if (!Boolean.TRUE.equals(isWindowBlitterAvailableFor(this))) {
+        myPreviousNotification = notify("Scrolling: cannot use window blitter");
+      }
+      else {
+        if (!Boolean.TRUE.equals(isTrueDoubleBufferingAvailableFor(this))) {
+          myPreviousNotification = notify("Scrolling: cannot use true double buffering");
+        }
+      }
+    }
+  }
+
+  /* Blit-acceleration copies as much of the rendered area as possible and then repaints only newly exposed region.
+     This helps to improve scrolling performance and to reduce CPU usage (especially if drawing is compute-intensive).
+
+     Generally, this requires that viewport must not be obscured by its ancestors and must be showing. */
+  @Nullable
+  private static Boolean isWindowBlitterAvailableFor(JViewport viewport) {
+    if (ourCanUseWindowBlitterMethod.isAvailable()) {
+      return (Boolean)ourCanUseWindowBlitterMethod.invoke(viewport);
+    }
+
+    return null;
+  }
+
+  @Override
+  public void setView(Component view) {
+    super.setView(view);
+    updateBorder(view);
+  }
+
+  /* True double buffering is needed to eliminate tearing on blit-accelerated scrolling and to restore
+     frame buffer content without the usual repainting, even when the EDT is blocked.
+
+     Generally, this requires default RepaintManager, swing.bufferPerWindow = true and
+     no prior direct invocations of JComponent.getGraphics() within JRootPane.
+
+     Use a breakpoint in JRootPane.disableTrueDoubleBuffering() to detect direct getGraphics() calls.
+
+     See GraphicsUtil.safelyGetGraphics() for more info. */
+  @Nullable
+  private static Boolean isTrueDoubleBufferingAvailableFor(JComponent component) {
+    if (ourGetPaintManagerMethod.isAvailable()) {
+      Object paintManager = ourGetPaintManagerMethod.invoke(RepaintManager.currentManager(component));
+
+      if (!"javax.swing.BufferStrategyPaintManager".equals(paintManager.getClass().getName())) {
+        return false;
+      }
+
+      if (ourGetUseTrueDoubleBufferingMethod.isAvailable()) {
+        JRootPane rootPane = component.getRootPane();
+
+        if (rootPane != null) {
+          return (Boolean)ourGetUseTrueDoubleBufferingMethod.invoke(rootPane);
+        }
+      }
+    }
+
+    return null;
+  }
+
+  private static Notification notify(String message) {
+    Notification notification = NOTIFICATION_GROUP.createNotification(message, NotificationType.INFORMATION);
+    notification.notify(null);
+
+    Timer timer = new Timer(NOTIFICATION_TIMEOUT, event -> notification.expire());
+    timer.setRepeats(false);
+    timer.start();
+
+    return notification;
+  }
+
+  @Override
   public Color getBackground() {
     Color color = super.getBackground();
-    if (!myBackgroundRequested && EventQueue.isDispatchThread() && Registry.is("ide.scroll.background.auto")) {
+    if (!myBackgroundRequested && EventQueue.isDispatchThread() && ScrollSettings.isBackgroundFromView()) {
       if (!isBackgroundSet() || color instanceof UIResource) {
         Component child = getView();
         if (child != null) {
@@ -142,18 +219,6 @@ public class JBViewport extends JViewport implements ZoomableViewport {
   @Override
   protected LayoutManager createLayoutManager() {
     return ourLayoutManager;
-  }
-
-  @Override
-  public void setViewSize(Dimension newSize) {
-    // only store newSize from ViewportLayout.layoutContainer
-    // if we're going to fix it the next moment in our layoutContainer code
-    if (mySaveTempViewSize) {
-      myTempViewSize = newSize;
-    }
-    else {
-      super.setViewSize(newSize);
-    }
   }
 
   @Override
@@ -204,39 +269,63 @@ public class JBViewport extends JViewport implements ZoomableViewport {
     return myPaintingNow;
   }
 
-  /**
-   * Returns the alignment of the specified scroll bar
-   * if and only if the specified scroll bar
-   * is located over the main viewport.
-   *
-   * @param bar the scroll bar to process
-   * @return the scroll bar alignment or {@code null}
-   */
-  private static Alignment getAlignment(JScrollBar bar) {
-    if (bar != null && bar.isVisible() && !bar.isOpaque()) {
-      return UIUtil.getClientProperty(bar, Alignment.class);
+  @Override
+  public void scrollRectToVisible(Rectangle bounds) {
+    Component view = getView();
+    if (view instanceof JComponent && !isAutoscroll(bounds)) {
+      JBInsets.addTo(bounds, getViewInsets((JComponent)view));
     }
-    return null;
+    super.scrollRectToVisible(bounds);
   }
 
-  private static boolean isAlignmentNeeded(JComponent view) {
-    return !SystemInfo.isMac && (view instanceof JList || view instanceof JTree || Registry.is("ide.scroll.align.component"));
-  }
-
-  static void fixPreferredSize(Dimension size, JComponent view, JScrollBar vsb, JScrollBar hsb) {
-    if (!view.isPreferredSizeSet()) {
-      Border border = view.getBorder();
-      if (border instanceof ViewBorder) {
-        Alignment va = getAlignment(vsb);
-        if (va == Alignment.LEFT || va == Alignment.RIGHT && isAlignmentNeeded(view)) {
-          size.width -= vsb.getWidth();
-        }
-        Alignment ha = getAlignment(hsb);
-        if (ha == Alignment.TOP || ha == Alignment.BOTTOM && isAlignmentNeeded(view)) {
-          size.height -= hsb.getHeight();
-        }
+  /**
+   * @param bounds a bounds passed to {@link #scrollRectToVisible}
+   * @return {@code true} if the specified bounds requested by auto-scrolling
+   */
+  private boolean isAutoscroll(Rectangle bounds) {
+    if (bounds.x == -bounds.width || bounds.x == getWidth()) {
+      if (bounds.y + bounds.height + bounds.y == getHeight()) {
+        // Horizontal auto-scrolling:
+        //          /---   or   ---\
+        //          y              y
+        //  /-width-!              !-width-\
+        //  !       !              !       !
+        //  h       !              !       h
+        //  e       !              !       e
+        //  i       !              !       i
+        //  g       !              !       g
+        //  h       !              !       h
+        //  t       !              !       t
+        //  !       !              !       !
+        //  \-------!              !-------/
+        //          y              y
+        //          \---   or   ---/
+        return true;
       }
     }
+    if (bounds.y == -bounds.height || bounds.y == getHeight()) {
+      if (bounds.x + bounds.width + bounds.x == getWidth()) {
+        // Vertical auto-scrolling is symmetric to horizontal one
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private static boolean isAlignmentNeeded(JComponent view, boolean horizontal) {
+    return (!SystemInfo.isMac || horizontal && ScrollSettings.isHorizontalGapNeededOnMac()) &&
+           (view instanceof JList || view instanceof JTree || (!SystemInfo.isMac && ScrollSettings.isGapNeededForAnyComponent()));
+  }
+
+  static Insets getViewInsets(JComponent view) {
+    Border border = view.getBorder();
+    if (border instanceof ViewBorder) {
+      ViewBorder vb = (ViewBorder)border;
+      Insets insets = emptyInsets();
+      vb.addViewInsets(view, insets);
+      return insets;
+    }
+    return null;
   }
 
   private static void doLayout(JScrollPane pane, JViewport viewport, Component view) {
@@ -296,8 +385,8 @@ public class JBViewport extends JViewport implements ZoomableViewport {
     viewport.setViewSize(viewSize);
   }
 
-  private static void updateBorder(Component view) {
-    if (view instanceof JTable) return; // tables are not supported yet
+  private static void updateBorder(@Nullable Component view) {
+    if (ScrollSettings.isNotSupportedYet(view)) return;
     if (view instanceof JComponent) {
       JComponent component = (JComponent)view;
       Border border = component.getBorder();
@@ -322,7 +411,7 @@ public class JBViewport extends JViewport implements ZoomableViewport {
    * This border is used to add additional space for a view.
    */
   private static class ViewBorder extends AbstractBorder {
-    private final Insets myInsets = new Insets(0, 0, 0, 0);
+    private final Insets myInsets = emptyInsets();
     private final Border myBorder;
 
     ViewBorder(Border border) {
@@ -332,7 +421,7 @@ public class JBViewport extends JViewport implements ZoomableViewport {
     @Override
     public Insets getBorderInsets(Component view, Insets insets) {
       if (insets == null) {
-        insets = new Insets(0, 0, 0, 0);
+        insets = emptyInsets();
       }
       else {
         insets.set(0, 0, 0, 0);
@@ -384,25 +473,35 @@ public class JBViewport extends JViewport implements ZoomableViewport {
           if (grand instanceof JScrollPane) {
             JScrollPane pane = (JScrollPane)grand;
             // calculate empty border under vertical scroll bar
-            if (viewport == pane.getViewport() || viewport == pane.getColumnHeader()) {
-              JScrollBar vsb = pane.getVerticalScrollBar();
-              Alignment va = getAlignment(vsb);
-              if (va == Alignment.LEFT) {
-                insets.left += vsb.getWidth();
-              }
-              else if (va == Alignment.RIGHT && isAlignmentNeeded(view)) {
-                insets.right += vsb.getWidth();
+            JScrollBar vsb = pane.getVerticalScrollBar();
+            if (vsb != null && vsb.isVisible()) {
+              boolean opaque = vsb.isOpaque();
+              if (viewport == pane.getColumnHeader()
+                  ? (!opaque || ScrollSettings.isHeaderOverCorner(pane.getViewport()))
+                  : (!opaque && viewport == pane.getViewport())) {
+                Alignment va = Alignment.get(vsb);
+                if (va == Alignment.LEFT) {
+                  insets.left += vsb.getWidth();
+                }
+                else if (va == Alignment.RIGHT && (opaque || isAlignmentNeeded(view, false))) {
+                  insets.right += vsb.getWidth();
+                }
               }
             }
             // calculate empty border under horizontal scroll bar
-            if (viewport == pane.getViewport() || viewport == pane.getRowHeader()) {
-              JScrollBar hsb = pane.getHorizontalScrollBar();
-              Alignment ha = getAlignment(hsb);
-              if (ha == Alignment.TOP) {
-                insets.top += hsb.getHeight();
-              }
-              else if (ha == Alignment.BOTTOM && isAlignmentNeeded(view)) {
-                insets.bottom += hsb.getHeight();
+            JScrollBar hsb = pane.getHorizontalScrollBar();
+            if (hsb != null && hsb.isVisible()) {
+              boolean opaque = hsb.isOpaque();
+              if (viewport == pane.getRowHeader()
+                  ? (!opaque || ScrollSettings.isHeaderOverCorner(pane.getViewport()))
+                  : (!opaque && viewport == pane.getViewport())) {
+                Alignment ha = Alignment.get(hsb);
+                if (ha == Alignment.TOP) {
+                  insets.top += hsb.getHeight();
+                }
+                else if (ha == Alignment.BOTTOM && (opaque || isAlignmentNeeded(view, true))) {
+                  insets.bottom += hsb.getHeight();
+                }
               }
             }
           }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2013 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@
 package com.intellij.ui;
 
 import com.intellij.util.ui.EmptyIcon;
+import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.UIUtil;
 import com.intellij.util.ui.tree.WideSelectionTreeUI;
 import org.jetbrains.annotations.Nls;
@@ -30,7 +31,7 @@ import java.awt.*;
  * @author Vladimir Kondratyev
  */
 public abstract class ColoredTreeCellRenderer extends SimpleColoredComponent implements TreeCellRenderer{
-  private static final Icon LOADING_NODE_ICON = new EmptyIcon(8, 16);
+  private static final Icon LOADING_NODE_ICON = JBUI.scale(EmptyIcon.create(8, 16));
 
   /**
    * Defines whether the tree is selected or not
@@ -167,6 +168,11 @@ public abstract class ColoredTreeCellRenderer extends SimpleColoredComponent imp
     else {
       super.append(fragment, attributes, isMainText);
     }
+  }
+
+  @Override
+  void revalidateAndRepaint() {
+    // no need for this in a renderer
   }
 
   /**

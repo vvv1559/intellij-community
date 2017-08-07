@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,24 +17,34 @@ package com.intellij.openapi.ui;
 
 import com.intellij.openapi.util.SystemInfo;
 import com.intellij.util.ui.UIUtil;
+import org.jetbrains.annotations.NotNull;
 
 import javax.swing.*;
 import java.awt.*;
 
 public class ComboBoxWithWidePopup<E> extends JComboBox<E> {
-  private boolean myLayingOut = false;
+  private boolean myLayingOut;
   private int myMinLength = 20;
 
-  public ComboBoxWithWidePopup() { }
-
-  public ComboBoxWithWidePopup(final ComboBoxModel<E> aModel) {
-    super(aModel);
-    if (SystemInfo.isMac && UIUtil.isUnderAquaLookAndFeel()) setMaximumRowCount(25);
+  public ComboBoxWithWidePopup() {
+    super();
+    init();
   }
 
-  public ComboBoxWithWidePopup(final E[] items) {
+  public ComboBoxWithWidePopup(@NotNull ComboBoxModel<E> model) {
+    super(model);
+    init();
+  }
+
+  public ComboBoxWithWidePopup(@NotNull E[] items) {
     super(items);
-    if (SystemInfo.isMac && UIUtil.isUnderAquaLookAndFeel()) setMaximumRowCount(25);
+    init();
+  }
+
+  private void init() {
+    if (SystemInfo.isMac && UIUtil.isUnderAquaLookAndFeel()) {
+      setMaximumRowCount(25);
+    }
   }
 
   @SuppressWarnings("GtkPreferredJComboBoxRenderer")
@@ -54,6 +64,7 @@ public class ComboBoxWithWidePopup<E> extends JComboBox<E> {
     return myMinLength;
   }
 
+  @Override
   public void doLayout() {
     try {
       myLayingOut = true;
@@ -64,6 +75,7 @@ public class ComboBoxWithWidePopup<E> extends JComboBox<E> {
     }
   }
 
+  @Override
   public Dimension getSize() {
     Dimension size = super.getSize();
     if (!myLayingOut) {
@@ -71,7 +83,7 @@ public class ComboBoxWithWidePopup<E> extends JComboBox<E> {
     }
     return size;
   }
-  
+
   private Dimension _getSuperSize() {
     return super.getSize();
   }

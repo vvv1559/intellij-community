@@ -18,7 +18,6 @@ package git4idea.commands;
 import com.intellij.concurrency.JobScheduler;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.application.ApplicationManager;
-import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.ProgressManager;
@@ -100,9 +99,9 @@ public class GitTask {
 
   /**
    * The most general execution method.
-   * @param sync  Set to <code>true</code> to make the calling thread wait for the task execution.
-   * @param modal If <code>true</code>, the task will be modal with a modal progress dialog. If false, the task will be executed in
-   * background. <code>modal</code> implies <code>sync</code>, i.e. if modal then sync doesn't matter: you'll wait anyway.
+   * @param sync  Set to {@code true} to make the calling thread wait for the task execution.
+   * @param modal If {@code true}, the task will be modal with a modal progress dialog. If false, the task will be executed in
+   * background. {@code modal} implies {@code sync}, i.e. if modal then sync doesn't matter: you'll wait anyway.
    * @param resultHandler Handle the result.
    * @see #execute(boolean)
    */
@@ -120,18 +119,13 @@ public class GitTask {
           commonOnCancel(LOCK, resultHandler);
           completed.set(true);
         }
-        @Override public void onError(@NotNull Exception error) {
-          super.onError(error);
+        @Override public void onThrowable(@NotNull Throwable error) {
+          super.onThrowable(error);
           commonOnCancel(LOCK, resultHandler);
           completed.set(true);
         }
       };
-      ApplicationManager.getApplication().invokeAndWait(new Runnable() {
-        @Override
-        public void run() {
-          ProgressManager.getInstance().run(task);
-        }
-      }, ModalityState.defaultModalityState());
+      ApplicationManager.getApplication().invokeAndWait(() -> ProgressManager.getInstance().run(task));
     } else {
       final BackgroundableTask task = new BackgroundableTask(myProject, myHandler, myTitle) {
         @Override public void onSuccess() {
@@ -273,12 +267,7 @@ public class GitTask {
 
     public final void runAlone() {
       if (ApplicationManager.getApplication().isDispatchThread()) {
-        ApplicationManager.getApplication().executeOnPooledThread(new Runnable() {
-          @Override
-          public void run() {
-            justRun();
-          }
-        });
+        ApplicationManager.getApplication().executeOnPooledThread(() -> justRun());
       } else {
         justRun();
       }

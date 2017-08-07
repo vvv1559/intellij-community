@@ -21,7 +21,6 @@ import com.intellij.ide.util.treeView.AbstractTreeNode;
 import com.intellij.ide.util.treeView.smartTree.*;
 import com.intellij.lang.properties.IProperty;
 import com.intellij.lang.properties.PropertiesBundle;
-import com.intellij.lang.properties.editor.PropertiesAnchorizer;
 import com.intellij.lang.properties.editor.ResourceBundlePropertyStructureViewElement;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.util.Comparing;
@@ -71,9 +70,6 @@ public class GroupByWordPrefixes implements Grouper, Sorter {
         continue;
       }
       Object value = ((StructureViewTreeElement)element).getValue();
-      if (value instanceof PropertiesAnchorizer.PropertyAnchor) {
-        value = ((PropertiesAnchorizer.PropertyAnchor)value).getRepresentative();
-      }
       if (!(value instanceof IProperty)) {
         continue;
       }
@@ -103,7 +99,7 @@ public class GroupByWordPrefixes implements Grouper, Sorter {
         continue;
       }
       // find longest group prefix
-      List<String> firstKey = groupStart == keys.size() ? Collections.<String>emptyList() :  keys.get(groupStart).words;
+      List<String> firstKey = groupStart == keys.size() ? Collections.emptyList() : keys.get(groupStart).words;
       int prefixLen = firstKey.size();
       for (int j = groupStart+1; j < i; j++) {
         List<String> prevKey = keys.get(j-1).words;

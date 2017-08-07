@@ -15,20 +15,18 @@
  */
 package com.intellij.credentialStore
 
+import com.intellij.credentialStore.windows.WindowsCryptUtils
 import com.intellij.ide.ApplicationLoadListener
 import com.intellij.ide.passwordSafe.impl.providers.ByteArrayWrapper
 import com.intellij.ide.passwordSafe.impl.providers.EncryptionUtil
-import com.intellij.ide.passwordSafe.impl.providers.masterKey.EnterPasswordComponent
-import com.intellij.ide.passwordSafe.impl.providers.masterKey.MasterPasswordDialog
-import com.intellij.ide.passwordSafe.impl.providers.masterKey.PasswordDatabase
-import com.intellij.ide.passwordSafe.impl.providers.masterKey.windows.WindowsCryptUtils
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.PathManager
 import com.intellij.openapi.components.ServiceManager
-import com.intellij.openapi.diagnostic.catchAndLog
+import com.intellij.openapi.diagnostic.runAndLogException
 import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.openapi.util.SystemInfo
-import com.intellij.util.exists
+import com.intellij.openapi.util.text.StringUtil
+import com.intellij.util.io.exists
 import gnu.trove.THashMap
 import java.nio.file.Paths
 import java.util.function.Function
@@ -39,21 +37,16 @@ internal fun isMasterPasswordValid(password: String, @Suppress("DEPRECATION") db
   val key = EncryptionUtil.genPasswordKey(password)
   val value = db.myDatabase.get(ByteArrayWrapper(EncryptionUtil.encryptKey(key, rawTestKey(password))))
   if (value != null) {
-    return EncryptionUtil.decryptText(key, value) == TEST_PASSWORD_VALUE
+    return StringUtil.equals(EncryptionUtil.decryptText(key, value), TEST_PASSWORD_VALUE)
   }
   return false
 }
 
-internal fun checkPassAndConvertOldDb(password: String, @Suppress("DEPRECATION") db: PasswordDatabase): Map<String, String>? {
-  if (isMasterPasswordValid(password, db)) {
-    return convertOldDb(password, db)
-  }
-  else {
-    return null
-  }
+internal fun checkPassAndConvertOldDb(password: String, @Suppress("DEPRECATION") db: PasswordDatabase): Map<CredentialAttributes, Credentials>? {
+  return if (isMasterPasswordValid(password, db)) convertOldDb(password, db) else null
 }
 
-fun convertOldDb(@Suppress("DEPRECATION") db: PasswordDatabase): Map<String, String>? {
+internal fun convertOldDb(@Suppress("DEPRECATION") db: PasswordDatabase): Map<CredentialAttributes, Credentials>? {
   if (db.myDatabase.size <= 1) {
     return null
   }
@@ -79,7 +72,7 @@ fun convertOldDb(@Suppress("DEPRECATION") db: PasswordDatabase): Map<String, Str
     return null
   }
 
-  var result: Map<String, String>? = null
+  var result: Map<CredentialAttributes, Credentials>? = null
   val dialog = MasterPasswordDialog(EnterPasswordComponent(Function {
     result = checkPassAndConvertOldDb(it, db)
     result != null
@@ -95,17 +88,18 @@ fun convertOldDb(@Suppress("DEPRECATION") db: PasswordDatabase): Map<String, Str
   return result
 }
 
-internal fun convertOldDb(oldKey: String, @Suppress("DEPRECATION") db: PasswordDatabase): Map<String, String> {
+internal fun convertOldDb(oldKey: String, @Suppress("DEPRECATION") db: PasswordDatabase): Map<CredentialAttributes, Credentials> {
   val oldKeyB = EncryptionUtil.genPasswordKey(oldKey)
   val testKey = ByteArrayWrapper(EncryptionUtil.encryptKey(oldKeyB, rawTestKey(oldKey)))
-  val newDb = THashMap<String, String>(db.myDatabase.size)
+  val newDb = THashMap<CredentialAttributes, Credentials>(db.myDatabase.size)
   for ((key, value) in db.myDatabase) {
     if (testKey == key) {
       continue
     }
 
     // in old db we cannot get key value - it is hashed, so, we store it as a base64 encoded in the new DB
-    newDb.put(toOldKey(EncryptionUtil.decryptKey(oldKeyB, key.unwrap())), EncryptionUtil.decryptText(oldKeyB, value))
+    val attributes = toOldKeyAsIdentity(EncryptionUtil.decryptKey(oldKeyB, key.unwrap()))
+    newDb.put(attributes, Credentials(attributes.userName, EncryptionUtil.decryptText(oldKeyB, value)))
   }
   return newDb
 }
@@ -118,7 +112,7 @@ internal class PasswordDatabaseConvertor : ApplicationLoadListener {
       val oldDbFile = Paths.get(PathManager.getConfigPath(), "options", "security.xml")
       if (oldDbFile.exists()) {
         val settings = ServiceManager.getService(PasswordSafeSettings::class.java)
-        if (settings.providerType != PasswordSafeSettings.ProviderType.MASTER_PASSWORD) {
+        if (settings.providerType == ProviderType.MEMORY_ONLY) {
           return
         }
 
@@ -129,16 +123,14 @@ internal class PasswordDatabaseConvertor : ApplicationLoadListener {
           @Suppress("DEPRECATION")
           val newDb = convertOldDb(ServiceManager.getService<PasswordDatabase>(PasswordDatabase::class.java))
           if (newDb != null && newDb.isNotEmpty()) {
-            LOG.catchAndLog {
+            LOG.runAndLogException {
               for (factory in CredentialStoreFactory.CREDENTIAL_STORE_FACTORY.extensions) {
                 val store = factory.create() ?: continue
-                for ((k, v) in newDb) {
-                  store.setPassword(k, v)
-                }
+                copyTo(newDb, store)
                 return
               }
             }
-            FileCredentialStore(newDb).save()
+            KeePassCredentialStore(newDb).save()
           }
         }
       }

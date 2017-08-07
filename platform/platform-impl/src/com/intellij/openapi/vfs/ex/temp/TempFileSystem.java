@@ -21,15 +21,11 @@ import com.intellij.openapi.util.io.FileAttributes;
 import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.impl.local.LocalFileSystemBase;
-import com.intellij.openapi.vfs.newvfs.ManagingFS;
-import com.intellij.openapi.vfs.newvfs.RefreshQueue;
-import com.intellij.openapi.vfs.newvfs.VfsImplUtil;
 import com.intellij.openapi.vfs.newvfs.impl.FakeVirtualFile;
 import com.intellij.openapi.vfs.newvfs.persistent.FSRecords;
 import com.intellij.util.ArrayUtil;
 import com.intellij.util.IncorrectOperationException;
 import com.intellij.util.LocalTimeCounter;
-import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -57,7 +53,7 @@ public class TempFileSystem extends LocalFileSystemBase {
   }
 
   @Nullable
-  private FSItem convert(VirtualFile file) {
+  private FSItem convert(@NotNull VirtualFile file) {
     final VirtualFile parentFile = file.getParent();
     if (parentFile == null) return myRoot;
 
@@ -166,6 +162,12 @@ public class TempFileSystem extends LocalFileSystemBase {
     return fsItem.list();
   }
 
+  @NotNull
+  @Override
+  public String getCanonicallyCasedName(@NotNull VirtualFile file) {
+    return file.getName();
+  }
+
   @Override
   public boolean isDirectory(@NotNull final VirtualFile file) {
     return convert(file) instanceof FSDir;
@@ -234,26 +236,6 @@ public class TempFileSystem extends LocalFileSystemBase {
   }
 
   @Override
-  public void refresh(final boolean asynchronous) {
-    RefreshQueue.getInstance().refresh(asynchronous, true, null, ManagingFS.getInstance().getRoots(this));
-  }
-
-  @Override
-  public VirtualFile findFileByPath(@NotNull @NonNls String path) {
-    return VfsImplUtil.findFileByPath(this, path);
-  }
-
-  @Override
-  public VirtualFile findFileByPathIfCached(@NotNull @NonNls String path) {
-    return VfsImplUtil.findFileByPathIfCached(this, path);
-  }
-
-  @Override
-  public VirtualFile refreshAndFindFileByPath(@NotNull String path) {
-    return VfsImplUtil.refreshAndFindFileByPath(this, path);
-  }
-
-  @Override
   public long getLength(@NotNull final VirtualFile file) {
     try {
       return contentsToByteArray(file).length;
@@ -269,7 +251,7 @@ public class TempFileSystem extends LocalFileSystemBase {
     private long myTimestamp;
     private boolean myWritable;
 
-    protected FSItem(final FSDir parent, final String name) {
+    FSItem(@Nullable FSDir parent, @NotNull String name) {
       myParent = parent;
       myName = name;
       myTimestamp = LocalTimeCounter.currentTime();
@@ -283,7 +265,7 @@ public class TempFileSystem extends LocalFileSystemBase {
       return null;
     }
 
-    public void setName(final String name) {
+    void setName(@NotNull String name) {
       myName = name;
     }
 
@@ -291,6 +273,7 @@ public class TempFileSystem extends LocalFileSystemBase {
       return myParent;
     }
 
+    @NotNull
     public String[] list() {
       return ArrayUtil.EMPTY_STRING_ARRAY;
     }
@@ -304,7 +287,7 @@ public class TempFileSystem extends LocalFileSystemBase {
   private static class FSDir extends FSItem {
     private final List<FSItem> myChildren = new ArrayList<>();
 
-    public FSDir(final FSDir parent, final String name) {
+    FSDir(@Nullable FSDir parent, @NotNull String name) {
       super(parent, name);
     }
 
@@ -325,17 +308,18 @@ public class TempFileSystem extends LocalFileSystemBase {
       return true;
     }
 
-    public void addChild(final FSItem item) {
+    void addChild(@NotNull FSItem item) {
       myChildren.add(item);
     }
 
-    public void removeChild(final FSItem fsItem) {
+    void removeChild(@NotNull FSItem fsItem) {
       if (fsItem.myName.equals("src") && getParent() == null) {
         throw new RuntimeException("removing src directory");
       }
       myChildren.remove(fsItem);
     }
 
+    @NotNull
     @Override
     public String[] list() {
       String[] names = ArrayUtil.newStringArray(myChildren.size());
@@ -347,7 +331,7 @@ public class TempFileSystem extends LocalFileSystemBase {
   }
 
   private static class FSFile extends FSItem {
-    public FSFile(final FSDir parent, final String name) {
+    FSFile(@NotNull FSDir parent, @NotNull String name) {
       super(parent, name);
     }
 
@@ -375,7 +359,7 @@ public class TempFileSystem extends LocalFileSystemBase {
     throw new IncorrectOperationException();
   }
 
-  @Nullable
+  @NotNull
   @Override
   protected String normalize(@NotNull String path) {
     return path;

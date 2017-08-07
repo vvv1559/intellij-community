@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,8 +24,9 @@ import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.psi.util.InheritanceUtil;
 import com.intellij.psi.util.PsiTreeUtil;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.idea.devkit.inspections.DevKitInspectionBase;
 
-public class UnsafeVfsRecursionInspection extends InternalInspection {
+public class UnsafeVfsRecursionInspection extends DevKitInspectionBase {
   private static final String VIRTUAL_FILE_CLASS_NAME = VirtualFile.class.getName();
   private static final String GET_CHILDREN_METHOD_NAME = "getChildren";
 
@@ -36,29 +37,30 @@ public class UnsafeVfsRecursionInspection extends InternalInspection {
 
   @NotNull
   @Override
-  public PsiElementVisitor buildInternalVisitor(@NotNull final ProblemsHolder holder, final boolean isOnTheFly) {
+  public PsiElementVisitor buildInternalVisitor(@NotNull ProblemsHolder holder, boolean isOnTheFly) {
     return new JavaElementVisitor() {
       @Override
-      public void visitMethodCallExpression(final PsiMethodCallExpression expression) {
-        final Project project = expression.getProject();
-        final JavaPsiFacade facade = JavaPsiFacade.getInstance(project);
+      public void visitMethodCallExpression(PsiMethodCallExpression expression) {
+        Project project = expression.getProject();
+        JavaPsiFacade facade = JavaPsiFacade.getInstance(project);
 
-        final PsiReferenceExpression methodRef = expression.getMethodExpression();
+        PsiReferenceExpression methodRef = expression.getMethodExpression();
         if (!GET_CHILDREN_METHOD_NAME.equals(methodRef.getReferenceName())) return;
-        final PsiElement methodElement = methodRef.resolve();
+        PsiElement methodElement = methodRef.resolve();
         if (!(methodElement instanceof PsiMethod)) return;
-        final PsiMethod method = (PsiMethod)methodElement;
-        final PsiClass aClass = method.getContainingClass();
-        final PsiClass virtualFileClass = facade.findClass(VIRTUAL_FILE_CLASS_NAME, GlobalSearchScope.allScope(project));
+        PsiMethod method = (PsiMethod)methodElement;
+        PsiClass aClass = method.getContainingClass();
+        PsiClass virtualFileClass = facade.findClass(VIRTUAL_FILE_CLASS_NAME, GlobalSearchScope.allScope(project));
         if (!InheritanceUtil.isInheritorOrSelf(aClass, virtualFileClass, true)) return;
 
-        final PsiMethod containingMethod = PsiTreeUtil.getParentOfType(expression, PsiMethod.class);
+        PsiMethod containingMethod = PsiTreeUtil.getParentOfType(expression, PsiMethod.class);
         if (containingMethod == null) return;
-        final String containingMethodName = containingMethod.getName();
-        final Ref<Boolean> result = Ref.create();
+        String containingMethodName = containingMethod.getName();
+        Ref<Boolean> result = Ref.create();
         containingMethod.accept(new JavaRecursiveElementVisitor() {
           @Override
-          public void visitMethodCallExpression(final PsiMethodCallExpression expression2) {
+          public void visitMethodCallExpression(PsiMethodCallExpression expression2) {
+            super.visitMethodCallExpression(expression2);
             if (expression2 != expression &&
                 containingMethodName.equals(expression2.getMethodExpression().getReferenceName()) &&
                 expression2.resolveMethod() == containingMethod) {
@@ -66,7 +68,6 @@ public class UnsafeVfsRecursionInspection extends InternalInspection {
             }
           }
         });
-
         if (!result.isNull()) {
           holder.registerProblem(expression, MESSAGE);
         }

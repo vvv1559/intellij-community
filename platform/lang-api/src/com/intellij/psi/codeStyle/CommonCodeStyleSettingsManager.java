@@ -21,8 +21,8 @@ import com.intellij.openapi.util.InvalidDataException;
 import com.intellij.openapi.util.WriteExternalException;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.util.ArrayUtil;
+import com.intellij.util.containers.ContainerUtil;
 import gnu.trove.THashMap;
-import gnu.trove.THashSet;
 import org.jdom.Content;
 import org.jdom.Element;
 import org.jetbrains.annotations.NonNls;
@@ -32,7 +32,6 @@ import org.jetbrains.annotations.Nullable;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.Set;
 
 /**
  * Manages common code style settings for every language using them.
@@ -53,11 +52,11 @@ public class CommonCodeStyleSettingsManager {
   }
 
   /**
-   * Attempts to get language-specific common settings from <code>LanguageCodeStyleSettingsProvider</code>.
+   * Attempts to get language-specific common settings from {@code LanguageCodeStyleSettingsProvider}.
    *
    * @param lang The language to get settings for.
    * @return If the provider for the language exists and is able to create language-specific default settings
-   *         (<code>LanguageCodeStyleSettingsProvider.getDefaultCommonSettings()</code> doesn't return null)
+   *         ({@code LanguageCodeStyleSettingsProvider.getDefaultCommonSettings()} doesn't return null)
    *         returns the instance of settings for this language. Otherwise returns the instance of parent settings
    *         shared between several languages.
    */
@@ -90,7 +89,7 @@ public class CommonCodeStyleSettingsManager {
   }
 
   /**
-   * Get common code style settings by language name. <code>getCommonSettings(Language)</code> is a preferred method but
+   * Get common code style settings by language name. {@code getCommonSettings(Language)} is a preferred method but
    * sometimes (for example, in plug-ins which do not depend on a specific language support) language settings can be
    * obtained by name.
    * 
@@ -153,6 +152,10 @@ public class CommonCodeStyleSettingsManager {
           CommonCodeStyleSettings clonedSettings = entry.getValue().clone(parentSettings);
           settingsManager.registerCommonSettings(entry.getKey(), clonedSettings);
         }
+        for (Map.Entry<String,Content> contentEntry : myUnknownSettingsMap.entrySet()) {
+          Content contentCopy = contentEntry.getValue().clone();
+          settingsManager.myUnknownSettingsMap.put(contentEntry.getKey(), contentCopy);
+        }
       }
       return settingsManager;
     }
@@ -194,20 +197,15 @@ public class CommonCodeStyleSettingsManager {
         return;
       }
 
-      final Map<String, Language> id2lang = new THashMap<>();
+      final Map<String, Language> idToLang = new THashMap<>();
       for (Language language : myCommonSettingsMap.keySet()) {
-        id2lang.put(language.getID(), language);
+        idToLang.put(language.getID(), language);
       }
 
-      final Set<String> langIdList = new THashSet<>();
-      langIdList.addAll(myUnknownSettingsMap.keySet());
-      langIdList.addAll(id2lang.keySet());
-
-      final String[] languages = ArrayUtil.toStringArray(langIdList);
-      Arrays.sort(languages, String::compareTo);
-
-      for (final String id : languages) {
-        final Language language = id2lang.get(id);
+      String[] languages = ArrayUtil.toStringArray(ContainerUtil.union(myUnknownSettingsMap.keySet(), idToLang.keySet()));
+      Arrays.sort(languages);
+      for (String id : languages) {
+        final Language language = idToLang.get(id);
         if (language != null) {
           final CommonCodeStyleSettings commonSettings = myCommonSettingsMap.get(language);
           Element commonSettingsElement = new Element(COMMON_SETTINGS_TAG);
@@ -236,5 +234,22 @@ public class CommonCodeStyleSettingsManager {
         CommonCodeStyleSettings.copyPublicFields(sourceIndentOptions, targetIndentOptions);
       }
     }
+  }
+
+  @Override
+  public boolean equals(Object obj) {
+    if (obj instanceof CommonCodeStyleSettingsManager) {
+      CommonCodeStyleSettingsManager other = (CommonCodeStyleSettingsManager)obj;
+      if (getCommonSettingsMap().size() != other.getCommonSettingsMap().size() ||
+          myUnknownSettingsMap.size() != other.myUnknownSettingsMap.size()) {
+        return false;
+      }
+      for (Language language : myCommonSettingsMap.keySet()) {
+        CommonCodeStyleSettings theseSettings = myCommonSettingsMap.get(language);
+        CommonCodeStyleSettings otherSettings = other.getCommonSettings(language);
+        if (!theseSettings.equals(otherSettings)) return false;
+      }
+    }
+    return true;
   }
 }

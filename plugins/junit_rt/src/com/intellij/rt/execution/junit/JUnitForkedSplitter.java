@@ -19,7 +19,6 @@ import com.intellij.rt.execution.testFrameworks.ForkedSplitter;
 
 import java.io.File;
 import java.io.IOException;
-import java.io.PrintStream;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -31,8 +30,8 @@ public class JUnitForkedSplitter extends ForkedSplitter {
 
   private IdeaTestRunner myTestRunner;
 
-  public JUnitForkedSplitter(String workingDirsPath, String forkMode, PrintStream out, PrintStream err, List newArgs) {
-    super(workingDirsPath, forkMode, out, err, newArgs);
+  public JUnitForkedSplitter(String workingDirsPath, String forkMode, List newArgs) {
+    super(workingDirsPath, forkMode, newArgs);
   }
 
 
@@ -63,7 +62,7 @@ public class JUnitForkedSplitter extends ForkedSplitter {
                                      Object rootDescription) throws IOException {
     File tempFile = File.createTempFile("idea_junit", ".tmp");
     tempFile.deleteOnExit();
-    JUnitStarter.printClassesList(classNames, packageName + ", working directory: \'" + workingDir + "\'", "", tempFile);
+    JUnitStarter.printClassesList(classNames, packageName, "", "", tempFile);
     final List childArgs = new ArrayList();
     childArgs.add("@" + tempFile.getAbsolutePath());
     childArgs.addAll(myNewArgs);

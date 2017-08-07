@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2016 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,15 +22,14 @@ import com.intellij.psi.util.QualifiedName;
 import com.jetbrains.python.psi.PyClass;
 import com.jetbrains.python.psi.PyPsiFacade;
 import com.jetbrains.python.psi.PyUtil;
-import com.jetbrains.python.psi.resolve.QualifiedNameFinder;
-import com.jetbrains.python.psi.resolve.QualifiedNameResolver;
-import com.jetbrains.python.psi.resolve.QualifiedNameResolverImpl;
+import com.jetbrains.python.psi.resolve.*;
 import com.jetbrains.python.psi.stubs.PyClassNameIndex;
 import com.jetbrains.python.psi.types.*;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.Collection;
+import java.util.List;
 
 /**
  * @author yole
@@ -42,14 +41,16 @@ public class PyPsiFacadeImpl extends PyPsiFacade {
     myProject = project;
   }
 
+  @NotNull
   @Override
-  public QualifiedNameResolver qualifiedNameResolver(String qNameString) {
-    return new QualifiedNameResolverImpl(qNameString);
+  public List<PsiElement> resolveQualifiedName(@NotNull QualifiedName name, @NotNull PyQualifiedNameResolveContext context) {
+    return PyResolveImportUtil.resolveQualifiedName(name, context);
   }
 
+  @NotNull
   @Override
-  public QualifiedNameResolver qualifiedNameResolver(QualifiedName qualifiedName) {
-    return new QualifiedNameResolverImpl(qualifiedName);
+  public PyQualifiedNameResolveContext createResolveContextFromFoothold(@NotNull PsiElement foothold) {
+    return PyResolveImportUtil.fromFoothold(foothold);
   }
 
   @Nullable
@@ -72,8 +73,8 @@ public class PyPsiFacadeImpl extends PyPsiFacade {
 
   @Nullable
   @Override
-  public PyType createTupleType(@NotNull Collection<PyType> members, @NotNull PsiElement anchor) {
-    return PyTupleType.create(anchor, members.toArray(new PyType[members.size()]));
+  public PyType createTupleType(@NotNull List<PyType> members, @NotNull PsiElement anchor) {
+    return PyTupleType.create(anchor, members);
   }
 
   @Nullable

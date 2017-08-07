@@ -15,27 +15,21 @@
  */
 package com.jetbrains.python.packaging;
 
-import com.intellij.openapi.components.PersistentStateComponent;
-import com.intellij.openapi.components.ServiceManager;
-import com.intellij.openapi.components.State;
-import com.intellij.openapi.components.Storage;
+import com.intellij.openapi.components.*;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.xmlb.XmlSerializerUtil;
 
 import java.util.List;
 import java.util.Map;
 
-/**
- * User: catherine
- */
-@State(name = "PyPackageService", storages = @Storage("packages.xml"))
+@State(name = "PyPackageService", storages = @Storage(value = "packages.xml", roamingType = RoamingType.DISABLED))
 public class PyPackageService implements
                               PersistentStateComponent<PyPackageService> {
-  public Map<String, Boolean> sdkToUsersite = ContainerUtil.newConcurrentMap();
-  public List<String> additionalRepositories = ContainerUtil.createConcurrentList();
-  public Map<String, String> PY_PACKAGES = ContainerUtil.newConcurrentMap();
-  public String virtualEnvBasePath;
-  public Boolean PYPI_REMOVED = false;
+  public volatile Map<String, Boolean> sdkToUsersite = ContainerUtil.newConcurrentMap();
+  public volatile List<String> additionalRepositories = ContainerUtil.createConcurrentList();
+  public volatile Map<String, String> PY_PACKAGES = ContainerUtil.newConcurrentMap();
+  public volatile String virtualEnvBasePath;
+  public volatile Boolean PYPI_REMOVED = false;
   
   public long LAST_TIME_CHECKED = 0;
 

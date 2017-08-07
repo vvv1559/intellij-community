@@ -28,7 +28,7 @@ import java.util.*;
  * @author: db
  * Date: 03.11.11
  */
-abstract class ObjectObjectMultiMaplet<K, V extends Streamable> implements Streamable {
+abstract class ObjectObjectMultiMaplet<K, V> implements Streamable, CloseableMaplet {
   abstract boolean containsKey(final K key);
 
   abstract Collection<V> get(final K key);
@@ -49,15 +49,13 @@ abstract class ObjectObjectMultiMaplet<K, V extends Streamable> implements Strea
 
   abstract void removeAll(final K key, final Collection<V> value);
 
-  abstract void close();
-
   abstract void forEachEntry(TObjectObjectProcedure<K, Collection<V>> procedure);
 
   abstract void flush(boolean memoryCachesOnly);
 
   public void toStream(final DependencyContext context, final PrintStream stream) {
 
-    final List<Pair<K, String>> keys = new ArrayList<Pair<K, String>>();
+    final List<Pair<K, String>> keys = new ArrayList<>();
     forEachEntry(new TObjectObjectProcedure<K, Collection<V>>() {
       @Override
       public boolean execute(final K a, final Collection<V> b) {
@@ -70,12 +68,7 @@ abstract class ObjectObjectMultiMaplet<K, V extends Streamable> implements Strea
       }
     });
 
-    Collections.sort(keys, new Comparator<Pair<K, String>>() {
-      @Override
-      public int compare(Pair<K, String> o1, Pair<K, String> o2) {
-        return o1.second.compareTo(o2.second);
-      }
-    });
+    keys.sort(Comparator.comparing(o -> o.second));
 
     for (final Pair<K, String> a: keys) {
       final Collection<V> b = get(a.first);
@@ -84,15 +77,15 @@ abstract class ObjectObjectMultiMaplet<K, V extends Streamable> implements Strea
       stream.println(a.second);
       stream.println("  Values:");
 
-      final List<String> list = new LinkedList<String>();
+      final List<String> list = new LinkedList<>();
 
       for (final V value : b) {
-        final ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        final PrintStream s = new PrintStream(baos);
-
-        value.toStream(context, s);
-
-        list.add(baos.toString());
+        if (value instanceof Streamable) {
+          final ByteArrayOutputStream baos = new ByteArrayOutputStream();
+          final PrintStream s = new PrintStream(baos);
+          ((Streamable) value).toStream(context, s);
+          list.add(baos.toString());
+        }
       }
 
       Collections.sort(list);

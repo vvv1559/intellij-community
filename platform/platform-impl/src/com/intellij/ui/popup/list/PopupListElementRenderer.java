@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2012 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,46 +25,46 @@ import com.intellij.openapi.ui.popup.ListPopupStep;
 import com.intellij.openapi.ui.popup.ListPopupStepEx;
 import com.intellij.openapi.ui.popup.util.BaseListPopupStep;
 import com.intellij.ui.ColorUtil;
-import com.intellij.ui.IdeBorderFactory;
 import com.intellij.util.ArrayUtil;
+import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
 import java.awt.*;
 
-public class PopupListElementRenderer extends GroupedItemsListRenderer {
+public class PopupListElementRenderer<E> extends GroupedItemsListRenderer<E> {
   private final ListPopupImpl myPopup;
   private JLabel myShortcutLabel;
 
   public PopupListElementRenderer(final ListPopupImpl aPopup) {
-    super(new ListItemDescriptorAdapter() {
+    super(new ListItemDescriptorAdapter<E>() {
       @Override
-      public String getTextFor(Object value) {
+      public String getTextFor(E value) {
         return aPopup.getListStep().getTextFor(value);
       }
 
       @Override
-      public Icon getIconFor(Object value) {
+      public Icon getIconFor(E value) {
         return aPopup.getListStep().getIconFor(value);
       }
 
       @Override
-      public boolean hasSeparatorAboveOf(Object value) {
+      public boolean hasSeparatorAboveOf(E value) {
         return aPopup.getListModel().isSeparatorAboveOf(value);
       }
 
       @Override
-      public String getCaptionAboveOf(Object value) {
+      public String getCaptionAboveOf(E value) {
         return aPopup.getListModel().getCaptionAboveOf(value);
       }
 
       @Nullable
       @Override
-      public String getTooltipFor(Object value) {
+      public String getTooltipFor(E value) {
         ListPopupStep<Object> listStep = aPopup.getListStep();
         if (!(listStep instanceof ListPopupStepEx)) return null;
-        return ((ListPopupStepEx)listStep).getTooltipTextFor(value);
+        return ((ListPopupStepEx<E>)listStep).getTooltipTextFor(value);
       }
     });
     myPopup = aPopup;
@@ -76,7 +76,7 @@ public class PopupListElementRenderer extends GroupedItemsListRenderer {
     createLabel();
     panel.add(myTextLabel, BorderLayout.CENTER);
     myShortcutLabel = new JLabel();
-    myShortcutLabel.setBorder(IdeBorderFactory.createEmptyBorder(0, 0, 0, 3));
+    myShortcutLabel.setBorder(JBUI.Borders.empty(0, 0, 0, 3));
     Color color = UIManager.getColor("MenuItem.acceleratorForeground");
     myShortcutLabel.setForeground(color);
     panel.add(myShortcutLabel, BorderLayout.EAST);
@@ -84,7 +84,7 @@ public class PopupListElementRenderer extends GroupedItemsListRenderer {
   }
 
   @Override
-  protected void customizeComponent(JList list, Object value, boolean isSelected) {
+  protected void customizeComponent(JList<? extends E> list, E value, boolean isSelected) {
     ListPopupStep<Object> step = myPopup.getListStep();
     boolean isSelectable = step.isSelectable(value);
     myTextLabel.setEnabled(isSelectable);

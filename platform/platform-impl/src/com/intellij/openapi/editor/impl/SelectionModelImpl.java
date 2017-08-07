@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2014 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,14 +14,6 @@
  * limitations under the License.
  */
 
-/*
- * Created by IntelliJ IDEA.
- * User: max
- * Date: Apr 19, 2002
- * Time: 1:51:41 PM
- * To change template for new class use
- * Code Style | Class Templates options (Tools | IDE Options).
- */
 package com.intellij.openapi.editor.impl;
 
 import com.intellij.openapi.Disposable;
@@ -30,14 +22,13 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.*;
 import com.intellij.openapi.editor.colors.EditorColors;
 import com.intellij.openapi.editor.colors.EditorColorsScheme;
-import com.intellij.openapi.editor.event.DocumentEvent;
 import com.intellij.openapi.editor.event.SelectionEvent;
 import com.intellij.openapi.editor.event.SelectionListener;
-import com.intellij.openapi.editor.ex.PrioritizedDocumentListener;
 import com.intellij.openapi.editor.ex.util.EditorUtil;
 import com.intellij.openapi.editor.markup.TextAttributes;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.Pair;
+import com.intellij.openapi.util.TextRange;
 import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -45,7 +36,7 @@ import org.jetbrains.annotations.Nullable;
 import java.util.Collection;
 import java.util.List;
 
-public class SelectionModelImpl implements SelectionModel, PrioritizedDocumentListener {
+public class SelectionModelImpl implements SelectionModel {
   private static final Logger LOG = Logger.getInstance("#com.intellij.openapi.editor.impl.SelectionModelImpl");
 
   private final List<SelectionListener> mySelectionListeners = ContainerUtil.createLockFreeCopyOnWriteList();
@@ -55,29 +46,6 @@ public class SelectionModelImpl implements SelectionModel, PrioritizedDocumentLi
 
   public SelectionModelImpl(EditorImpl editor) {
     myEditor = editor;
-  }
-
-  @Override
-  public void beforeDocumentChange(DocumentEvent event) {
-    if (myEditor.getDocument().isInBulkUpdate()) return;
-    for (Caret caret : myEditor.getCaretModel().getAllCarets()) {
-      ((CaretImpl)caret).beforeDocumentChange();
-    }
-  }
-
-  @Override
-  public void documentChanged(DocumentEvent event) {
-    if (myEditor.getDocument().isInBulkUpdate()) return;
-    myEditor.getCaretModel().doWithCaretMerging(() -> {
-      for (Caret caret : myEditor.getCaretModel().getAllCarets()) {
-        ((CaretImpl)caret).documentChanged();
-      }
-    });
-  }
-
-  @Override
-  public int getPriority() {
-    return EditorDocumentPriorities.SELECTION_MODEL;
   }
 
   /**
@@ -149,12 +117,25 @@ public class SelectionModelImpl implements SelectionModel, PrioritizedDocumentLi
     myEditor.getCaretModel().getCurrentCaret().setSelection(startPosition, startOffset, endPosition, endOffset);
   }
 
-  void fireSelectionChanged(int oldSelectionStart, int oldSelectionEnd, int startOffset, int endOffset) {
-    repaintBySelectionChange(oldSelectionStart, startOffset, oldSelectionEnd, endOffset);
-
-    SelectionEvent event = new SelectionEvent(myEditor,
-                                              oldSelectionStart, oldSelectionEnd,
-                                              startOffset, endOffset);
+  void fireSelectionChanged(SelectionEvent event) {
+    TextRange[] oldRanges = event.getOldRanges();
+    TextRange[] newRanges = event.getNewRanges();
+    int count = Math.min(oldRanges.length, newRanges.length);
+    for (int i = 0; i < count; i++) {
+      TextRange oldRange = oldRanges[i];
+      TextRange newRange = newRanges[i];
+      int oldSelectionStart = oldRange.getStartOffset();
+      int startOffset = newRange.getStartOffset();
+      int oldSelectionEnd = oldRange.getEndOffset();
+      int endOffset = newRange.getEndOffset();
+      myEditor.repaint(Math.min(oldSelectionStart, startOffset), Math.max(oldSelectionStart, startOffset), false);
+      myEditor.repaint(Math.min(oldSelectionEnd, endOffset), Math.max(oldSelectionEnd, endOffset), false);
+    }
+    TextRange[] remaining = oldRanges.length < newRanges.length ? newRanges : oldRanges;
+    for (int i = count; i < remaining.length; i++) {
+      TextRange range = remaining[i];
+      myEditor.repaint(range.getStartOffset(), range.getEndOffset(), false);
+    }
 
     broadcastSelectionEvent(event);
   }
@@ -168,11 +149,6 @@ public class SelectionModelImpl implements SelectionModel, PrioritizedDocumentLi
         LOG.error(e);
       }
     }
-  }
-
-  private void repaintBySelectionChange(int oldSelectionStart, int startOffset, int oldSelectionEnd, int endOffset) {
-    myEditor.repaint(Math.min(oldSelectionStart, startOffset), Math.max(oldSelectionStart, startOffset), false);
-    myEditor.repaint(Math.min(oldSelectionEnd, endOffset), Math.max(oldSelectionEnd, endOffset), false);
   }
 
   @Override
@@ -250,7 +226,7 @@ public class SelectionModelImpl implements SelectionModel, PrioritizedDocumentLi
 
   @Override
   public String getSelectedText(boolean allCarets) {
-    validateContext(false);
+    ApplicationManager.getApplication().assertReadAccessAllowed();
 
     if (myEditor.getCaretModel().supportsMultipleCarets() && allCarets) {
       final StringBuilder buf = new StringBuilder();
@@ -270,24 +246,24 @@ public class SelectionModelImpl implements SelectionModel, PrioritizedDocumentLi
     }
   }
 
-  public static void doSelectLineAtCaret(Editor editor) {
-    int lineNumber = editor.getCaretModel().getLogicalPosition().line;
+  public static void doSelectLineAtCaret(Caret caret) {
+    Editor editor = caret.getEditor();
+    int lineNumber = caret.getLogicalPosition().line;
     Document document = editor.getDocument();
     if (lineNumber >= document.getLineCount()) {
       return;
     }
 
-    Pair<LogicalPosition, LogicalPosition> lines = EditorUtil.calcCaretLineRange(editor);
+    Pair<LogicalPosition, LogicalPosition> lines = EditorUtil.calcCaretLineRange(caret);
     LogicalPosition lineStart = lines.first;
     LogicalPosition nextLineStart = lines.second;
 
     int start = editor.logicalPositionToOffset(lineStart);
     int end = editor.logicalPositionToOffset(nextLineStart);
 
-    //myEditor.getCaretModel().moveToOffset(start);
     editor.getScrollingModel().scrollToCaret(ScrollType.RELATIVE);
-    editor.getSelectionModel().removeSelection();
-    editor.getSelectionModel().setSelection(start, end);
+    caret.removeSelection();
+    caret.setSelection(start, end);
   }
 
   @Override
@@ -331,15 +307,5 @@ public class SelectionModelImpl implements SelectionModel, PrioritizedDocumentLi
 
   public void reinitSettings() {
     myTextAttributes = null;
-  }
-
-  private void validateContext(boolean isWrite) {
-    if (!myEditor.getComponent().isShowing()) return;
-    if (isWrite) {
-      ApplicationManager.getApplication().assertIsDispatchThread();
-    }
-    else {
-      ApplicationManager.getApplication().assertReadAccessAllowed();
-    }
   }
 }

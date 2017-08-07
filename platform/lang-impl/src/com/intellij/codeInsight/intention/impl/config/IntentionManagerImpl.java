@@ -17,6 +17,8 @@
 package com.intellij.codeInsight.intention.impl.config;
 
 import com.intellij.codeInsight.daemon.HighlightDisplayKey;
+import com.intellij.codeInsight.daemon.impl.CleanupOnScopeIntention;
+import com.intellij.codeInsight.daemon.impl.EditCleanupProfileIntentionAction;
 import com.intellij.codeInsight.intention.IntentionAction;
 import com.intellij.codeInsight.intention.IntentionActionBean;
 import com.intellij.codeInsight.intention.IntentionManager;
@@ -24,9 +26,11 @@ import com.intellij.codeInspection.GlobalInspectionTool;
 import com.intellij.codeInspection.GlobalSimpleInspectionTool;
 import com.intellij.codeInspection.LocalQuickFix;
 import com.intellij.codeInspection.ProblemDescriptor;
+import com.intellij.codeInspection.actions.CleanupAllIntention;
 import com.intellij.codeInspection.actions.CleanupInspectionIntention;
 import com.intellij.codeInspection.actions.RunInspectionIntention;
 import com.intellij.codeInspection.ex.*;
+import com.intellij.openapi.Disposable;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.extensions.ExtensionPoint;
@@ -50,13 +54,13 @@ import java.util.List;
 /**
  * @author dsl
  */
-public class IntentionManagerImpl extends IntentionManager {
+public class IntentionManagerImpl extends IntentionManager implements Disposable {
   private static final Logger LOG = Logger.getInstance("#com.intellij.codeInsight.intention.impl.config.IntentionManagerImpl");
 
   private final List<IntentionAction> myActions = ContainerUtil.createLockFreeCopyOnWriteList();
   private final IntentionManagerSettings mySettings;
 
-  private final Alarm myInitActionsAlarm = new Alarm(Alarm.ThreadToUse.SHARED_THREAD);
+  private final Alarm myInitActionsAlarm = new Alarm(Alarm.ThreadToUse.POOLED_THREAD, this);
 
   public IntentionManagerImpl(IntentionManagerSettings intentionManagerSettings) {
     mySettings = intentionManagerSettings;
@@ -105,6 +109,11 @@ public class IntentionManagerImpl extends IntentionManager {
     else {
       myInitActionsAlarm.addRequest(runnable, 300);
     }
+  }
+
+  @Override
+  public void dispose() {
+
   }
 
   private static IntentionAction createIntentionActionWrapper(@NotNull IntentionActionBean intentionActionBean, String[] categories) {
@@ -183,6 +192,11 @@ public class IntentionManagerImpl extends IntentionManager {
   @Nullable
   @Override
   public IntentionAction createFixAllIntention(InspectionToolWrapper toolWrapper, IntentionAction action) {
+    if (toolWrapper instanceof GlobalInspectionToolWrapper) {
+      final LocalInspectionToolWrapper localWrapper = ((GlobalInspectionToolWrapper)toolWrapper).getSharedLocalInspectionToolWrapper();
+      if (localWrapper != null) return createFixAllIntention(localWrapper, action);
+    }
+
     if (toolWrapper instanceof LocalInspectionToolWrapper) {
       Class aClass = action.getClass();
       if (action instanceof QuickFixWrapper) {
@@ -204,6 +218,21 @@ public class IntentionManagerImpl extends IntentionManager {
       throw new AssertionError("unknown tool: " + toolWrapper);
     }
     return null;
+  }
+
+  @NotNull
+  @Override
+  public IntentionAction createCleanupAllIntention() {
+    return CleanupAllIntention.INSTANCE;
+  }
+
+  @NotNull
+  @Override
+  public List<IntentionAction> getCleanupIntentionOptions() {
+    ArrayList<IntentionAction> options = new ArrayList<>();
+    options.add(EditCleanupProfileIntentionAction.INSTANCE);
+    options.add(CleanupOnScopeIntention.INSTANCE);
+    return options;
   }
 
   @Override

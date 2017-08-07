@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,14 +24,14 @@ import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.EditorFactory;
-import com.intellij.openapi.editor.event.DocumentAdapter;
 import com.intellij.openapi.editor.event.DocumentEvent;
+import com.intellij.openapi.editor.event.DocumentListener;
 import com.intellij.openapi.editor.ex.EditorMarkupModel;
 import com.intellij.openapi.extensions.ExtensionPointName;
 import com.intellij.openapi.extensions.Extensions;
 import com.intellij.openapi.fileEditor.FileEditorManager;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.project.ProjectCoreUtil;
+import com.intellij.openapi.project.ProjectUtil;
 import com.intellij.openapi.roots.ProjectRootManager;
 import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.Pair;
@@ -67,7 +67,7 @@ class PsiChangeHandler extends PsiTreeChangeAdapter implements Disposable {
                    @NotNull FileStatusMap fileStatusMap) {
     myProject = project;
     myFileStatusMap = fileStatusMap;
-    editorFactory.getEventMulticaster().addDocumentListener(new DocumentAdapter() {
+    editorFactory.getEventMulticaster().addDocumentListener(new DocumentListener() {
       @Override
       public void beforeDocumentChange(DocumentEvent e) {
         final Document document = e.getDocument();
@@ -104,7 +104,7 @@ class PsiChangeHandler extends PsiTreeChangeAdapter implements Disposable {
 
   private void updateChangesForDocument(@NotNull final Document document) {
     ApplicationManager.getApplication().assertIsDispatchThread();
-    if (DaemonListeners.isUnderIgnoredAction(null) || myProject.isDisposed()) return;
+    if (myProject.isDisposed()) return;
     List<Pair<PsiElement, Boolean>> toUpdate = changedElements.get(document);
     if (toUpdate == null) {
       // The document has been changed, but psi hasn't
@@ -266,7 +266,7 @@ class PsiChangeHandler extends PsiTreeChangeAdapter implements Disposable {
   }
 
   private boolean shouldBeIgnored(@NotNull VirtualFile virtualFile) {
-    return ProjectCoreUtil.isProjectOrWorkspaceFile(virtualFile) ||
+    return ProjectUtil.isProjectOrWorkspaceFile(virtualFile) ||
            ProjectRootManager.getInstance(myProject).getFileIndex().isExcluded(virtualFile);
   }
 

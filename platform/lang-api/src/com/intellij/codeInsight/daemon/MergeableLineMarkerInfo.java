@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2015 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,13 +21,12 @@ import com.intellij.openapi.ui.popup.PopupChooserBuilder;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.PsiElement;
-import com.intellij.ui.IdeBorderFactory;
 import com.intellij.ui.awt.RelativePoint;
 import com.intellij.ui.components.JBLabel;
 import com.intellij.ui.components.JBList;
 import com.intellij.util.Function;
-import com.intellij.util.NotNullFunction;
 import com.intellij.util.SmartList;
+import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -36,7 +35,6 @@ import javax.swing.*;
 import java.awt.event.MouseEvent;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.List;
 
 /**
@@ -147,11 +145,13 @@ public abstract class MergeableLineMarkerInfo<T extends PsiElement> extends Line
                 PsiElement element = ((LineMarkerInfo)dom).getElement();
                 assert element != null;
                 final String elementPresentation =
-                  dom instanceof MergeableLineMarkerInfo ? ((MergeableLineMarkerInfo)dom).getElementPresentation(element) : element.getText();
+                  dom instanceof MergeableLineMarkerInfo
+                  ? ((MergeableLineMarkerInfo)dom).getElementPresentation(element)
+                  : element.getText();
                 String text = StringUtil.first(elementPresentation, 100, true).replace('\n', ' ');
 
                 final JBLabel label = new JBLabel(text, icon, SwingConstants.LEFT);
-                label.setBorder(IdeBorderFactory.createEmptyBorder(2));
+                label.setBorder(JBUI.Borders.empty(2));
                 return label;
               }
 

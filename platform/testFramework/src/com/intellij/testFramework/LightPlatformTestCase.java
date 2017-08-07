@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -36,13 +36,14 @@ import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ex.ApplicationEx;
 import com.intellij.openapi.application.impl.ApplicationInfoImpl;
 import com.intellij.openapi.command.WriteCommandAction;
+import com.intellij.openapi.command.impl.DocumentReferenceManagerImpl;
 import com.intellij.openapi.command.impl.UndoManagerImpl;
+import com.intellij.openapi.command.undo.DocumentReferenceManager;
 import com.intellij.openapi.command.undo.UndoManager;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.EditorFactory;
 import com.intellij.openapi.editor.impl.EditorFactoryImpl;
-import com.intellij.openapi.editor.impl.EditorImpl;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.fileEditor.impl.FileDocumentManagerImpl;
 import com.intellij.openapi.fileTypes.FileType;
@@ -52,7 +53,7 @@ import com.intellij.openapi.module.EmptyModuleType;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleType;
 import com.intellij.openapi.project.DumbService;
-import com.intellij.openapi.project.ModuleAdapter;
+import com.intellij.openapi.project.ModuleListener;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectManager;
 import com.intellij.openapi.project.ex.ProjectManagerEx;
@@ -77,7 +78,6 @@ import com.intellij.psi.PsiDocumentManager;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiFileFactory;
 import com.intellij.psi.PsiManager;
-import com.intellij.psi.codeStyle.CodeStyleSchemes;
 import com.intellij.psi.codeStyle.CodeStyleSettings;
 import com.intellij.psi.codeStyle.CodeStyleSettingsManager;
 import com.intellij.psi.impl.DocumentCommitThread;
@@ -85,12 +85,16 @@ import com.intellij.psi.impl.PsiDocumentManagerImpl;
 import com.intellij.psi.impl.PsiManagerImpl;
 import com.intellij.psi.impl.source.tree.injected.InjectedLanguageManagerImpl;
 import com.intellij.psi.templateLanguages.TemplateDataLanguageMappings;
-import com.intellij.util.*;
+import com.intellij.util.IncorrectOperationException;
+import com.intellij.util.LocalTimeCounter;
+import com.intellij.util.ReflectionUtil;
+import com.intellij.util.ThrowableRunnable;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.indexing.UnindexedFilesUpdater;
-import com.intellij.util.lang.CompoundRuntimeException;
 import com.intellij.util.messages.MessageBusConnection;
+import com.intellij.util.ref.GCUtil;
 import com.intellij.util.ui.UIUtil;
+import junit.framework.AssertionFailedError;
 import junit.framework.TestCase;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
@@ -104,9 +108,11 @@ import java.io.IOException;
 import java.io.PrintStream;
 import java.lang.management.GarbageCollectorMXBean;
 import java.lang.management.ManagementFactory;
+import java.lang.reflect.Method;
 import java.util.Arrays;
-import java.util.List;
-import java.util.function.Consumer;
+import java.util.concurrent.DelayQueue;
+import java.util.concurrent.Delayed;
+import java.util.concurrent.TimeUnit;
 
 /**
  * @author yole
@@ -259,11 +265,14 @@ public abstract class LightPlatformTestCase extends UsefulTestCase implements Da
   protected void setUp() throws Exception {
     EdtTestUtil.runInEdtAndWait(() -> {
       super.setUp();
+      ApplicationInfoImpl.setInStressTest(isStressTest());
+      if (isPerformanceTest()) {
+        Timings.getStatistics();
+      }
       initApplication();
-      ApplicationInfoImpl.setInPerformanceTest(isPerformanceTest());
 
       ourApplication.setDataProvider(this);
-      LightProjectDescriptor descriptor = new SimpleLightProjectDescriptor(getModuleType(), getProjectJDK());
+      LightProjectDescriptor descriptor = getProjectDescriptor();
       doSetup(descriptor, configureLocalInspectionTools(), getTestRootDisposable());
       InjectedLanguageManagerImpl.pushInjectors(getProject());
 
@@ -274,6 +283,11 @@ public abstract class LightPlatformTestCase extends UsefulTestCase implements Da
       VirtualFilePointerManagerImpl filePointerManager = (VirtualFilePointerManagerImpl)VirtualFilePointerManager.getInstance();
       filePointerManager.storePointers();
     });
+  }
+
+  @NotNull
+  protected LightProjectDescriptor getProjectDescriptor() {
+    return new SimpleLightProjectDescriptor(getModuleType(), getProjectJDK());
   }
 
   public static void doSetup(@NotNull LightProjectDescriptor descriptor,
@@ -289,13 +303,19 @@ public abstract class LightPlatformTestCase extends UsefulTestCase implements Da
     }
 
     ProjectManagerEx projectManagerEx = ProjectManagerEx.getInstanceEx();
-    projectManagerEx.openTestProject(ourProject);
+    try {
+      projectManagerEx.openTestProject(ourProject);
+    }
+    catch (Throwable e) {
+      ourProject = null;
+      throw e;
+    }
     if (reusedProject) {
-      DumbService.getInstance(ourProject).queueTask(new UnindexedFilesUpdater(ourProject, false));
+      DumbService.getInstance(ourProject).queueTask(new UnindexedFilesUpdater(ourProject));
     }
 
     MessageBusConnection connection = ourProject.getMessageBus().connect(parentDisposable);
-    connection.subscribe(ProjectTopics.MODULES, new ModuleAdapter() {
+    connection.subscribe(ProjectTopics.MODULES, new ModuleListener() {
       @Override
       public void moduleAdded(@NotNull Project project, @NotNull Module module) {
         fail("Adding modules is not permitted in LightIdeaTestCase.");
@@ -355,122 +375,101 @@ public abstract class LightPlatformTestCase extends UsefulTestCase implements Da
   @Override
   protected void tearDown() throws Exception {
     Project project = getProject();
-    List<Throwable> errors = new SmartList<>();
-    Consumer<ThrowableRunnable<?>> runSafe = c -> {
-      try {
-        c.run();
-      }
-      catch (Throwable e) {
-        errors.add(e);
-      }
-    };
-    try {
-      runSafe.accept(() -> CodeStyleSettingsManager.getInstance(project).dropTemporarySettings());
-      runSafe.accept(() -> checkForSettingsDamage(errors));
-      runSafe.accept(() -> doTearDown(project, ourApplication, true, errors));
-      runSafe.accept(super::tearDown);
-      runSafe.accept(() -> myThreadTracker.checkLeak());
-      runSafe.accept(() -> InjectedLanguageManagerImpl.checkInjectorsAreDisposed(project));
-      runSafe.accept(() -> ((VirtualFilePointerManagerImpl)VirtualFilePointerManager.getInstance()).assertPointersAreDisposed());
-    }
-    catch (Throwable e) {
-      errors.add(e);
-    }
-    finally {
-      CompoundRuntimeException.throwIfNotEmpty(errors);
-    }
+
+    new RunAll(
+      () -> CodeStyleSettingsManager.getInstance(project).dropTemporarySettings(),
+      this::checkForSettingsDamage,
+      () -> doTearDown(project, ourApplication),
+      () -> checkEditorsReleased(),
+      super::tearDown,
+      () -> myThreadTracker.checkLeak(),
+      () -> InjectedLanguageManagerImpl.checkInjectorsAreDisposed(project),
+      () -> ((VirtualFilePointerManagerImpl)VirtualFilePointerManager.getInstance()).assertPointersAreDisposed()
+    ).run();
   }
 
-  public static void doTearDown(@NotNull final Project project, @NotNull IdeaTestApplication application, boolean checkForEditors, @NotNull List<Throwable> exceptions) throws Exception {
-    PsiDocumentManagerImpl documentManager;
-    try {
-      ((FileTypeManagerImpl)FileTypeManager.getInstance()).drainReDetectQueue();
-      DocumentCommitThread.getInstance().clearQueue();
-      CodeStyleSettingsManager.getInstance(project).dropTemporarySettings();
-
-      checkJavaSwingTimersAreDisposed(exceptions);
-
-      UsefulTestCase.doPostponedFormatting(project);
-
-      LookupManager lookupManager = LookupManager.getInstance(project);
-      if (lookupManager != null) {
-        lookupManager.hideActiveLookup();
-      }
-      ((StartupManagerImpl)StartupManager.getInstance(project)).prepareForNextTest();
-      if (ProjectManager.getInstance() == null) {
-        exceptions.add(new AssertionError("Application components damaged"));
-      }
-
-      ContainerUtil.addIfNotNull(exceptions, new WriteCommandAction.Simple(project) {
-        @Override
-        protected void run() throws Throwable {
-          if (ourSourceRoot != null) {
-            try {
-              final VirtualFile[] children = ourSourceRoot.getChildren();
-              for (VirtualFile child : children) {
-                child.delete(this);
-              }
-            }
-            catch (IOException e) {
-              //noinspection CallToPrintStackTrace
-              e.printStackTrace();
+  public static void doTearDown(@NotNull Project project, @NotNull IdeaTestApplication application) throws Exception {
+    new RunAll().
+      append(() -> ((FileTypeManagerImpl)FileTypeManager.getInstance()).drainReDetectQueue()).
+      append(() -> CodeStyleSettingsManager.getInstance(project).dropTemporarySettings()).
+      append(LightPlatformTestCase::checkJavaSwingTimersAreDisposed).
+      append(() -> UsefulTestCase.doPostponedFormatting(project)).
+      append(() -> LookupManager.getInstance(project).hideActiveLookup()).
+      append(() -> ((StartupManagerImpl)StartupManager.getInstance(project)).prepareForNextTest()).
+      append(() -> { if (ProjectManager.getInstance() == null) throw new AssertionError("Application components damaged"); }).
+      append(() -> WriteCommandAction.runWriteCommandAction(project, () -> {
+        if (ourSourceRoot != null) {
+          try {
+            for (VirtualFile child : ourSourceRoot.getChildren()) {
+              child.delete(LightPlatformTestCase.class);
             }
           }
-          EncodingManager encodingManager = EncodingManager.getInstance();
-          if (encodingManager instanceof EncodingManagerImpl) ((EncodingManagerImpl)encodingManager).clearDocumentQueue();
-
-          FileDocumentManager manager = FileDocumentManager.getInstance();
-
-          ApplicationManager.getApplication().runWriteAction(EmptyRunnable.getInstance()); // Flush postponed formatting if any.
-          manager.saveAllDocuments();
-          if (manager instanceof FileDocumentManagerImpl) {
-            ((FileDocumentManagerImpl)manager).dropAllUnsavedDocuments();
+          catch (IOException e) {
+            //noinspection CallToPrintStackTrace
+            e.printStackTrace();
           }
         }
-      }.execute().getThrowable());
 
-      assertFalse(PsiManager.getInstance(project).isDisposed());
-      if (!ourAssertionsInTestDetected) {
-        if (IdeaLogger.ourErrorsOccurred != null) {
-          throw IdeaLogger.ourErrorsOccurred;
+        FileDocumentManager manager = FileDocumentManager.getInstance();
+        if (manager instanceof FileDocumentManagerImpl) {
+          ((FileDocumentManagerImpl)manager).dropAllUnsavedDocuments();
         }
-      }
-      documentManager = clearUncommittedDocuments(project);
-      ((HintManagerImpl)HintManager.getInstance()).cleanup();
-      DocumentCommitThread.getInstance().clearQueue();
+      })).
+      append(() -> assertFalse(PsiManager.getInstance(project).isDisposed())).
+      append(() -> {
+        EncodingManager encodingManager = EncodingManager.getInstance();
+        if (encodingManager instanceof EncodingManagerImpl) {
+          ((EncodingManagerImpl)encodingManager).clearDocumentQueue();
+        }
 
-      EdtTestUtil.runInEdtAndWait(() -> {
-        ((UndoManagerImpl)UndoManager.getGlobalInstance()).dropHistoryInTests();
-        ((UndoManagerImpl)UndoManager.getInstance(project)).dropHistoryInTests();
-
-        UIUtil.dispatchAllInvocationEvents();
-      });
-
-      TemplateDataLanguageMappings.getInstance(project).cleanupForNextTest();
-    }
-    finally {
-      ProjectManagerEx.getInstanceEx().closeTestProject(project);
-      application.setDataProvider(null);
-      ourTestCase = null;
-      ((PsiManagerImpl)PsiManager.getInstance(project)).cleanupForNextTest();
-      CompletionProgressIndicator.cleanupForNextTest();
-    }
-
-    if (checkForEditors) {
-      checkEditorsReleased(exceptions);
-    }
-    documentManager.clearUncommittedDocuments();
-    
-    if (ourTestCount++ % 100 == 0) {
-      // some tests are written in Groovy, and running all of them may result in some 40M of memory wasted on bean infos
-      // so let's clear the cache every now and then to ensure it doesn't grow too large
-      GCUtil.clearBeanInfoCache();
-    }
+        if (!ourAssertionsInTestDetected) {
+          if (IdeaLogger.ourErrorsOccurred != null) {
+            throw IdeaLogger.ourErrorsOccurred;
+          }
+        }
+      }).
+      append(() -> clearUncommittedDocuments(project)).
+      append(() -> ((HintManagerImpl)HintManager.getInstance()).cleanup()).
+      append(() -> DocumentCommitThread.getInstance().clearQueue()).
+      append(() -> ((UndoManagerImpl)UndoManager.getGlobalInstance()).dropHistoryInTests()).
+      append(() -> ((UndoManagerImpl)UndoManager.getInstance(project)).dropHistoryInTests()).
+      append(() -> ((DocumentReferenceManagerImpl)DocumentReferenceManager.getInstance()).cleanupForNextTest()).
+      append(() -> TemplateDataLanguageMappings.getInstance(project).cleanupForNextTest()).
+      append(() -> ((PsiManagerImpl)PsiManager.getInstance(project)).cleanupForNextTest()).
+      append(() -> ProjectManagerEx.getInstanceEx().closeTestProject(project)).
+      append(() -> application.setDataProvider(null)).
+      append(() -> ourTestCase = null).
+      append(() -> CompletionProgressIndicator.cleanupForNextTest()).
+      append(() -> {
+        if (ourTestCount++ % 100 == 0) {
+          // some tests are written in Groovy, and running all of them may result in some 40M of memory wasted on bean infos
+          // so let's clear the cache every now and then to ensure it doesn't grow too large
+          GCUtil.clearBeanInfoCache();
+        }
+      }).
+      run();
   }
   
   private static int ourTestCount;
 
-  public static PsiDocumentManagerImpl clearUncommittedDocuments(@NotNull Project project) {
+  private static void checkJavaSwingTimersAreDisposed() throws Exception {
+    Class<?> TimerQueueClass = Class.forName("javax.swing.TimerQueue");
+    Method sharedInstance = ReflectionUtil.getMethod(TimerQueueClass, "sharedInstance");
+
+    Object timerQueue = sharedInstance.invoke(null);
+    DelayQueue delayQueue = ReflectionUtil.getField(TimerQueueClass, timerQueue, DelayQueue.class, "queue");
+    Delayed timer = delayQueue.peek();
+    if (timer != null) {
+      long delay = timer.getDelay(TimeUnit.MILLISECONDS);
+      String text = "(delayed for " + delay + "ms)";
+      Method getTimer = ReflectionUtil.getDeclaredMethod(timer.getClass(), "getTimer");
+      Timer swingTimer = (Timer)getTimer.invoke(timer);
+      text = "Timer (listeners: "+Arrays.asList(swingTimer.getActionListeners()) + ") "+text;
+      throw new AssertionFailedError("Not disposed java.swing.Timer: " + text + "; queue:" + timerQueue);
+    }
+  }
+
+  public static void clearUncommittedDocuments(@NotNull Project project) {
     PsiDocumentManagerImpl documentManager = (PsiDocumentManagerImpl)PsiDocumentManager.getInstance(project);
     documentManager.clearUncommittedDocuments();
 
@@ -479,38 +478,29 @@ public abstract class LightPlatformTestCase extends UsefulTestCase implements Da
       Project defaultProject = projectManager.getDefaultProject();
       ((PsiDocumentManagerImpl)PsiDocumentManager.getInstance(defaultProject)).clearUncommittedDocuments();
     }
-    return documentManager;
   }
 
-  public static void checkEditorsReleased(@NotNull List<Throwable> exceptions) {
-    Editor[] allEditors = EditorFactory.getInstance().getAllEditors();
-    if (allEditors.length == 0) {
-      return;
-    }
+  public static void checkEditorsReleased() {
+    new RunAll(
+      () -> UIUtil.dispatchAllInvocationEvents(),
+      () -> {
+        RunAll runAll = new RunAll();
+        for (Editor editor : EditorFactory.getInstance().getAllEditors()) {
+          runAll = runAll
+            .append(() -> EditorFactoryImpl.throwNotReleasedError(editor))
+            .append(() -> EditorFactory.getInstance().releaseEditor(editor));
+        }
+        runAll.run();
+      }).run();
+  }
 
-    for (Editor editor : allEditors) {
-      try {
-        EditorFactoryImpl.throwNotReleasedError(editor);
-      }
-      catch (Throwable e) {
-        exceptions.add(e);
-      }
-      finally {
-        EditorFactory.getInstance().releaseEditor(editor);
-      }
-    }
-
-    try {
-      ((EditorImpl)allEditors[0]).throwDisposalError("Unreleased editors: " + allEditors.length);
-    }
-    catch (Throwable e) {
-      exceptions.add(e);
-    }
+  @Override
+  public final void runBare() throws Throwable {
+    runBareImpl(this::startRunAndTear);
   }
 
   @SuppressWarnings("AssignmentToStaticFieldFromInstanceMethod")
-  @Override
-  public final void runBare() throws Throwable {
+  protected void runBareImpl(ThrowableRunnable<?> start) throws Exception {
     if (!shouldRunTest()) {
       return;
     }
@@ -519,7 +509,7 @@ public abstract class LightPlatformTestCase extends UsefulTestCase implements Da
     EdtTestUtil.runInEdtAndWait(() -> {
       try {
         ourTestThread = Thread.currentThread();
-        startRunAndTear();
+        start.run();
       }
       finally {
         ourTestThread = null;
@@ -630,7 +620,6 @@ public abstract class LightPlatformTestCase extends UsefulTestCase implements Da
   @NotNull
   @Override
   protected CodeStyleSettings getCurrentCodeStyleSettings() {
-    if (CodeStyleSchemes.getInstance().getCurrentScheme() == null) return new CodeStyleSettings();
     return CodeStyleSettingsManager.getSettings(getProject());
   }
 
@@ -648,9 +637,10 @@ public abstract class LightPlatformTestCase extends UsefulTestCase implements Da
     }
 
     if (!ourProject.isDisposed()) {
+      assertEquals(ourProject, ourModule.getProject());
+
       @SuppressWarnings("ConstantConditions")
       File ioFile = new File(ourProject.getProjectFilePath());
-      Disposer.dispose(ourProject);
       if (ioFile.exists()) {
         File dir = ioFile.getParentFile();
         if (dir.getName().startsWith(UsefulTestCase.TEMP_DIR_MARKER)) {
@@ -662,7 +652,8 @@ public abstract class LightPlatformTestCase extends UsefulTestCase implements Da
       }
     }
 
-    ProjectManagerEx.getInstanceEx().closeAndDispose(ourProject);
+    assertTrue(ProjectManagerEx.getInstanceEx().closeAndDispose(ourProject));
+    assertTrue(ourProject.isDisposed());
 
     // project may be disposed but empty folder may still be there
     if (ourPathToKeep != null) {
@@ -675,6 +666,12 @@ public abstract class LightPlatformTestCase extends UsefulTestCase implements Da
     }
 
     ourProject = null;
+    assertTrue(ourModule.isDisposed());
+    ourModule = null;
+    if (ourPsiManager != null) {
+      assertTrue(ourPsiManager.isDisposed());
+      ourPsiManager = null;
+    }
     ourPathToKeep = null;
   }
 

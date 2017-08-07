@@ -81,24 +81,21 @@ public class DetectedFrameworksTree extends CheckboxTree {
   }
 
   public void processUncheckedNodes(@NotNull final Consumer<DetectedFrameworkTreeNodeBase> consumer) {
-    TreeUtil.traverse(getRoot(), new TreeUtil.Traverse() {
-      @Override
-      public boolean accept(Object node) {
-        if (node instanceof DetectedFrameworkTreeNodeBase) {
-          final DetectedFrameworkTreeNodeBase frameworkNode = (DetectedFrameworkTreeNodeBase)node;
-          if (!frameworkNode.isChecked()) {
-            consumer.consume(frameworkNode);
-          }
+    TreeUtil.traverse(getRoot(), node -> {
+      if (node instanceof DetectedFrameworkTreeNodeBase) {
+        final DetectedFrameworkTreeNodeBase frameworkNode = (DetectedFrameworkTreeNodeBase)node;
+        if (!frameworkNode.isChecked()) {
+          consumer.consume(frameworkNode);
         }
-        return true;
       }
+      return true;
     });
   }
 
   @Override
   protected void onNodeStateChanged(CheckedTreeNode node) {
     final List<DetectedFrameworkDescription> checked = Arrays.asList(getCheckedNodes(DetectedFrameworkDescription.class, null));
-    final List<DetectedFrameworkDescription> disabled = FrameworkDetectionUtil.getDisabledDescriptions(checked, Collections.<DetectedFrameworkDescription>emptyList());
+    final List<DetectedFrameworkDescription> disabled = FrameworkDetectionUtil.getDisabledDescriptions(checked, Collections.emptyList());
     for (DetectedFrameworkDescription description : disabled) {
       final DefaultMutableTreeNode treeNode = TreeUtil.findNodeWithObject(getRoot(), description);
       if (treeNode instanceof CheckedTreeNode) {

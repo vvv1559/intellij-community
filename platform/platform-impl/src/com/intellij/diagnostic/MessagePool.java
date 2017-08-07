@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2009 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@
 package com.intellij.diagnostic;
 
 import com.intellij.openapi.diagnostic.IdeaLoggingEvent;
-import com.intellij.util.Alarm;
+import com.intellij.util.concurrency.AppExecutorUtil;
 import com.intellij.util.containers.ContainerUtil;
 import org.apache.log4j.Category;
 import org.apache.log4j.Priority;
@@ -26,6 +26,9 @@ import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 public class MessagePool {
   private static final int MAX_POOL_SIZE_FOR_FATALS = 100;
@@ -117,12 +120,11 @@ public class MessagePool {
     private final int myTimeOut;
     private final int myMaxGroupSize;
     private final List<AbstractMessage> myMessages = new ArrayList<>();
-    private final Alarm myAlarm;
+    private Future<?> myAlarm = CompletableFuture.completedFuture(null);
 
     public MessageGrouper(int timeout, int maxGroupSize) {
       myTimeOut = timeout;
       myMaxGroupSize = maxGroupSize;
-      myAlarm = new Alarm(Alarm.ThreadToUse.SHARED_THREAD);
     }
 
     public void run() {
@@ -140,6 +142,7 @@ public class MessagePool {
       } else {
         message = new GroupedLogMessage(new ArrayList<>(myMessages));
       }
+      message.setOnReadCallback(() -> notifyListenersRead());
       myMessages.clear();
       myIdeFatals.add(message);
       notifyListenersAdd();
@@ -152,8 +155,8 @@ public class MessagePool {
         if (myMessages.size() >= myMaxGroupSize) {
           post();
         } else {
-          myAlarm.cancelAllRequests();
-          myAlarm.addRequest(this, myTimeOut);
+          myAlarm.cancel(false);
+          myAlarm = AppExecutorUtil.getAppScheduledExecutorService().schedule(this, myTimeOut, TimeUnit.MILLISECONDS);
         }
       }
       return result;

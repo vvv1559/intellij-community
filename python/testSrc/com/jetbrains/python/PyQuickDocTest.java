@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -263,6 +263,36 @@ public class PyQuickDocTest extends LightMarkedTestCase {
 
   // PY-17705
   public void testOptionalParameterType() {
+    runWithLanguageLevel(LanguageLevel.PYTHON35, this::checkHTMLOnly);
+  }
+
+  public void testHomogeneousTuple() {
+    runWithLanguageLevel(LanguageLevel.PYTHON35, this::checkHTMLOnly);
+  }
+
+  public void testHeterogeneousTuple() {
+    runWithLanguageLevel(LanguageLevel.PYTHON35, this::checkHTMLOnly);
+  }
+
+  public void testUnknownTuple() {
+    runWithLanguageLevel(LanguageLevel.PYTHON35, this::checkHTMLOnly);
+  }
+
+  public void testTypeVars() {
+    runWithLanguageLevel(LanguageLevel.PYTHON35, this::checkHTMLOnly);
+  }
+  
+  // PY-22730
+  public void testOptionalAndUnionTypesContainingTypeVars() {
+    runWithLanguageLevel(LanguageLevel.PYTHON36, this::checkHTMLOnly);
+  }
+
+  // PY-22685
+  public void testBuiltinLen() {
+    checkHTMLOnly();
+  }
+
+  public void testReferenceToMethodQualifiedWithInstance() {
     checkHTMLOnly();
   }
 }

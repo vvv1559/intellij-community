@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,7 +21,6 @@ import com.intellij.lang.impl.PsiBuilderFactoryImpl;
 import com.intellij.mock.*;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.application.ex.PathManagerEx;
-import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.EditorFactory;
 import com.intellij.openapi.extensions.ExtensionPointName;
 import com.intellij.openapi.extensions.Extensions;
@@ -52,7 +51,6 @@ import com.intellij.psi.impl.source.text.BlockSupportImpl;
 import com.intellij.psi.impl.source.text.DiffLog;
 import com.intellij.psi.util.CachedValuesManager;
 import com.intellij.util.CachedValuesManagerImpl;
-import com.intellij.util.Function;
 import com.intellij.util.messages.MessageBus;
 import junit.framework.TestCase;
 import org.jetbrains.annotations.NonNls;
@@ -125,6 +123,7 @@ public abstract class ParsingTestCase extends PlatformLiteFixture {
     myProject.registerService(PsiManager.class, myPsiManager);
     myProject.registerService(StartupManager.class, new StartupManagerImpl(myProject));
     registerExtensionPoint(FileTypeFactory.FILE_TYPE_FACTORY_EP, FileTypeFactory.class);
+    registerExtensionPoint(MetaLanguage.EP_NAME, MetaLanguage.class);
 
     for (ParserDefinition definition : myDefinitions) {
       addExplicitExtension(LanguageParserDefinitions.INSTANCE, definition.getFileNodeType().getLanguage(), definition);
@@ -178,6 +177,7 @@ public abstract class ParsingTestCase extends PlatformLiteFixture {
     });
   }
 
+  @NotNull
   public MockProjectEx getProject() {
     return myProject;
   }
@@ -188,10 +188,11 @@ public abstract class ParsingTestCase extends PlatformLiteFixture {
 
   @Override
   protected void tearDown() throws Exception {
-    super.tearDown();
     myFile = null;
     myProject = null;
     myPsiManager = null;
+    myFileFactory = null;
+    super.tearDown();
   }
 
   protected String getTestDataPath() {
