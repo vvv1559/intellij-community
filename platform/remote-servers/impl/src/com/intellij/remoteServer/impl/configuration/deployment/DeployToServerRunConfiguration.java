@@ -61,7 +61,11 @@ public class DeployToServerRunConfiguration<S extends ServerConfiguration, D ext
   private DeploymentSource myDeploymentSource;
   private D myDeploymentConfiguration;
 
-  public DeployToServerRunConfiguration(Project project, ConfigurationFactory factory, String name, ServerType<S> serverType, DeploymentConfigurator<D, S> deploymentConfigurator) {
+  public DeployToServerRunConfiguration(Project project,
+                                        ConfigurationFactory factory,
+                                        String name,
+                                        ServerType<S> serverType,
+                                        DeploymentConfigurator<D, S> deploymentConfigurator) {
     super(project, factory, name);
     myServerType = serverType;
     myDeploymentConfigurator = deploymentConfigurator;
@@ -90,7 +94,7 @@ public class DeployToServerRunConfiguration<S extends ServerConfiguration, D ext
     SettingsEditorGroup<DeployToServerRunConfiguration> group = new SettingsEditorGroup<>();
     group.addEditor("Deployment", commonEditor);
     DeployToServerRunConfigurationExtensionsManager.getInstance().appendEditors(this, group);
-    return group.getEditors().size() == 1 ? commonEditor : group;
+    return group;
   }
 
   @Nullable
@@ -158,20 +162,24 @@ public class DeployToServerRunConfiguration<S extends ServerConfiguration, D ext
 
   @Override
   public boolean isGeneratedName() {
-    return getDeploymentSource() != null && getDeploymentConfigurator().isGeneratedConfigurationName(getName(), getDeploymentSource());
+    return getDeploymentSource() != null && getDeploymentConfiguration() != null &&
+           getDeploymentConfigurator().isGeneratedConfigurationName(getName(), getDeploymentSource(), getDeploymentConfiguration());
   }
 
   @Nullable
   @Override
   public String suggestedName() {
-    return getDeploymentSource() == null ? null : getDeploymentConfigurator().suggestConfigurationName(getDeploymentSource());
+    if (getDeploymentSource() == null || getDeploymentConfiguration() == null) {
+      return null;
+    }
+    return getDeploymentConfigurator().suggestConfigurationName(getDeploymentSource(), getDeploymentConfiguration());
   }
 
   @Override
   public void readExternal(Element element) throws InvalidDataException {
     super.readExternal(element);
     ConfigurationState state = XmlSerializer.deserialize(element, ConfigurationState.class);
-    myServerName =  null;
+    myServerName = null;
     myDeploymentSource = null;
     myServerName = state.myServerName;
     final Element deploymentTag = state.myDeploymentTag;

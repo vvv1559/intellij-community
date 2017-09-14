@@ -22,6 +22,7 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.progress.Task;
+import com.intellij.openapi.progress.util.BackgroundTaskUtil;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.roots.FileIndexFacade;
 import com.intellij.openapi.util.Ref;
@@ -268,7 +269,7 @@ public class SvnCheckoutProvider implements CheckoutProvider {
       myFilter = filter;
     }
 
-    public boolean accept(final File file) throws SVNException {
+    public boolean accept(final File file) {
       final VirtualFile vf = myLfs.findFileByIoFile(file);
       return vf != null && myFilter.accept(vf);
     }
@@ -302,7 +303,7 @@ public class SvnCheckoutProvider implements CheckoutProvider {
 
       final WorkingCopyFormat result = displayUpgradeDialog();
 
-      getApplication().getMessageBus().syncPublisher(SvnVcs.WC_CONVERTED).run();
+      BackgroundTaskUtil.syncPublisher(SvnVcs.WC_CONVERTED).run();
 
       return result;
     }

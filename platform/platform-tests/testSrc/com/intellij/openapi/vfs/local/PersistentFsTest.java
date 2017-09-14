@@ -160,13 +160,13 @@ public class PersistentFsTest extends PlatformTestCase {
     }
   }
 
-  public void testInvalidJarRootsIgnored() throws Exception {
+  public void testInvalidJarRootsIgnored() {
     File file = IoTestUtil.createTestFile("file.txt");
     String url = "jar://" + FileUtil.toSystemIndependentName(file.getPath()) + "!/";
     assertNull(VirtualFileManager.getInstance().findFileByUrl(url));
   }
 
-  public void testBrokenJarRoots() throws Exception {
+  public void testBrokenJarRoots() {
     final File jarFile = IoTestUtil.createTestFile("empty.jar");
 
     final int[] logCount = {0};
@@ -178,10 +178,11 @@ public class PersistentFsTest extends PlatformTestCase {
       }
     });
 
+    VirtualFile jarRoot = null;
     try {
       String rootUrl = "jar://" + FileUtil.toSystemIndependentName(jarFile.getPath()) + "!/";
       assertNotNull(getVirtualFile(jarFile));
-      VirtualFile jarRoot = VirtualFileManager.getInstance().findFileByUrl(rootUrl);
+      jarRoot = VirtualFileManager.getInstance().findFileByUrl(rootUrl);
       assertNotNull(jarRoot);
       assertTrue(jarRoot.isValid());
       assertEquals(0, jarRoot.getChildren().length);
@@ -286,7 +287,7 @@ public class PersistentFsTest extends PlatformTestCase {
     assertFalse(FSRecords.isDirty());
   }
 
-  public void testProcessEventsMustIgnoreDeleteDuplicates() throws IOException {
+  public void testProcessEventsMustIgnoreDeleteDuplicates() {
     VirtualFile vFile = setupFile();
     checkEvents("Before:[VFileDeleteEvent->file.txt]\nAfter:[VFileDeleteEvent->file.txt]\n",
                 new VFileDeleteEvent(this, vFile, false),
@@ -317,7 +318,7 @@ public class PersistentFsTest extends PlatformTestCase {
     assertEquals(expectedEvents, log.toString());
   }
 
-  public void testProcessEventsMustGroupDependentEventsCorrectly() throws IOException {
+  public void testProcessEventsMustGroupDependentEventsCorrectly() {
     VirtualFile vFile = setupFile();
     checkEvents("Before:[VFileCreateEvent->xx.created, VFileDeleteEvent->file.txt]\n" +
                 "After:[VFileCreateEvent->xx.created, VFileDeleteEvent->file.txt]\n",

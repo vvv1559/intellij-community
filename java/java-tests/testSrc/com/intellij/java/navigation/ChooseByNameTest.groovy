@@ -16,7 +16,6 @@
 package com.intellij.java.navigation
 
 import com.intellij.codeInsight.JavaProjectCodeInsightSettings
-import com.intellij.ide.actions.GotoFileItemProvider
 import com.intellij.ide.util.gotoByName.*
 import com.intellij.lang.java.JavaLanguage
 import com.intellij.openapi.Disposable
@@ -186,9 +185,15 @@ class Intf {
 
   void "test accept file paths starting with a dot"() {
     def file = myFixture.addFileToProject("foo/index.html", "foo")
-    def model = new GotoFileModel(project)
-    def popup = ChooseByNamePopup.createPopup(project, model, new GotoFileItemProvider(project, null, model))
+    def popup = createPopup(new GotoFileModel(project))
     assert calcPopupElements(popup, "./foo/in") == [file]
+  }
+
+  void "test don't match path to jdk"() {
+    def objects = getPopupElements(new GotoFileModel(project), "Object.java", true)
+    assert objects.size() > 0
+    assert (objects[0] as PsiFile).virtualFile.path.contains("mockJDK")
+    assert getPopupElements(new GotoFileModel(project), "mockJDK/Object.java", true).size() == 0
   }
 
   void "test goto file can go to dir"() {
@@ -270,6 +275,7 @@ class Intf {
   void "test anonymous classes"() {
     def goo = myFixture.addClass("package goo; class Goo { Runnable r = new Runnable() {}; }")
     assert getPopupElements(new GotoClassModel2(project), 'Goo$1') == [goo]
+    assert getPopupElements(new GotoSymbolModel2(project), 'Goo$1') == [goo]
   }
 
   void "test qualified name matching"() {
@@ -298,12 +304,18 @@ class Intf {
     def clazz = myFixture.addClass("package foo.bar; class Goo implements Runnable { public void run() {} }")
     def ourRun = null
     def sdkRun = null
+    def sdkRun2 = null
+    def sdkRun3 = null
     runInEdtAndWait {
       ourRun = clazz.methods[0]
       sdkRun = ourRun.containingClass.interfaces[0].methods[0]
+      sdkRun2 = myFixture.javaFacade.findClass("java.security.PrivilegedAction").methods[0]
+      sdkRun3 = myFixture.javaFacade.findClass("java.security.PrivilegedExceptionAction").methods[0]
     }
 
     def withLibs = filterJavaItems(getPopupElements(new GotoSymbolModel2(project), 'run ', true))
+    withLibs.remove(sdkRun2)
+    withLibs.remove(sdkRun3)
     assert withLibs == [sdkRun]
     assert !(ourRun in withLibs)
 
@@ -374,6 +386,23 @@ class Intf {
     assert calcPopupElements(popup, "List", false) == [foo, bar]
   }
 
+  void "test file path matching without slashes"() {
+    def fooBarFile = myFixture.addFileToProject("foo/bar/index_fooBar.html", "")
+    def fbFile = myFixture.addFileToProject("fb/index_fb.html", "")
+    def fbSomeFile = myFixture.addFileToProject("fb/some.dir/index_fbSome.html", "")
+    def someFbFile = myFixture.addFileToProject("some/fb/index_someFb.html", "")
+
+    def popup = createPopup(new GotoFileModel(project))
+    assert calcPopupElements(popup, "barindex") == [fooBarFile]
+    assert calcPopupElements(popup, "fooindex") == [fooBarFile]
+    assert calcPopupElements(popup, "fbindex") == [fbFile, someFbFile, fooBarFile, fbSomeFile]
+    assert calcPopupElements(popup, "fbhtml") == [fbFile, someFbFile, fbSomeFile, fooBarFile]
+
+    // partial slashes
+    assert calcPopupElements(popup, "somefb/index.html") == [someFbFile]
+    assert calcPopupElements(popup, "somefb\\index.html") == [someFbFile]
+  }
+
   private List<Object> getPopupElements(ChooseByNameModel model, String text, boolean checkboxState = false) {
     return calcPopupElements(createPopup(model), text, checkboxState)
   }
@@ -388,7 +417,7 @@ class Intf {
         semaphore.up()
       } as Consumer<Set<?>>)
     }
-    if (!semaphore.waitFor(10000)) {
+    if (!semaphore.waitFor(10_000_000)) {
       printThreadDump()
       fail()
     }

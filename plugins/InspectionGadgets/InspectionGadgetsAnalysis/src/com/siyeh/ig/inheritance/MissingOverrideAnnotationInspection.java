@@ -20,27 +20,30 @@ import com.intellij.codeInspection.BaseJavaBatchLocalInspectionTool;
 import com.intellij.codeInspection.CleanupLocalInspectionTool;
 import com.intellij.codeInspection.ProblemsHolder;
 import com.intellij.codeInspection.ui.MultipleCheckboxOptionsPanel;
+import com.intellij.openapi.module.EffectiveLanguageLevelUtil;
+import com.intellij.openapi.module.Module;
+import com.intellij.openapi.module.ModuleManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.text.StringUtil;
+import com.intellij.pom.java.LanguageLevel;
 import com.intellij.psi.*;
-import com.intellij.psi.impl.java.stubs.index.JavaStubIndexKeys;
 import com.intellij.psi.search.GlobalSearchScope;
-import com.intellij.psi.search.GlobalSearchScopeUtil;
-import com.intellij.psi.search.SearchScope;
-import com.intellij.psi.stubs.StubIndex;
 import com.intellij.psi.util.InheritanceUtil;
-import com.intellij.psi.util.PsiSuperMethodUtil;
 import com.intellij.psi.util.PsiUtil;
 import com.intellij.util.ThreeState;
 import com.siyeh.InspectionGadgetsBundle;
+import com.siyeh.ig.JavaOverridingMethodUtil;
 import com.siyeh.ig.psiutils.MethodUtils;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
+import java.util.Arrays;
 import java.util.Objects;
+import java.util.function.Predicate;
+import java.util.stream.Stream;
 
 public class MissingOverrideAnnotationInspection extends BaseJavaBatchLocalInspectionTool implements CleanupLocalInspectionTool{
-  private static final int MAX_OVERRIDDEN_METHOD_SEARCH = 20;
   private static final String OVERRIDE_SHORT_NAME = StringUtil.getShortName(CommonClassNames.JAVA_LANG_OVERRIDE);
 
   @SuppressWarnings({"PublicField"})
@@ -127,45 +130,15 @@ public class MissingOverrideAnnotationInspection extends BaseJavaBatchLocalInspe
       // 3) only one annotation with short name 'Override' exists: it's 'java.lang.Override'
       private void checkMissingOverrideInOverriders(@NotNull PsiMethod method,
                                                     @NotNull InspectionResult result) {
-        if (method.hasModifierProperty(PsiModifier.FINAL)) {
-          return;
-        }
-
         Project project = method.getProject();
-        String name = method.getName();
-        SearchScope useScope = method.getUseScope();
-        GlobalSearchScope searchScope = GlobalSearchScopeUtil.toGlobalSearchScope(useScope, project);
-        PsiMethod[] methods =
-          StubIndex.getElements(JavaStubIndexKeys.METHODS, name, project, searchScope, PsiMethod.class)
-          .stream()
-          .filter(m -> {
-            if (m == method) return false;
-            for (PsiAnnotation annotation : m.getModifierList().getAnnotations()) {
-              PsiJavaCodeReferenceElement ref = annotation.getNameReferenceElement();
-              if (ref != null && OVERRIDE_SHORT_NAME.equals(ref.getReferenceName())) {
-                return false;
-              }
-            }
-            return true;
-          })
-          .limit(MAX_OVERRIDDEN_METHOD_SEARCH + 1)
-          .toArray(PsiMethod[]::new);
+        LanguageLevel minimal = Objects.requireNonNull(method.getContainingClass()).isInterface() ? LanguageLevel.JDK_1_6 : LanguageLevel.JDK_1_5;
 
-        // search should be deterministic
-        if (methods.length > MAX_OVERRIDDEN_METHOD_SEARCH) {
-          return;
-        }
-
-        boolean isOverrideApplicableToJava5Methods = !Objects.requireNonNull(method.getContainingClass()).isInterface();
-
-        for (PsiMethod candidate : methods) {
-          if ((isOverrideApplicableToJava5Methods || PsiUtil.isLanguageLevel6OrHigher(candidate)) && PsiSuperMethodUtil.isSuperMethod(candidate, method)) {
-            result.hierarchyAnnotated = ThreeState.NO;
-            return;
-          }
-        }
-
-        result.hierarchyAnnotated = ThreeState.YES;
+        GlobalSearchScope scope = getLanguageLevelScope(minimal, project);
+        if (scope == null) return;
+        Predicate<PsiMethod> preFilter = m -> !JavaOverridingMethodUtil.containsAnnotationWithName(m, OVERRIDE_SHORT_NAME);
+        Stream<PsiMethod> overridingMethods = JavaOverridingMethodUtil.getOverridingMethodsIfCheapEnough(method, scope, preFilter);
+        if (overridingMethods == null) return;
+        result.hierarchyAnnotated = ThreeState.fromBoolean(!overridingMethods.findAny().isPresent());
       }
 
       private void checkMissingOverride(@NotNull PsiMethod method,
@@ -239,5 +212,15 @@ public class MissingOverrideAnnotationInspection extends BaseJavaBatchLocalInspe
   private static class InspectionResult {
     private boolean requireAnnotation = false;
     private ThreeState hierarchyAnnotated = ThreeState.UNSURE;
+  }
+
+  @Nullable
+  private static GlobalSearchScope getLanguageLevelScope(@NotNull LanguageLevel minimal, @NotNull Project project) {
+    GlobalSearchScope[] scopes = Arrays
+      .stream(ModuleManager.getInstance(project).getModules())
+      .filter(m -> EffectiveLanguageLevelUtil.getEffectiveLanguageLevel(m).isAtLeast(minimal))
+      .map(Module::getModuleScope)
+      .toArray(GlobalSearchScope[]::new);
+    return scopes.length == 0 ? null : GlobalSearchScope.union(scopes);
   }
 }

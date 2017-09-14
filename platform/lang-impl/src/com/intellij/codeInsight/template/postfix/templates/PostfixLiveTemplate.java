@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -32,6 +32,7 @@ import com.intellij.openapi.command.undo.UndoConstants;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.Editor;
+import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.util.Condition;
 import com.intellij.openapi.util.Conditions;
 import com.intellij.openapi.util.text.StringUtil;
@@ -59,6 +60,7 @@ public class PostfixLiveTemplate extends CustomLiveTemplateBase {
     Set<String> keys = Sets.newHashSet();
     Language language = PsiUtilCore.getLanguageAtOffset(file, offset);
     for (PostfixTemplateProvider provider : LanguagePostfixTemplate.LANG_EP.allForLanguage(language)) {
+      ProgressManager.checkCanceled();
       keys.addAll(getKeys(provider));
     }
     return keys;
@@ -74,6 +76,7 @@ public class PostfixLiveTemplate extends CustomLiveTemplateBase {
     }
 
     while (startOffset > 0) {
+      ProgressManager.checkCanceled();
       char currentChar = documentContent.charAt(startOffset - 1);
       if (!Character.isJavaIdentifierPart(currentChar)) {
         if (!provider.isTerminalSymbol(currentChar)) {
@@ -108,6 +111,7 @@ public class PostfixLiveTemplate extends CustomLiveTemplateBase {
     Editor editor = callback.getEditor();
     int currentOffset = editor.getCaretModel().getOffset();
     for (PostfixTemplateProvider provider : LanguagePostfixTemplate.LANG_EP.allForLanguage(getLanguage(callback))) {
+      ProgressManager.checkCanceled();
       String key = computeTemplateKeyWithoutContextChecking(provider, editor.getDocument().getCharsSequence(), currentOffset);
       if (key != null) return key;
     }
@@ -157,14 +161,16 @@ public class PostfixLiveTemplate extends CustomLiveTemplateBase {
   }
 
   @Override
-  public boolean isApplicable(PsiFile file, int offset, boolean wrapping) {
+  public boolean isApplicable(@NotNull CustomTemplateCallback callback, int offset, boolean wrapping) {
     PostfixTemplatesSettings settings = PostfixTemplatesSettings.getInstance();
-    if (wrapping || file == null || settings == null || !settings.isPostfixTemplatesEnabled()) {
+    if (wrapping || settings == null || !settings.isPostfixTemplatesEnabled()) {
       return false;
     }
-    Language language = PsiUtilCore.getLanguageAtOffset(file, offset);
+    PsiFile contextFile = callback.getFile();
+    Language language = PsiUtilCore.getLanguageAtOffset(contextFile, offset);
+    String fileText = contextFile.getText();
     for (PostfixTemplateProvider provider : LanguagePostfixTemplate.LANG_EP.allForLanguage(language)) {
-      if (StringUtil.isNotEmpty(computeTemplateKeyWithoutContextChecking(provider, file.getText(), offset + 1))) {
+      if (StringUtil.isNotEmpty(computeTemplateKeyWithoutContextChecking(provider, fileText, offset + 1))) {
         return true;
       }
     }
@@ -194,7 +200,7 @@ public class PostfixLiveTemplate extends CustomLiveTemplateBase {
   }
 
   @Override
-  public boolean hasCompletionItem(@NotNull PsiFile file, int offset) {
+  public boolean hasCompletionItem(@NotNull CustomTemplateCallback callback, int offset) {
     return true;
   }
 
@@ -206,10 +212,12 @@ public class PostfixLiveTemplate extends CustomLiveTemplateBase {
     Collection<CustomLiveTemplateLookupElement> result = ContainerUtil.newHashSet();
     CustomTemplateCallback callback = new CustomTemplateCallback(editor, file);
     for (PostfixTemplateProvider provider : LanguagePostfixTemplate.LANG_EP.allForLanguage(getLanguage(callback))) {
+      ProgressManager.checkCanceled();
       String key = computeTemplateKeyWithoutContextChecking(callback);
       if (key != null && editor.getCaretModel().getCaretCount() == 1) {
         Condition<PostfixTemplate> isApplicationTemplateFunction = createIsApplicationTemplateFunction(provider, key, file, editor);
         for (PostfixTemplate postfixTemplate : provider.getTemplates()) {
+          ProgressManager.checkCanceled();
           if (isApplicationTemplateFunction.value(postfixTemplate)) {
             result.add(new PostfixTemplateLookupElement(this, postfixTemplate, postfixTemplate.getKey(), provider, false));
           }

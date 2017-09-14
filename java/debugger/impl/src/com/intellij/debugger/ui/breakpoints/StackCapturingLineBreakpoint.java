@@ -39,8 +39,8 @@ import com.intellij.openapi.util.ThrowableComputable;
 import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.PsiElement;
+import com.intellij.ui.SimpleColoredComponent;
 import com.intellij.util.containers.ContainerUtil;
-import com.intellij.util.containers.WeakHashMap;
 import com.sun.jdi.*;
 import com.sun.jdi.event.LocatableEvent;
 import one.util.streamex.StreamEx;
@@ -151,13 +151,17 @@ public class StackCapturingLineBreakpoint extends WildcardMethodBreakpoint {
       .limit(1);
   }
 
-  public static void recreateAll(DebugProcessImpl debugProcess) {
+  public static void deleteAll(DebugProcessImpl debugProcess) {
     DebuggerManagerThreadImpl.assertIsManagerThread();
     List<StackCapturingLineBreakpoint> bpts = debugProcess.getUserData(CAPTURE_BREAKPOINTS);
     if (!ContainerUtil.isEmpty(bpts)) {
       bpts.forEach(debugProcess.getRequestsManager()::deleteRequest);
       bpts.clear();
     }
+  }
+
+  public static void createAll(DebugProcessImpl debugProcess) {
+    DebuggerManagerThreadImpl.assertIsManagerThread();
     if (Registry.is("debugger.capture.points")) {
       DebuggerSettings.getInstance().getCapturePoints().stream().filter(c -> c.myEnabled).forEach(c -> track(debugProcess, c));
     }
@@ -179,6 +183,22 @@ public class StackCapturingLineBreakpoint extends WildcardMethodBreakpoint {
     if (!StringUtil.isEmpty(getClassName())) {
       super.createRequest(debugProcess);
     }
+  }
+
+  @Override
+  public void customizeRenderer(SimpleColoredComponent renderer) {
+    renderer.append("Capture point at " + myCapturePoint.myClassName + "." + myCapturePoint.myMethodName);
+  }
+
+  @Override
+  public boolean isEnabled() {
+    return myCapturePoint.myEnabled;
+  }
+
+  @Override
+  public void setEnabled(boolean enabled) {
+    myCapturePoint.myEnabled = enabled;
+    DebuggerSettings.getInstance().setCapturePoints(DebuggerSettings.getInstance().getCapturePoints()); // to fire change event
   }
 
   private static void track(DebugProcessImpl debugProcess, CapturePoint capturePoint) {
@@ -281,7 +301,7 @@ public class StackCapturingLineBreakpoint extends WildcardMethodBreakpoint {
   private static class MyEvaluator {
     private final String myExpression;
     private ExpressionEvaluator myEvaluator;
-    private final WeakHashMap<Location, ExpressionEvaluator> myEvaluatorCache = new WeakHashMap<>();
+    private final Map<Location, ExpressionEvaluator> myEvaluatorCache = ContainerUtil.createWeakMap();
 
     public MyEvaluator(String expression) {
       myExpression = expression;

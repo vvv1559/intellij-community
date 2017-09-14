@@ -721,7 +721,7 @@ public class HighlightControlFlowUtil {
         String text = JavaErrorMessages.message("lambda.variable.must.be.final");
         HighlightInfo highlightInfo = HighlightInfo.newHighlightInfo(HighlightInfoType.ERROR).range(context).descriptionAndTooltip(text).create();
         QuickFixAction.registerQuickFixAction(highlightInfo, QUICK_FIX_FACTORY.createVariableAccessFromInnerClassFix(variable, lambdaExpression));
-        return highlightInfo;
+        return ErrorFixExtensionPoint.registerFixes(highlightInfo, context, "lambda.variable.must.be.final");
       }
     }
     return null;
@@ -753,6 +753,15 @@ public class HighlightControlFlowUtil {
           }
         }
         effectivelyFinal = notAccessedForWriting(variable, new LocalSearchScope(scope));
+        if (effectivelyFinal) {
+          return ReferencesSearch.search(variable).forEach(ref -> {
+            PsiElement element = ref.getElement();
+            if (element instanceof PsiReferenceExpression && PsiUtil.isAccessedForWriting((PsiExpression)element)) {
+              return !ControlFlowUtil.isVariableAssignedInLoop((PsiReferenceExpression)element, variable);
+            }
+            return true;
+          });
+        }
       }
     }
     return effectivelyFinal;

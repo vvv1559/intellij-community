@@ -72,13 +72,16 @@ public class StandardInstructionVisitor extends InstructionVisitor {
       dfaDest = instruction.getAssignedValue();
     }
 
+    NullabilityProblem problem = PsiUtil.skipParenthesizedExprDown(instruction.getLExpression()) instanceof PsiArrayAccessExpression ?
+                                 NullabilityProblem.storingToNotNullArray : NullabilityProblem.assigningToNotNull;
+
     if (dfaDest instanceof DfaVariableValue) {
       DfaVariableValue var = (DfaVariableValue) dfaDest;
 
       final PsiModifierListOwner psi = var.getPsiVariable();
       boolean forceDeclaredNullity = !(psi instanceof PsiParameter && psi.getParent() instanceof PsiParameterList);
       if (forceDeclaredNullity && var.getInherentNullability() == Nullness.NOT_NULL) {
-        checkNotNullable(memState, dfaSource, NullabilityProblem.assigningToNotNull, instruction.getRExpression());
+        checkNotNullable(memState, dfaSource, problem, instruction.getRExpression());
       }
       if (!(psi instanceof PsiField) || !psi.hasModifierProperty(PsiModifier.VOLATILE)) {
         memState.setVarValue(var, dfaSource);
@@ -89,7 +92,7 @@ public class StandardInstructionVisitor extends InstructionVisitor {
       }
 
     } else if (dfaDest instanceof DfaTypeValue && ((DfaTypeValue)dfaDest).isNotNull()) {
-      checkNotNullable(memState, dfaSource, NullabilityProblem.assigningToNotNull, instruction.getRExpression());
+      checkNotNullable(memState, dfaSource, problem, instruction.getRExpression());
     }
 
     memState.push(dfaDest);
@@ -320,11 +323,16 @@ public class StandardInstructionVisitor extends InstructionVisitor {
       }
     }
 
+    PsiMethodReferenceExpression methodRef = instruction.getMethodType() == MethodCallInstruction.MethodType.METHOD_REFERENCE_CALL ?
+                                             (PsiMethodReferenceExpression)instruction.getContext() : null;
     DfaInstructionState[] result = new DfaInstructionState[finalStates.size()];
     int i = 0;
     for (DfaMemoryState state : finalStates) {
       if (instruction.shouldFlushFields()) {
         state.flushFields();
+      }
+      if (methodRef != null) {
+        processMethodReferenceResult(methodRef, instruction.getContracts(), state.peek());
       }
       result[i++] = new DfaInstructionState(runner.getInstruction(instruction.getIndex() + 1), state);
     }
@@ -333,8 +341,7 @@ public class StandardInstructionVisitor extends InstructionVisitor {
 
   @NotNull
   private List<DfaMemoryState> handleKnownMethods(MethodCallInstruction instruction, DataFlowRunner runner, DfaMemoryState memState) {
-    PsiMethodCallExpression call = ObjectUtils.tryCast(instruction.getCallExpression(), PsiMethodCallExpression.class);
-    CustomMethodHandlers.CustomMethodHandler handler = CustomMethodHandlers.find(call);
+    CustomMethodHandlers.CustomMethodHandler handler = CustomMethodHandlers.find(instruction);
     if (handler == null) return Collections.emptyList();
     DfaCallArguments callArguments = popCall(instruction, runner, memState, false);
     List<DfaMemoryState> states =
@@ -396,7 +403,7 @@ public class StandardInstructionVisitor extends InstructionVisitor {
           forceNotNull(runner, memState, arg);
         }
       }
-      else if (!instruction.updateOfNullable(memState, arg) && requiredNullability == Nullness.UNKNOWN) {
+      else if (requiredNullability == Nullness.UNKNOWN) {
         checkNotNullable(memState, arg, NullabilityProblem.passingNullableArgumentToNonAnnotatedParameter, anchor);
       }
     }
@@ -480,6 +487,15 @@ public class StandardInstructionVisitor extends InstructionVisitor {
 
     final PsiType type = instruction.getResultType();
     final MethodCallInstruction.MethodType methodType = instruction.getMethodType();
+
+    if (methodType == MethodCallInstruction.MethodType.METHOD_REFERENCE_CALL && qualifierValue instanceof DfaVariableValue) {
+      PsiMethod method = instruction.getTargetMethod();
+      PsiModifierListOwner modifierListOwner = DfaExpressionFactory.getAccessedVariableOrGetter(method);
+      if (modifierListOwner != null) {
+        return factory.getVarFactory().createVariableValue(modifierListOwner, instruction.getResultType(), false,
+                                                           (DfaVariableValue)qualifierValue);
+      }
+    }
 
     if (methodType == MethodCallInstruction.MethodType.UNBOXING) {
       return factory.getBoxedFactory().createUnboxed(qualifierValue);

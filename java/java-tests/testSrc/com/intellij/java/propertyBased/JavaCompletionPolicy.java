@@ -17,6 +17,7 @@ package com.intellij.java.propertyBased;
 
 import com.intellij.lang.jvm.JvmModifier;
 import com.intellij.psi.*;
+import com.intellij.psi.impl.source.resolve.reference.impl.providers.FileReference;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.psi.util.PsiUtil;
 import com.intellij.testFramework.propertyBased.CompletionPolicy;
@@ -28,6 +29,12 @@ import java.util.Arrays;
  * @author peter
  */
 class JavaCompletionPolicy extends CompletionPolicy {
+
+  @Override
+  protected boolean isAfterError(@NotNull PsiFile file, @NotNull PsiElement leaf) {
+    return super.isAfterError(file, leaf) || isAdoptedOrphanPsiAfterClassEnd(leaf);
+  }
+
   @Override
   protected boolean shouldSuggestReferenceText(@NotNull PsiReference ref, @NotNull PsiElement target) {
     PsiElement refElement = ref.getElement();
@@ -35,17 +42,34 @@ class JavaCompletionPolicy extends CompletionPolicy {
         !shouldSuggestJavaTarget((PsiJavaCodeReferenceElement)refElement, target)) {
       return false;
     }
+    if (ref instanceof FileReference) {
+      if (target instanceof PsiFile) {
+        return false; // IDEA-177167
+      }
+      if (target instanceof PsiDirectory && ((PsiDirectory)target).getName().endsWith(".jar") && ((PsiDirectory)target).getParentDirectory() == null) {
+        return false; // IDEA-178629
+      }
+    }
     return true;
+  }
+
+  private static boolean isAdoptedOrphanPsiAfterClassEnd(PsiElement element) {
+    PsiClass topmostClass = PsiTreeUtil.getTopmostParentOfType(element, PsiClass.class);
+    if (topmostClass != null) {
+      PsiElement rBrace = topmostClass.getRBrace();
+      if (rBrace != null && rBrace.getTextRange().getStartOffset() < element.getTextRange().getStartOffset()) return true;
+    }
+    return false;
   }
 
   private static boolean shouldSuggestJavaTarget(PsiJavaCodeReferenceElement ref, @NotNull PsiElement target) {
     if (PsiTreeUtil.getParentOfType(ref, PsiPackageStatement.class) != null) return false;
 
     if (!ref.isQualified() && target instanceof PsiPackage) return false;
-    if (target instanceof PsiClass && PsiTreeUtil.isAncestor(target, ref, true)) {
-      PsiElement lBrace = ((PsiClass)target).getLBrace();
-      if (lBrace == null || ref.getTextRange().getStartOffset() < lBrace.getTextRange().getStartOffset()) {
-        return false;
+    if (target instanceof PsiClass) {
+      if (isCyclicInheritance(ref, target)) return false;
+      if (ref.getParent() instanceof PsiAnnotation && !((PsiClass)target).isAnnotationType()) {
+        return false; // red code
       }
     }
     if (target instanceof PsiField &&
@@ -57,6 +81,14 @@ class JavaCompletionPolicy extends CompletionPolicy {
       return false;
     }
     return target != null;
+  }
+
+  private static boolean isCyclicInheritance(PsiJavaCodeReferenceElement ref, @NotNull PsiElement target) {
+    if (PsiTreeUtil.isAncestor(target, ref, true)) {
+      PsiElement lBrace = ((PsiClass)target).getLBrace();
+      return lBrace == null || ref.getTextRange().getStartOffset() < lBrace.getTextRange().getStartOffset();
+    }
+    return false;
   }
 
   private static boolean isStaticWithInstanceQualifier(PsiJavaCodeReferenceElement ref, @NotNull PsiElement target) {

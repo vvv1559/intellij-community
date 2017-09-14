@@ -28,6 +28,7 @@ import com.intellij.openapi.vcs.changes.Change;
 import com.intellij.openapi.vcs.changes.ChangeListManager;
 import com.intellij.openapi.vfs.VirtualFile;
 import git4idea.GitUtil;
+import git4idea.changes.GitChangeUtils;
 import git4idea.commands.*;
 import git4idea.merge.GitMergeCommittingConflictResolver;
 import git4idea.merge.GitMerger;
@@ -40,6 +41,8 @@ import javax.swing.event.HyperlinkEvent;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import static git4idea.GitUtil.HEAD;
+import static git4idea.GitUtil.updateAndRefreshVfs;
 import static git4idea.config.GitVcsSettings.UpdateChangesPolicy.STASH;
 
 class GitMergeOperation extends GitBranchOperation {
@@ -75,8 +78,10 @@ class GitMergeOperation extends GitBranchOperation {
       while (hasMoreRepositories() && !fatalErrorHappened) {
         final GitRepository repository = next();
         LOG.info("next repository: " + repository);
-
         VirtualFile root = repository.getRoot();
+
+        Collection<Change> changes = GitChangeUtils.getDiff(repository, HEAD, myBranchToMerge, false);
+
         GitLocalChangesWouldBeOverwrittenDetector localChangesDetector =
           new GitLocalChangesWouldBeOverwrittenDetector(root, GitLocalChangesWouldBeOverwrittenDetector.Operation.MERGE);
         GitSimpleEventDetector unmergedFiles = new GitSimpleEventDetector(GitSimpleEventDetector.Event.UNMERGED_PREVENTING_MERGE);
@@ -90,7 +95,7 @@ class GitMergeOperation extends GitBranchOperation {
                                             alreadyUpToDateDetector);
         if (result.success()) {
           LOG.info("Merged successfully");
-          refresh(repository);
+          updateAndRefreshVfs(repository, changes);
           markSuccessful(repository);
           if (alreadyUpToDateDetector.hasHappened()) {
             alreadyUpToDateRepositories += 1;
@@ -111,7 +116,7 @@ class GitMergeOperation extends GitBranchOperation {
         else if (mergeConflict.hasHappened()) {
           LOG.info("Merge conflict");
           myConflictedRepositories.put(repository, Boolean.FALSE);
-          refresh(repository);
+          updateAndRefreshVfs(repository);
           markSuccessful(repository);
         }
         else if (untrackedOverwrittenByMerge.wasMessageDetected()) {
@@ -191,8 +196,9 @@ class GitMergeOperation extends GitBranchOperation {
     List<Change> affectedChanges = conflictingRepositoriesAndAffectedChanges.getSecond();
 
     Collection<String> absolutePaths = GitUtil.toAbsolute(repository.getRoot(), localChangesOverwrittenByMerge.getRelativeFilePaths());
-    int smartCheckoutDecision = myUiHandler.showSmartOperationDialog(myProject, affectedChanges, absolutePaths, "merge", null);
-    if (smartCheckoutDecision == GitSmartOperationDialog.SMART_EXIT_CODE) {
+    GitSmartOperationDialog.Choice decision = myUiHandler.showSmartOperationDialog(myProject, affectedChanges, absolutePaths,
+                                                                                   "merge", null);
+    if (decision == GitSmartOperationDialog.Choice.SMART) {
       return doSmartMerge(allConflictingRepositories);
     }
     else {
@@ -232,7 +238,7 @@ class GitMergeOperation extends GitBranchOperation {
       if (!result.success()) {
         if (mergeConflict.hasHappened()) {
           myConflictedRepositories.put(repository, Boolean.TRUE);
-          refresh(repository);
+          updateAndRefreshVfs(repository);
           markSuccessful(repository);
         }
         else {
@@ -241,7 +247,7 @@ class GitMergeOperation extends GitBranchOperation {
         }
       }
       else {
-        refresh(repository);
+        updateAndRefreshVfs(repository);
         markSuccessful(repository);
       }
     }
@@ -312,7 +318,7 @@ class GitMergeOperation extends GitBranchOperation {
   @NotNull
   private GitCommandResult rollbackMerge(@NotNull GitRepository repository) {
     GitCommandResult result = myGit.resetMerge(repository, null);
-    refresh(repository);
+    updateAndRefreshVfs(repository);
     return result;
   }
 
@@ -339,13 +345,6 @@ class GitMergeOperation extends GitBranchOperation {
   @Override
   protected String getOperationName() {
     return "merge";
-  }
-
-  private void refresh(GitRepository... repositories) {
-    for (GitRepository repository : repositories) {
-      refreshRoot(repository);
-      repository.update();
-    }
   }
 
   private class MyMergeConflictResolver extends GitMergeCommittingConflictResolver {

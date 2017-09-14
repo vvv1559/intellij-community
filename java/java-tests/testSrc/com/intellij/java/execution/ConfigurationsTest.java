@@ -33,14 +33,19 @@ import com.intellij.execution.runners.ExecutionEnvironmentBuilder;
 import com.intellij.execution.testframework.SearchForTestsTask;
 import com.intellij.execution.testframework.TestSearchScope;
 import com.intellij.execution.ui.CommonJavaParametersPanel;
+import com.intellij.openapi.Disposable;
+import com.intellij.openapi.compiler.CompilerMessage;
+import com.intellij.openapi.compiler.CompilerMessageCategory;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleManager;
 import com.intellij.openapi.options.Configurable;
 import com.intellij.openapi.options.ConfigurationException;
+import com.intellij.openapi.project.Project;
 import com.intellij.openapi.projectRoots.Sdk;
 import com.intellij.openapi.roots.*;
 import com.intellij.openapi.ui.LabeledComponent;
 import com.intellij.openapi.util.Disposer;
+import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.JarFileSystem;
 import com.intellij.openapi.vfs.LocalFileSystem;
@@ -49,6 +54,7 @@ import com.intellij.psi.*;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.rt.ant.execution.SegmentedOutputStream;
 import com.intellij.rt.execution.junit.JUnitStarter;
+import com.intellij.testFramework.CompilerTester;
 import com.intellij.testFramework.MapDataContext;
 import com.intellij.testFramework.PlatformTestUtil;
 import com.intellij.testFramework.PsiTestUtil;
@@ -61,10 +67,7 @@ import junit.framework.TestCase;
 import org.jdom.Element;
 
 import java.io.*;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-import java.util.StringTokenizer;
+import java.util.*;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -84,7 +87,7 @@ public class ConfigurationsTest extends BaseConfigurationTestCase {
     assignJdk(getModule1());
   }
 
-  public void testCreateConfiguration() throws IOException, ExecutionException {
+  public void testCreateConfiguration() throws ExecutionException {
     Module module1 = getModule1();
     PsiClass psiClass = findTestA(module1);
     JUnitConfiguration configuration = createConfiguration(psiClass);
@@ -182,7 +185,7 @@ public class ConfigurationsTest extends BaseConfigurationTestCase {
     List<String> lines = extractAllInPackageTests(parameters, psiPackage);
     Assertion.compareUnordered(
       //category, filters, classNames...
-      new Object[]{"", "", psiClass.getQualifiedName(), psiClass2.getQualifiedName(), derivedTest.getQualifiedName(), RT_INNER_TEST_NAME,
+      new Object[]{"", "", psiClass.getQualifiedName(), derivedTest.getQualifiedName(), RT_INNER_TEST_NAME,
         testB.getQualifiedName()},
       lines);
   }
@@ -223,6 +226,19 @@ public class ConfigurationsTest extends BaseConfigurationTestCase {
     String childTest2 = findClass(child2, "test1.Test5").getQualifiedName();
     String ancestorTest = findClass(ancestor, "test1.TestA").getQualifiedName();
     CHECK.containsAll(tests, new Object[]{ancestorTest, childTest1, childTest2});
+  }
+
+  public void testConstructors() throws IOException, ExecutionException {
+    addModule("module6", true);
+    PsiPackage psiPackage = JavaPsiFacade.getInstance(myProject).findPackage("test1");
+    JUnitConfiguration configuration = createJUnitConfiguration(psiPackage, AllInPackageConfigurationProducer.class, new MapDataContext());
+    configuration.getPersistentData().setScope(TestSearchScope.SINGLE_MODULE);
+    configuration.setModule(getModule(3));
+    assertNotNull(configuration);
+    checkPackage(psiPackage.getQualifiedName(), configuration);
+    JavaParameters parameters = checkCanRun(configuration);
+    List<String> tests = extractAllInPackageTests(parameters, psiPackage);
+    CHECK.containsAll(tests, new Object[]{"test1.TestCaseInheritor"});
   }
 
   public void testClasspathConfiguration() throws CantRunException {
@@ -272,7 +288,7 @@ public class ConfigurationsTest extends BaseConfigurationTestCase {
     checkClassName(oldRc.getPersistentData().getMainClassName(), newRc);
   }
 
-  public void testTestClassPathWhenRunningConfigurations() throws IOException, ExecutionException {
+  public void testTestClassPathWhenRunningConfigurations() throws ExecutionException {
     addModule("module4", false);
     Module module4 = getModule4();
     assignJdk(module4);
@@ -300,7 +316,7 @@ public class ConfigurationsTest extends BaseConfigurationTestCase {
     checkContains(classPath, output);
   }
 
-  public void testSameTestAndCommonOutput() throws IOException, ExecutionException {
+  public void testSameTestAndCommonOutput() throws ExecutionException {
     addModule("module4", false);
     Module module = getModule4();
     assignJdk(module);
@@ -387,7 +403,7 @@ public class ConfigurationsTest extends BaseConfigurationTestCase {
     checkCanRun(configuration);
   }
 
-  public void testAllInPackageForProject() throws IOException, ExecutionException {
+  public void testAllInPackageForProject() throws ExecutionException {
     // module1 -> module2 -> module3
     // module5
     addModule("module5");
@@ -413,7 +429,7 @@ public class ConfigurationsTest extends BaseConfigurationTestCase {
     }
   }
 
-  public void testOriginalModule() throws Exception {
+  public void testOriginalModule() {
     ModuleRootModificationUtil.addDependency(getModule1(), getModule2(), DependencyScope.TEST, true);
     ModuleRootModificationUtil.addDependency(getModule2(), getModule3(), DependencyScope.TEST, false);
     assertTrue(ModuleBasedConfiguration.canRestoreOriginalModule(getModule1(), new Module[] {getModule2()}));
@@ -446,7 +462,7 @@ public class ConfigurationsTest extends BaseConfigurationTestCase {
     return PathUtil.getLocalPath(output);
   }
 
-  private static String[] addOutputs(Module module, int index) {
+  private String[] addOutputs(Module module, int index) {
     String[] outputs = new String[2];
     String prefix = "outputs" + File.separatorChar;
     VirtualFile generalOutput = findFile(prefix + "general " + index);
@@ -455,6 +471,15 @@ public class ConfigurationsTest extends BaseConfigurationTestCase {
     outputs[1] = testOutput.getPresentableUrl();
     PsiTestUtil.setCompilerOutputPath(module, generalOutput.getUrl(), false);
     PsiTestUtil.setCompilerOutputPath(module, testOutput.getUrl(), true);
+    Disposer.register(getTestRootDisposable(), new Disposable() {
+      @Override
+      public void dispose() {
+        for (File file : new File(outputs[1]).listFiles()) {
+          if (file.getName().equals("keep.dir")) continue;
+          FileUtil.delete(file);
+        }
+      }
+    });
     return outputs;
   }
 
@@ -468,7 +493,21 @@ public class ConfigurationsTest extends BaseConfigurationTestCase {
       final JavaParameters parameters = ((TestPackage)state).getJavaParameters();
       final SearchForTestsTask task = ((TestPackage)state).createSearchingForTestsTask();
       assertNotNull(task);
-      task.startSearch();
+      Project project = configuration.getProject();
+      try {
+        CompilerTester tester = new CompilerTester(project, Arrays.asList(ModuleManager.getInstance(project).getModules()));
+        try {
+          List<CompilerMessage> messages = tester.make();
+          assertFalse(messages.stream().anyMatch(message -> message.getCategory() == CompilerMessageCategory.ERROR));
+          task.startSearch();
+        }
+        finally {
+          tester.tearDown();
+        }
+      }
+      catch (Exception e) {
+        fail(e.getMessage());
+      }
     }
     try {
       configuration.checkConfiguration();

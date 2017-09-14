@@ -18,6 +18,9 @@ package com.intellij.testGuiFramework.framework
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.util.Ref
 import com.intellij.testGuiFramework.impl.GuiTestStarter
+import com.intellij.testGuiFramework.impl.GuiTestThread
+import com.intellij.testGuiFramework.impl.GuiTestUtilKt
+import com.intellij.testGuiFramework.launcher.GuiTestLocalLauncher
 import com.intellij.testGuiFramework.launcher.GuiTestLocalLauncher.runIdeLocally
 import com.intellij.testGuiFramework.launcher.ide.CommunityIde
 import com.intellij.testGuiFramework.launcher.ide.Ide
@@ -34,11 +37,14 @@ import org.junit.runner.notification.RunNotifier
 import org.junit.runners.BlockJUnit4ClassRunner
 import org.junit.runners.model.FrameworkMethod
 import org.junit.runners.model.InitializationError
+import java.util.concurrent.TimeUnit
 import kotlin.reflect.KClass
 
 
 class GuiTestLocalRunner @Throws(InitializationError::class)
-constructor(testClass: Class<*>) : BlockJUnit4ClassRunner(testClass) {
+  constructor(testClass: Class<*>, val ide: Ide?) : BlockJUnit4ClassRunner(testClass) {
+
+  constructor(testClass: Class<*>): this(testClass, null)
 
   val SERVER_LOG = org.apache.log4j.Logger.getLogger("#com.intellij.testGuiFramework.framework.GuiTestLocalRunner")!!
   val criticalError = Ref<Boolean>(false)
@@ -67,8 +73,10 @@ constructor(testClass: Class<*>) : BlockJUnit4ClassRunner(testClass) {
     val server = JUnitServerHolder.getServer()
 
     try {
-      if (!server.isConnected())
-        runIdeLocally(port = server.getPort(), ide = getIdeFromAnnotation(this@GuiTestLocalRunner.testClass.javaClass))
+      if (!server.isConnected()) {
+        val localIde = ide ?: getIdeFromAnnotation(this@GuiTestLocalRunner.testClass.javaClass)
+        runIdeLocally(port = server.getPort(), ide = localIde)
+      }
       val jUnitTestContainer = JUnitTestContainer(method.declaringClass, method.name)
       server.send(TransportMessage(MessageType.RUN_TEST, jUnitTestContainer))
     }
@@ -89,6 +97,22 @@ constructor(testClass: Class<*>) : BlockJUnit4ClassRunner(testClass) {
           Type.FINISHED -> { eachNotifier.fireTestFinished(); testIsRunning = false }
           else -> throw UnsupportedOperationException("Unable to recognize received from JUnitClient")
         }
+      }
+      if (message.type == MessageType.RESTART_IDE) {
+        //close previous IDE
+        server.send(TransportMessage(MessageType.CLOSE_IDE))
+        //await to close previous process
+        GuiTestLocalLauncher.process?.waitFor(2, TimeUnit.MINUTES)
+        //restart JUnitServer to let accept a new connection
+        server.stopServer()
+        server.start()
+        //start a new one IDE
+        val localIde = ide ?: getIdeFromAnnotation(this@GuiTestLocalRunner.testClass.javaClass)
+        runIdeLocally(port = server.getPort(), ide = localIde)
+        //check connection
+        //start test if needed
+        val jUnitTestContainer = JUnitTestContainer(method.declaringClass, method.name)
+        server.send(TransportMessage(MessageType.RUN_TEST, jUnitTestContainer))
       }
     }
   }
@@ -116,14 +140,12 @@ constructor(testClass: Class<*>) : BlockJUnit4ClassRunner(testClass) {
     }
 
     try {
-
       notifier.addListener(runListener)
-
       LOG.info("Starting test: '${testClass.name}.${method.name}'")
-      if (GuiTestUtil.doesIdeHaveFatalErrors()) {
-        notifier.fireTestIgnored(describeChild(method))
-        LOG.error("Skipping test '${method.name}': a fatal error has occurred in the IDE")
-        notifier.pleaseStop()
+      //if IDE has a fatal errors from a previous test
+      if (GuiTestUtilKt.fatalErrorsFromIde().isNotEmpty() or GuiTestUtil.doesIdeHaveFatalErrors()) {
+        val restartIdeMessage = TransportMessage(MessageType.RESTART_IDE, "IDE has fatal errors from previous test, let's start a new instance")
+        GuiTestThread.client?.send(restartIdeMessage) ?: throw Exception("JUnitClient is accidentally null")
       }
       else {
         if (!GuiTestStarter.isGuiTestThread())
@@ -147,7 +169,5 @@ constructor(testClass: Class<*>) : BlockJUnit4ClassRunner(testClass) {
       return Ide(ideType, 0, 0)
     }
   }
-
-
 }
 

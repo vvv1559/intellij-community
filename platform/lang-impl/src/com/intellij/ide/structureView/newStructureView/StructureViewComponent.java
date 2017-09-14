@@ -398,10 +398,10 @@ public class StructureViewComponent extends SimpleToolWindowPanel implements Tre
       for (Object element : expandedPsiElements) {
         if (element instanceof PsiElement && !((PsiElement)element).isValid()) {
           continue;
-      }
+        }
         expandPathToElement(element);
+      }
     }
-  }
   }
 
   private StructureViewFactoryImpl.State getSettings() {
@@ -810,6 +810,8 @@ public class StructureViewComponent extends SimpleToolWindowPanel implements Tre
       final Object o = unwrapValue(getValue());
       long currentStamp = -1;
       if (o instanceof PsiElement) {
+        if (!((PsiElement)o).isValid()) return Collections.emptyList();
+
         PsiFile file = ((PsiElement)o).getContainingFile();
         if (file != null) {
           currentStamp = file.getModificationStamp();

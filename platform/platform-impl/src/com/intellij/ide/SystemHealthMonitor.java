@@ -41,6 +41,8 @@ import com.intellij.ui.awt.RelativePoint;
 import com.intellij.util.JdkBundle;
 import com.intellij.util.SystemProperties;
 import com.intellij.util.TimeoutUtil;
+import com.intellij.util.ui.JBUI;
+import com.intellij.util.ui.UIUtil;
 import com.sun.jna.Library;
 import com.sun.jna.Memory;
 import com.sun.jna.Native;
@@ -64,7 +66,8 @@ public class SystemHealthMonitor implements ApplicationComponent {
   private static final NotificationGroup GROUP = new NotificationGroup("System Health", NotificationDisplayType.STICKY_BALLOON, false);
   private static final NotificationGroup LOG_GROUP = NotificationGroup.logOnlyGroup("System Health (minor)");
   private static final String SWITCH_JDK_ACTION = "SwitchBootJdk";
-  private static final String LATEST_JDK_RELEASE = "1.8.0u112";
+  private static final int LATEST_JDK8_UPDATE = 144;
+  private static final String LATEST_JDK_RELEASE = "1.8.0u" + LATEST_JDK8_UPDATE;
 
   private final PropertiesComponent myProperties;
 
@@ -78,7 +81,7 @@ public class SystemHealthMonitor implements ApplicationComponent {
     checkReservedCodeCacheSize();
     checkIBus();
     checkSignalBlocking();
-    checkLauncherScript();
+    checkHiDPIMode();
     startDiskSpaceMonitoring();
   }
 
@@ -91,34 +94,49 @@ public class SystemHealthMonitor implements ApplicationComponent {
     if (bundle != null && !bundle.isBundled()) {
       Version version = bundle.getVersion();
       Integer updateNumber = bundle.getUpdateNumber();
-      if (version != null && updateNumber != null && version.major == 1 && version.minor == 8 && updateNumber < 112) {
-        final String bundleVersion = version.toCompactString() + "u" + updateNumber;
-        boolean showSwitchOption = false;
+      boolean isRuntimeOutdated = version != null && updateNumber != null && version.major == 1 && version.minor == 8 && updateNumber < LATEST_JDK8_UPDATE;
+      if (!SystemInfo.isJetBrainsJvm || isRuntimeOutdated) {
+        String runtimeVersion = version.toCompactString() + "u" + updateNumber;
+        boolean isBundledJdkValid = false;
 
         final File bundledJDKAbsoluteLocation = JdkBundle.getBundledJDKAbsoluteLocation();
         if (bundledJDKAbsoluteLocation.exists() && bundle.getBitness() == Bitness.x64) {
           if (SystemInfo.isMacIntel64) {
-            showSwitchOption = true;
+            isBundledJdkValid = true;
           }
           else if (SystemInfo.isWindows || SystemInfo.isLinux) {
             JdkBundle bundledJdk = JdkBundle.createBundle(bundledJDKAbsoluteLocation, false, false);
             if (bundledJdk != null && bundledJdk.getVersion() != null) {
-              showSwitchOption = true; // Version of bundled jdk is available, so the jdk is compatible with underlying OS
+              isBundledJdkValid = true; // Version of bundled jdk is available, so the jdk is compatible with underlying OS
             }
           }
         }
 
-        showNotification(new KeyHyperlinkAdapter(showSwitchOption ? "outdated.jvm.version.message1" : "outdated.jvm.version.message2") {
-          @Override
-          protected void hyperlinkActivated(HyperlinkEvent e) {
-            if ("switch".equals(e.getDescription())) {
-              ActionManager.getInstance().getAction(SWITCH_JDK_ACTION).actionPerformed(null);
+        if (isRuntimeOutdated) {
+          showNotification(new KeyHyperlinkAdapter(isBundledJdkValid ? "outdated.jre.version.message1" : "outdated.jre.version.message2") {
+            @Override
+            protected void hyperlinkActivated(HyperlinkEvent e) {
+              if ("switch".equals(e.getDescription())) {
+                ActionManager.getInstance().getAction(SWITCH_JDK_ACTION).actionPerformed(null);
+              }
+              else {
+                super.hyperlinkActivated(e);
+              }
             }
-            else {
-              super.hyperlinkActivated(e);
-            }
-          }
-        }, bundleVersion, LATEST_JDK_RELEASE);
+          }, runtimeVersion, LATEST_JDK_RELEASE);
+        }
+        else if (isBundledJdkValid) {
+          showNotification(new KeyHyperlinkAdapter("bundled.jre.version.message") {
+            @Override
+            protected void hyperlinkActivated(HyperlinkEvent e) {
+              if ("switch".equals(e.getDescription())) {
+                ActionManager.getInstance().getAction(SWITCH_JDK_ACTION).actionPerformed(null);
+              }
+              else {
+                super.hyperlinkActivated(e);
+              }
+          }}, runtimeVersion);
+        }
       }
     }
   }
@@ -152,7 +170,7 @@ public class SystemHealthMonitor implements ApplicationComponent {
   private void checkSignalBlocking() {
     if (SystemInfo.isUnix && JnaLoader.isLoaded()) {
       try {
-        LibC lib = (LibC)Native.loadLibrary("c", LibC.class);
+        LibC lib = Native.loadLibrary("c", LibC.class);
         Memory buf = new Memory(1024);
         if (lib.sigaction(LibC.SIGINT, null, buf) == 0) {
           long handler = Native.POINTER_SIZE == 8 ? buf.getLong(0) : buf.getInt(0);
@@ -167,9 +185,11 @@ public class SystemHealthMonitor implements ApplicationComponent {
     }
   }
 
-  private void checkLauncherScript() {
-    if (SystemInfo.isXWindow && System.getProperty("jb.restart.code") != null) {
-      showNotification(new KeyHyperlinkAdapter("ide.launcher.script.outdated"));
+  private void checkHiDPIMode() {
+    // if switched from JRE-HiDPI to IDE-HiDPI
+    boolean switchedHiDPIMode = SystemInfo.isJetBrainsJvm && "true".equalsIgnoreCase(System.getProperty("sun.java2d.uiScale.enabled")) && !UIUtil.isJreHiDPIEnabled();
+    if (SystemInfo.isWindows && ((switchedHiDPIMode && JBUI.isHiDPI(JBUI.sysScale())) || RemoteDesktopService.isRemoteSession())) {
+      showNotification(new KeyHyperlinkAdapter("ide.set.hidpi.mode"));
     }
   }
 
@@ -199,7 +219,13 @@ public class SystemHealthMonitor implements ApplicationComponent {
               .show(new RelativePoint(component, new Point(rect.x + 30, rect.y + rect.height - 10)), Balloon.Position.above);
           }
 
-          Notification notification = LOG_GROUP.createNotification(message, NotificationType.WARNING);
+          Notification notification = LOG_GROUP.createNotification("", message, NotificationType.WARNING,
+            new NotificationListener.Adapter() {
+              @Override
+              protected void hyperlinkActivated(@NotNull Notification notification, @NotNull HyperlinkEvent e) {
+                adapter.hyperlinkActivated(e);
+              }
+            });
           notification.setImportant(true);
           Notifications.Bus.notify(notification);
         });

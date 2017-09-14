@@ -25,6 +25,7 @@ import com.intellij.codeInsight.completion.JavaMethodCallElement;
 import com.intellij.codeInsight.daemon.DaemonCodeAnalyzer;
 import com.intellij.codeInsight.daemon.impl.ParameterHintsPresentationManager;
 import com.intellij.codeInsight.hints.ParameterHintsPass;
+import com.intellij.codeInsight.hints.ParameterHintsPassFactory;
 import com.intellij.codeInsight.javadoc.JavaDocInfoGenerator;
 import com.intellij.codeInsight.lookup.LookupElement;
 import com.intellij.lang.parameterInfo.*;
@@ -131,6 +132,11 @@ public class MethodParameterInfoHandler implements ParameterInfoHandlerWithTabAc
 
   @Override
   public PsiExpressionList findElementForUpdatingParameterInfo(@NotNull final UpdateParameterInfoContext context) {
+    if (context.isPreservedOnHintHidden() && isOutsideOfCompletedInvocation(context)) {
+      ParameterHintsPassFactory.forceHintsUpdateOnNextPass(context.getEditor());
+      context.setPreservedOnHintHidden(false);
+      return null;
+    }
     PsiExpressionList expressionList = findArgumentList(context.getFile(), context.getOffset(), context.getParameterListStart());
     if (expressionList != null) {
       Object[] candidates = context.getObjectsToView();
@@ -172,7 +178,7 @@ public class MethodParameterInfoHandler implements ParameterInfoHandlerWithTabAc
                                                                           context.getOffset(), JavaTokenType.COMMA);
                   TextRange textRange = expressionList.getTextRange();
                   if (context.getOffset() <= textRange.getStartOffset() || context.getOffset() >= textRange.getEndOffset()) index = -1;
-                  highlightHints(context.getEditor(), expressionList, index);
+                  highlightHints(context.getEditor(), expressionList, context.isInnermostContext() ? index : -1);
                 }
               }
 
@@ -184,6 +190,35 @@ public class MethodParameterInfoHandler implements ParameterInfoHandlerWithTabAc
     }
     highlightHints(context.getEditor(), null, -1);
     return null;
+  }
+
+  private static boolean isOutsideOfCompletedInvocation(UpdateParameterInfoContext context) {
+    PsiElement owner = context.getParameterOwner();
+    if (owner != null && owner.isValid()) {
+      TextRange ownerTextRange = owner.getTextRange();
+      int caretOffset = context.getOffset();
+      if (ownerTextRange != null) {
+        if (caretOffset >= ownerTextRange.getStartOffset() && caretOffset <= ownerTextRange.getEndOffset()) {
+          return false;
+        }
+        else {
+          for (PsiElement element : owner.getChildren()) {
+            if (element instanceof PsiErrorElement) return false;
+          }
+          if (owner instanceof PsiExpressionList && ((PsiExpressionList)owner).getExpressions().length == 0) {
+            PsiElement parent = owner.getParent();
+            if (parent instanceof PsiCall) {
+              PsiMethod chosenMethod = CompletionMemory.getChosenMethod((PsiCall)parent);
+              if (chosenMethod != null) {
+                int parametersCount = chosenMethod.getParameterList().getParametersCount();
+                if (parametersCount == 1 || parametersCount == 2 && chosenMethod.isVarArgs()) return false;
+              }
+            }
+          }
+        }
+      }
+    }
+    return true;
   }
 
   private static boolean isIncompatibleParameterCount(@NotNull PsiMethod method, int numberOfParameters) {
@@ -521,7 +556,7 @@ public class MethodParameterInfoHandler implements ParameterInfoHandlerWithTabAc
 
     StringBuilder buffer = new StringBuilder();
 
-    if (settings.SHOW_FULL_SIGNATURES_IN_PARAMETER_INFO) {
+    if (settings.SHOW_FULL_SIGNATURES_IN_PARAMETER_INFO && !context.isSingleParameterInfo()) {
       if (!method.isConstructor()) {
         PsiType returnType = method.getReturnType();
         if (substitutor != null) {
@@ -545,6 +580,8 @@ public class MethodParameterInfoHandler implements ParameterInfoHandlerWithTabAc
     int highlightEndOffset = -1;
     if (numParams > 0) {
       for (int j = 0; j < numParams; j++) {
+        if (context.isSingleParameterInfo() && j != currentParameter) continue;
+        
         PsiParameter param = parms[j];
 
         int startOffset = buffer.length();
@@ -559,22 +596,24 @@ public class MethodParameterInfoHandler implements ParameterInfoHandlerWithTabAc
           appendModifierList(buffer, param);
           buffer.append(paramType.getPresentableText(true));
           String name = param.getName();
-          if (name != null) {
+          if (name != null && !context.isSingleParameterInfo()) {
             buffer.append(" ");
             buffer.append(name);
           }
         }
 
-        int endOffset = buffer.length();
+        if (!context.isSingleParameterInfo()) {
+          int endOffset = buffer.length();
 
-        if (j < numParams - 1) {
-          buffer.append(", ");
-        }
+          if (j < numParams - 1) {
+            buffer.append(", ");
+          }
 
-        if (context.isUIComponentEnabled() &&
-            (j == currentParameter || j == numParams - 1 && param.isVarArgs() && currentParameter >= numParams)) {
-          highlightStartOffset = startOffset;
-          highlightEndOffset = endOffset;
+          if (context.isUIComponentEnabled() &&
+              (j == currentParameter || j == numParams - 1 && param.isVarArgs() && currentParameter >= numParams)) {
+            highlightStartOffset = startOffset;
+            highlightEndOffset = endOffset;
+          }
         }
       }
     }
@@ -582,7 +621,7 @@ public class MethodParameterInfoHandler implements ParameterInfoHandlerWithTabAc
       buffer.append(CodeInsightBundle.message("parameter.info.no.parameters"));
     }
 
-    if (settings.SHOW_FULL_SIGNATURES_IN_PARAMETER_INFO) {
+    if (settings.SHOW_FULL_SIGNATURES_IN_PARAMETER_INFO && !context.isSingleParameterInfo()) {
       buffer.append(")");
     }
 
@@ -591,7 +630,7 @@ public class MethodParameterInfoHandler implements ParameterInfoHandlerWithTabAc
       highlightStartOffset,
       highlightEndOffset,
       !context.isUIComponentEnabled(),
-      method.isDeprecated(),
+      method.isDeprecated() && !context.isSingleParameterInfo() && !context.isSingleOverload(),
       false,
       context.getDefaultParameterColor()
     );

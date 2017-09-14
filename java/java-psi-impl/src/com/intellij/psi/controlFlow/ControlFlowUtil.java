@@ -1044,8 +1044,17 @@ public class ControlFlowUtil {
         boolean isNormal = nextOffset <= endOffset && !isReturn && (nextOffset == endOffset || canCompleteNormally[nextOffset]);
         if (isNormal && nextOffset == endOffset) {
           PsiElement element = flow.getElement(offset);
-          if (element instanceof PsiBreakStatement || element instanceof PsiContinueStatement) {
-            isNormal = false;
+          if (element instanceof PsiBreakStatement) {
+            PsiStatement exitedStatement = ((PsiBreakStatement)element).findExitedStatement();
+            if (exitedStatement == null || flow.getStartOffset(exitedStatement) < startOffset) {
+              isNormal = false;
+            }
+          }
+          else if (element instanceof PsiContinueStatement) {
+            PsiStatement continuedStatement = ((PsiContinueStatement)element).findContinuedStatement();
+            if (continuedStatement == null || flow.getStartOffset(continuedStatement) < startOffset) {
+              isNormal = false;
+            }
           }
         }
         canCompleteNormally[offset] |= isNormal;
@@ -1720,15 +1729,13 @@ public class ControlFlowUtil {
     }
 
     public CopyOnWriteList(Collection<VariableInfo> infos) {
-      list = new LinkedList<>(infos);
+      list = new SmartList<>(infos);
     }
 
     public CopyOnWriteList addAll(CopyOnWriteList addList) {
       CopyOnWriteList newList = new CopyOnWriteList();
       List<VariableInfo> list = getList();
-      for (final VariableInfo variableInfo : list) {
-        newList.list.add(variableInfo);
-      }
+      newList.list.addAll(list);
       List<VariableInfo> toAdd = addList.getList();
       for (final VariableInfo variableInfo : toAdd) {
         if (!newList.list.contains(variableInfo)) {

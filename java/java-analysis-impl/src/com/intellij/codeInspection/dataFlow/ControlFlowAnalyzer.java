@@ -21,6 +21,7 @@ import com.intellij.codeInspection.dataFlow.inliner.*;
 import com.intellij.codeInspection.dataFlow.instructions.*;
 import com.intellij.codeInspection.dataFlow.value.*;
 import com.intellij.codeInspection.dataFlow.value.DfaRelationValue.RelationType;
+import com.intellij.lang.jvm.JvmModifier;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.registry.Registry;
@@ -34,6 +35,7 @@ import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.FList;
 import com.siyeh.ig.numeric.UnnecessaryExplicitNumericCastInspection;
 import com.siyeh.ig.psiutils.CountingLoop;
+import com.siyeh.ig.psiutils.ExpectedTypeUtils;
 import com.siyeh.ig.psiutils.ExpressionUtils;
 import com.siyeh.ig.psiutils.VariableAccessUtils;
 import org.jetbrains.annotations.Contract;
@@ -76,11 +78,31 @@ public class ControlFlowAnalyzer extends JavaElementVisitor {
     myAssertionError = createClassType(scope, JAVA_LANG_ASSERTION_ERROR);
   }
 
+  private void buildClassInitializerFlow(PsiClass psiClass, boolean isStatic) {
+    pushUnknown();
+    ConditionalGotoInstruction conditionalGoto = new ConditionalGotoInstruction(null, false, null);
+    addInstruction(conditionalGoto);
+    for (PsiElement element : psiClass.getChildren()) {
+      if ((element instanceof PsiField || element instanceof PsiClassInitializer) &&
+          ((PsiModifierListOwner)element).hasModifier(JvmModifier.STATIC) == isStatic) {
+        element.accept(this);
+      }
+    }
+    addInstruction(new FlushVariableInstruction(null));
+    conditionalGoto.setOffset(getInstructionCount());
+  }
+
   @Nullable
   public ControlFlow buildControlFlow() {
     myCurrentFlow = new ControlFlow(myFactory);
     try {
-      myCodeFragment.accept(this);
+      if(myCodeFragment instanceof PsiClass) {
+        // if(unknown) { staticInitializer(); } if(unknown) { instanceInitializer(); }
+        buildClassInitializerFlow((PsiClass)myCodeFragment, true);
+        buildClassInitializerFlow((PsiClass)myCodeFragment, false);
+      } else {
+        myCodeFragment.accept(this);
+      }
     }
     catch (CannotAnalyzeException e) {
       return null;
@@ -270,11 +292,25 @@ public class ControlFlowAnalyzer extends JavaElementVisitor {
     if (initializer != null) {
       initializeVariable(field, initializer);
     }
+    else if (!field.hasModifier(JvmModifier.FINAL)) {
+      // initialize with default value
+      DfaVariableValue dfaVariable = myFactory.getVarFactory().createVariableValue(field, false);
+      addInstruction(new PushInstruction(dfaVariable, null, true));
+      addInstruction(new PushInstruction(
+        myFactory.getConstFactory().createFromValue(PsiTypesUtil.getDefaultValue(field.getType()), field.getType(), null), null));
+      addInstruction(new AssignInstruction(null, dfaVariable));
+      addInstruction(new PopInstruction());
+    }
+  }
+
+  @Override
+  public void visitClassInitializer(PsiClassInitializer initializer) {
+    visitCodeBlock(initializer.getBody());
   }
 
   private void initializeVariable(PsiVariable variable, PsiExpression initializer) {
     DfaVariableValue dfaVariable = myFactory.getVarFactory().createVariableValue(variable, false);
-    addInstruction(new PushInstruction(dfaVariable, initializer));
+    addInstruction(new PushInstruction(dfaVariable, initializer, true));
     initializer.accept(this);
     generateBoxingUnboxingInstructionFor(initializer, variable.getType());
     addInstruction(new AssignInstruction(initializer, dfaVariable));
@@ -1013,16 +1049,26 @@ public class ControlFlowAnalyzer extends JavaElementVisitor {
   public void visitArrayInitializerExpression(PsiArrayInitializerExpression expression) {
     startElement(expression);
     PsiType type = expression.getType();
+    PsiType componentType = type instanceof PsiArrayType ? ((PsiArrayType)type).getComponentType() : null;
+    processArrayInitializers(expression, componentType, DfaPsiUtil.getTypeNullability(componentType));
+    pushUnknown();
+    finishElement(expression);
+  }
+
+  private void processArrayInitializers(@NotNull PsiArrayInitializerExpression expression,
+                                        @Nullable PsiType componentType,
+                                        @NotNull Nullness componentNullability) {
     PsiExpression[] initializers = expression.getInitializers();
     for (PsiExpression initializer : initializers) {
       initializer.accept(this);
-      if (type instanceof PsiArrayType) {
-        generateBoxingUnboxingInstructionFor(initializer, ((PsiArrayType)type).getComponentType());
+      if (componentType != null) {
+        generateBoxingUnboxingInstructionFor(initializer, componentType);
+        if (componentNullability == Nullness.NOT_NULL) {
+          addInstruction(new CheckNotNullInstruction(initializer, NullabilityProblem.storingToNotNullArray));
+        }
       }
       addInstruction(new PopInstruction());
     }
-    pushUnknown();
-    finishElement(expression);
   }
 
   @Override
@@ -1515,9 +1561,17 @@ public class ControlFlowAnalyzer extends JavaElementVisitor {
   @Override public void visitNewExpression(PsiNewExpression expression) {
     startElement(expression);
 
+    PsiExpression qualifier = expression.getQualifier();
+    if (qualifier != null) {
+      qualifier.accept(this);
+      addInstruction(new CheckNotNullInstruction(expression, NullabilityProblem.callNPE));
+      addInstruction(new PopInstruction());
+    }
+
     pushUnknown();
 
-    if (expression.getType() instanceof PsiArrayType) {
+    PsiType type = expression.getType();
+    if (type instanceof PsiArrayType) {
       final PsiExpression[] dimensions = expression.getArrayDimensions();
       for (final PsiExpression dimension : dimensions) {
         dimension.accept(this);
@@ -1527,10 +1581,14 @@ public class ControlFlowAnalyzer extends JavaElementVisitor {
       }
       final PsiArrayInitializerExpression arrayInitializer = expression.getArrayInitializer();
       if (arrayInitializer != null) {
-        for (final PsiExpression initializer : arrayInitializer.getInitializers()) {
-          initializer.accept(this);
-          addInstruction(new PopInstruction());
+        Nullness nullability = DfaPsiUtil.getTypeNullability(((PsiArrayType)type).getComponentType());
+        if(nullability == Nullness.UNKNOWN) {
+          PsiType expectedType = ExpectedTypeUtils.findExpectedType(expression, false);
+          if(expectedType instanceof PsiArrayType) {
+            nullability = DfaPsiUtil.getTypeNullability(((PsiArrayType)expectedType).getComponentType());
+          }
         }
+        processArrayInitializers(arrayInitializer, ((PsiArrayType)type).getComponentType(), nullability);
       }
       addConditionalRuntimeThrow();
       addInstruction(new MethodCallInstruction(expression, null, Collections.emptyList()));

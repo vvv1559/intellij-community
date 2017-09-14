@@ -375,14 +375,8 @@ public class PsiVFSListener implements VirtualFileListener {
     final String propertyName = event.getPropertyName();
     final VirtualFile vFile = event.getFile();
 
-    final FileViewProvider oldFileViewProvider = myFileManager.findCachedViewProvider(vFile);
-    final PsiFile oldPsiFile;
-    if (oldFileViewProvider instanceof SingleRootFileViewProvider) {
-      oldPsiFile = ((SingleRootFileViewProvider)oldFileViewProvider).getCachedPsi(oldFileViewProvider.getBaseLanguage());
-    }
-    else {
-      oldPsiFile = null;
-    }
+    FileViewProvider oldFileViewProvider = myFileManager.findCachedViewProvider(vFile);
+    PsiFile oldPsiFile = myFileManager.getCachedPsiFile(vFile);
 
     VirtualFile parent = vFile.getParent();
     final PsiDirectory parentDir = oldPsiFile != null && parent != null ? myFileManager.findDirectory(parent) : getCachedDirectory(parent);
@@ -701,7 +695,7 @@ public class PsiVFSListener implements VirtualFileListener {
               if (FileDocumentManagerImpl.recomputeFileTypeIfNecessary(file)) {
                 myFileManager.forceReload(file);
               } else {
-                myFileManager.reloadFromDisk(psiFile, true); // important to ignore document which might appear already!
+                myFileManager.reloadPsiAfterTextChange(psiFile, file);
               }
             }
           }
@@ -718,7 +712,7 @@ public class PsiVFSListener implements VirtualFileListener {
       ApplicationManager.getApplication().runWriteAction(new ExternalChangeAction() {
         @Override
         public void run() {
-          myFileManager.reloadFromDisk(psiFile, true);
+          myFileManager.reloadPsiAfterTextChange(psiFile, file);
         }
       });
     }

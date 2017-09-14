@@ -66,7 +66,7 @@ class LinuxDistributionBuilder extends OsSpecificDistributionBuilder {
 
   @Override
   void buildArtifacts(String osSpecificDistPath) {
-    buildContext.executeStep("Build Linux .tar.gz", BuildOptions.LINUX_TAR_GZ_STEP) {
+    buildContext.executeStep("Build Linux .tar.gz", BuildOptions.LINUX_ARTIFACTS_STEP) {
       if (customizer.buildTarGzWithoutBundledJre) {
         buildTarGz(null, osSpecificDistPath)
       }
@@ -93,7 +93,7 @@ class LinuxDistributionBuilder extends OsSpecificDistributionBuilder {
     }
 
     buildContext.ant.copy(todir: "${unixDistPath}/bin") {
-      fileset(dir: "$buildContext.paths.communityHome/bin/scripts/unix")
+      fileset(dir: "$buildContext.paths.communityHome/platform/build-scripts/resources/linux/scripts")
 
       filterset(begintoken: "@@", endtoken: "@@") {
         filter(token: "product_full", value: fullName)
@@ -107,10 +107,8 @@ class LinuxDistributionBuilder extends OsSpecificDistributionBuilder {
       }
     }
 
-    if (name != "idea.sh") {
-      //todo[nik] rename idea.sh in sources to something more generic
-      buildContext.ant.move(file: "${unixDistPath}/bin/idea.sh", tofile: "${unixDistPath}/bin/$name")
-    }
+    buildContext.ant.move(file: "${unixDistPath}/bin/executable-template.sh", tofile: "${unixDistPath}/bin/$name")
+
     String inspectScript = buildContext.productProperties.inspectCommandName
     if (inspectScript != "inspect") {
       String targetPath = "${unixDistPath}/bin/${inspectScript}.sh"
@@ -133,7 +131,7 @@ class LinuxDistributionBuilder extends OsSpecificDistributionBuilder {
 
   private void generateReadme(String unixDistPath) {
     String fullName = buildContext.applicationInfo.productName
-    BuildUtils.copyAndPatchFile("$buildContext.paths.communityHome/build/Install-Linux-tar.txt", "$unixDistPath/Install-Linux-tar.txt",
+    BuildUtils.copyAndPatchFile("$buildContext.paths.communityHome/platform/build-scripts/resources/linux/Install-Linux-tar.txt", "$unixDistPath/Install-Linux-tar.txt",
                      ["product_full"   : fullName,
                       "product"        : buildContext.productProperties.baseFileName,
                       "system_selector": buildContext.systemSelector], "@@")
@@ -199,21 +197,19 @@ class LinuxDistributionBuilder extends OsSpecificDistributionBuilder {
       buildContext.messages.progress("Preparing files")
 
       def desktopTemplate = "${buildContext.paths.communityHome}/platform/platform-resources/src/entry.desktop"
-      def ce = buildContext.productProperties.productCode in ["IC", "PC"]
-      def productName = buildContext.applicationInfo.productName
-      if (ce && !productName.contains("Community Edition")) productName += " Community Edition"  // IdeaApplicationInfo.xml//names@product
+      def productName = buildContext.applicationInfo.productNameWithEdition
       buildContext.ant.copy(file: desktopTemplate, tofile: "${snapDir}/snap/gui/${customizer.snapName}.desktop") {
         filterset(begintoken: '$', endtoken: '$') {
           filter(token: "NAME", value: productName)
           filter(token: "ICON", value: "/bin/${buildContext.productProperties.baseFileName}.png")
           filter(token: "SCRIPT", value: "/bin/${buildContext.productProperties.baseFileName}.sh")
-          filter(token: "WM_CLASS", value: "jetbrains-${buildContext.applicationInfo.shortProductName.toLowerCase()}${ce ? "-ce" : ""}")
+          filter(token: "WM_CLASS", value: getFrameClass())
         }
       }
 
       buildContext.ant.copy(file: customizer.iconPngPath, tofile: "${snapDir}/${customizer.snapName}.png")
 
-      def snapcraftTemplate = "${buildContext.paths.communityHome}/build/snap/snapcraft-template.yaml"
+      def snapcraftTemplate = "${buildContext.paths.communityHome}/platform/build-scripts/resources/linux/snap/snapcraft-template.yaml"
       def version = "${buildContext.applicationInfo.majorVersion}.${buildContext.applicationInfo.minorVersion}"
       buildContext.ant.copy(file: snapcraftTemplate, tofile: "${snapDir}/snapcraft.yaml") {
         filterset(begintoken: '$', endtoken: '$') {
@@ -226,7 +222,7 @@ class LinuxDistributionBuilder extends OsSpecificDistributionBuilder {
       }
 
       buildContext.ant.concat(destfile: "${unixDistPath}/bin/idea.properties", append: true) {
-        filelist(dir: "${buildContext.paths.communityHome}/build/snap", files: "idea-snap.properties")
+        filelist(dir: "${buildContext.paths.communityHome}/platform/build-scripts/resources/linux/snap", files: "idea-snap.properties")
       }
 
       buildContext.ant.delete(quiet: true) {
@@ -267,5 +263,15 @@ class LinuxDistributionBuilder extends OsSpecificDistributionBuilder {
       buildContext.ant.move(file: "${snapDir}/${snapArtifact}", todir: buildContext.paths.artifacts)
       buildContext.notifyArtifactBuilt("${buildContext.paths.artifacts}/" + snapArtifact)
     }
+  }
+
+  // keep in sync with AppUIUtil#getFrameClass
+  private String getFrameClass() {
+    String name = buildContext.applicationInfo.productNameWithEdition
+      .toLowerCase(Locale.US)
+      .replace(' ', '-')
+      .replace("intellij-idea", "idea").replace("android-studio", "studio")
+      .replace("-community-edition", "-ce").replace("-ultimate-edition", "").replace("-professional-edition", "")
+    "jetbrains-" + name
   }
 }

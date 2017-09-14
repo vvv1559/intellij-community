@@ -177,7 +177,27 @@
               text="Shelf Settings" description="Open shelf settings" icon="AllIcons.General.SecondaryGroup"/>
     </group>
 
+    <!--a group for plugins to add their actions-->
     <group id="VcsHistoryActionsGroup"/>
+
+    <action id="FileHistory.AnnotateRevision" class="com.intellij.openapi.vcs.history.actions.AnnotateRevisionAction"/>
+
+    <group id="VcsHistoryInternalGroup.Popup">
+      <reference ref="Diff.ShowDiff"/>
+      <reference ref="Vcs.ShowDiffWithLocal"/>
+      <reference ref="VcsHistoryActionsGroup"/>
+      <reference ref="ChangesView.CreatePatchFromChanges"/>
+      <reference ref="Vcs.GetVersion"/>
+      <reference ref="FileHistory.AnnotateRevision"/>
+    </group>
+
+    <group id="VcsHistoryInternalGroup.Toolbar">
+      <reference ref="Diff.ShowDiff"/>
+      <reference ref="VcsHistoryActionsGroup"/>
+      <reference ref="ChangesView.CreatePatchFromChanges"/>
+      <reference ref="Vcs.GetVersion"/>
+      <reference ref="FileHistory.AnnotateRevision"/>
+    </group>
 
     <group id="CommittedChangesToolbar">
       <action id="CommittedChanges.Refresh" class="com.intellij.openapi.vcs.changes.committed.RefreshCommittedAction"
@@ -303,8 +323,8 @@
     </group>
 
     <group id="FileHistory.KeymapGroup" text="File History">
-      <reference id="Vcs.ShowHistoryForBlock"/>
       <reference id="Vcs.GetVersion"/>
+      <reference id="FileHistory.AnnotateRevision"/>
 
       <add-to-group group-id="Vcs.KeymapGroup"/>
     </group>
@@ -319,6 +339,7 @@
       <reference ref="Show.Current.Revision"/>
       <reference ref="Vcs.ShowHistoryForBlock"/>
       <reference ref="Vcs.ShowTabbedFileHistory"/>
+      <reference ref="Vcs.ShowHistoryForRevision"/>
       <reference ref="VcsHistory.ShowAllAffected"/>
       <reference ref="Compare.Specified"/>
       <reference ref="Compare.Selected"/>

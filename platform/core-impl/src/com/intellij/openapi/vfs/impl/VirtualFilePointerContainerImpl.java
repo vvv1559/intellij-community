@@ -42,7 +42,7 @@ import java.util.List;
 /**
  * @author dsl
  */
-public class VirtualFilePointerContainerImpl extends TraceableDisposable implements VirtualFilePointerContainer, Disposable {
+class VirtualFilePointerContainerImpl extends TraceableDisposable implements VirtualFilePointerContainer, Disposable {
   private static final Logger LOG = Logger.getInstance("#com.intellij.openapi.vfs.pointers.VirtualFilePointerContainer");
   @NotNull private final List<VirtualFilePointer> myList = ContainerUtil.createLockFreeCopyOnWriteList();
   @NotNull private final VirtualFilePointerManager myVirtualFilePointerManager;
@@ -259,14 +259,17 @@ public class VirtualFilePointerContainerImpl extends TraceableDisposable impleme
     return myList.hashCode();
   }
 
+  @NotNull
   protected VirtualFilePointer create(@NotNull VirtualFile file) {
     return myVirtualFilePointerManager.create(file, myParent, myListener);
   }
 
+  @NotNull
   protected VirtualFilePointer create(@NotNull String url) {
     return myVirtualFilePointerManager.create(url, myParent, myListener);
   }
 
+  @NotNull
   protected VirtualFilePointer duplicate(@NotNull VirtualFilePointer virtualFilePointer) {
     return myVirtualFilePointerManager.duplicate(virtualFilePointer, myParent, myListener);
   }
@@ -300,5 +303,6 @@ public class VirtualFilePointerContainerImpl extends TraceableDisposable impleme
     assert !myDisposed;
     myDisposed = true;
     kill(null);
+    clear();
   }
 }

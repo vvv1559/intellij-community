@@ -12,7 +12,7 @@ public class OptionalInlining {
       System.out.println("Always");
     }
     String s3 = Optional.of(Math.random() > 0.5 ? "foo" : "baz").orElse("bar");
-    if (<warning descr="Condition 's3.equals(\"foo\") || s3.equals(\"baz\")' is always 'true'">s3.equals("foo") || s3.equals("baz")</warning>) {
+    if (<warning descr="Condition 's3.equals(\"foo\") || s3.equals(\"baz\")' is always 'true'">s3.equals("foo") || <warning descr="Condition 's3.equals(\"baz\")' is always 'true' when reached">s3.equals("baz")</warning></warning>) {
       System.out.println("Always");
     }
     if (<warning descr="Condition 's3.equals(\"bar\")' is always 'false'">s3.equals("bar")</warning>) {
@@ -111,7 +111,7 @@ public class OptionalInlining {
   void testMap(Optional<String> opt) {
     opt.map(<warning descr="Passing 'null' argument to parameter annotated as @NotNull">null</warning>);
     String res = opt.<String>map(s -> null).orElse("abc");
-    if (<warning descr="Condition '!res.equals(\"abc\")' is always 'false'">!res.equals("abc")</warning>) {
+    if (<warning descr="Condition '!res.equals(\"abc\")' is always 'false'">!<warning descr="Condition 'res.equals(\"abc\")' is always 'true'">res.equals("abc")</warning></warning>) {
       System.out.println("Never");
     }
     String trimmed = Optional.ofNullable(nullableMethod()).map(xx -> xx.trim()).orElse("");
@@ -129,7 +129,7 @@ public class OptionalInlining {
   }
 
   void testGuavaTransform(com.google.common.base.Optional<String> opt) {
-    String trimmed = com.google.common.base.Optional.fromNullable(nullableMethod()).transform(xx -> xx.trim()).or("");
+    String trimmed = com.google.common.base.Optional.fromNullable(<warning descr="Argument 'nullableMethod()' might be null but passed to non annotated parameter">nullableMethod()</warning>).transform(xx -> xx.trim()).or("");
     if(<warning descr="Condition 'trimmed == null' is always 'false'">trimmed == null</warning>) {
       System.out.println("impossible");
     }
@@ -145,7 +145,7 @@ public class OptionalInlining {
 
   void testToJavaUtil() {
     String xyz = nullableMethod();
-    Object n = com.google.common.base.Optional.fromNullable(xyz).transform(String::trim).toJavaUtil().map(this::getObj).orElse(null);
+    Object n = com.google.common.base.Optional.fromNullable(<warning descr="Argument 'xyz' might be null but passed to non annotated parameter">xyz</warning>).transform(String::trim).toJavaUtil().map(this::getObj).orElse(null);
     if(n instanceof Integer) {
       // n instanceof Integer -> n is not null -> xyz was not null -> safe to dereference
       System.out.println(xyz.trim());

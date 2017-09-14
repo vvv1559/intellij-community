@@ -20,6 +20,7 @@ import com.intellij.ide.DataManager;
 import com.intellij.ide.PsiCopyPasteManager;
 import com.intellij.ide.projectView.BaseProjectTreeBuilder;
 import com.intellij.ide.projectView.PresentationData;
+import com.intellij.ide.projectView.ProjectView;
 import com.intellij.ide.projectView.impl.nodes.PsiDirectoryNode;
 import com.intellij.ide.ui.customization.CustomizationUtil;
 import com.intellij.ide.util.treeView.AbstractTreeBuilder;
@@ -47,14 +48,13 @@ import com.intellij.util.EditSourceOnDoubleClickHandler;
 import com.intellij.util.OpenSourceUtil;
 import com.intellij.util.ui.UIUtil;
 import com.intellij.util.ui.accessibility.ScreenReader;
+import com.intellij.util.ui.tree.TreeModelAdapter;
 import com.intellij.util.ui.tree.TreeUtil;
 import com.intellij.util.ui.update.Activatable;
 import com.intellij.util.ui.update.UiNotifyConnector;
 import org.jetbrains.annotations.NotNull;
 
 import javax.swing.*;
-import javax.swing.event.TreeModelEvent;
-import javax.swing.event.TreeModelListener;
 import javax.swing.event.TreeSelectionEvent;
 import javax.swing.event.TreeSelectionListener;
 import javax.swing.tree.DefaultMutableTreeNode;
@@ -67,6 +67,7 @@ import java.util.ArrayList;
 import java.util.StringTokenizer;
 
 public abstract class AbstractProjectViewPSIPane extends AbstractProjectViewPane {
+  private AsyncProjectViewSupport myAsyncSupport;
   private JScrollPane myComponent;
 
   protected AbstractProjectViewPSIPane(Project project) {
@@ -98,12 +99,18 @@ public abstract class AbstractProjectViewPSIPane extends AbstractProjectViewPane
     myTreeStructure = createStructure();
 
     BaseProjectTreeBuilder treeBuilder = createBuilder(treeModel);
-    installComparator(treeBuilder);
-    setTreeBuilder(treeBuilder);
+    if (treeBuilder != null) {
+      installComparator(treeBuilder);
+      setTreeBuilder(treeBuilder);
+    }
+    else {
+      myAsyncSupport = new AsyncProjectViewSupport(this, myProject, myTree, myTreeStructure,
+                                                   new GroupByTypeComparator(ProjectView.getInstance(myProject), getId()));
+    }
 
     initTree();
 
-    Disposer.register(getTreeBuilder(), new UiNotifyConnector(myTree, new Activatable() {
+    Disposer.register(this, new UiNotifyConnector(myTree, new Activatable() {
       private boolean showing;
 
       @Override
@@ -150,28 +157,7 @@ public abstract class AbstractProjectViewPSIPane extends AbstractProjectViewPane
         fireTreeChangeListener();
       }
     });
-    myTree.getModel().addTreeModelListener(new TreeModelListener() {
-      @Override
-      public void treeNodesChanged(TreeModelEvent e) {
-        fireTreeChangeListener();
-      }
-
-      @Override
-      public void treeNodesInserted(TreeModelEvent e) {
-        fireTreeChangeListener();
-      }
-
-      @Override
-      public void treeNodesRemoved(TreeModelEvent e) {
-        fireTreeChangeListener();
-      }
-
-      @Override
-      public void treeStructureChanged(TreeModelEvent e) {
-        fireTreeChangeListener();
-      }
-    });
-
+    myTree.getModel().addTreeModelListener(TreeModelAdapter.create((e, t) -> fireTreeChangeListener()));
     new MySpeedSearch(myTree);
 
     myTree.addKeyListener(new KeyAdapter() {
@@ -235,11 +221,16 @@ public abstract class AbstractProjectViewPSIPane extends AbstractProjectViewPane
   @NotNull
   public ActionCallback selectCB(Object element, VirtualFile file, boolean requestFocus) {
     if (file != null) {
-      beforeSelect().doWhenDone(() -> {
-        UIUtil.invokeLaterIfNeeded(
-          () -> ((BaseProjectTreeBuilder)getTreeBuilder()).select(element, file, requestFocus)
-        );
-      });
+      if (getTreeBuilder() instanceof BaseProjectTreeBuilder) {
+        beforeSelect().doWhenDone(() -> {
+          UIUtil.invokeLaterIfNeeded(
+            () -> ((BaseProjectTreeBuilder)getTreeBuilder()).select(element, file, requestFocus)
+          );
+        });
+      }
+      else if (myAsyncSupport != null) {
+        myAsyncSupport.select(myTree, element, file);
+      }
     }
     return ActionCallback.DONE;
   }
@@ -251,7 +242,6 @@ public abstract class AbstractProjectViewPSIPane extends AbstractProjectViewPane
     return getTreeBuilder().getInitialized();
   }
 
-  @NotNull
   protected BaseProjectTreeBuilder createBuilder(DefaultTreeModel treeModel) {
     return new ProjectTreeBuilder(myProject, myTree, treeModel, null, (ProjectAbstractTreeStructureBase)myTreeStructure) {
       @Override

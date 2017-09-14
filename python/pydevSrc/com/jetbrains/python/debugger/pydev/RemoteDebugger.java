@@ -262,8 +262,9 @@ public class RemoteDebugger implements ProcessDebugger {
       if (frameVars == null || frameVars.size() == 0) continue;
 
       final String expression = "del " + StringUtil.join(frameVars, ",");
+      final String wrappedExpression = String.format("try:\n    %s\nexcept:\n    pass", expression);
       try {
-        evaluate(threadId, entry.getKey(), expression, true);
+        evaluate(threadId, entry.getKey(), wrappedExpression, true);
       }
       catch (PyDebuggerException e) {
         LOG.error(e);
@@ -332,10 +333,12 @@ public class RemoteDebugger implements ProcessDebugger {
 
       try {
         command.execute();
-        myLatch.countDown();
       }
       catch (PyDebuggerException e) {
         LOG.error(e);
+      }
+      finally {
+        myLatch.countDown();
       }
     });
     if (command.isResponseExpected()) {

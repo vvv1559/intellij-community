@@ -73,19 +73,20 @@ public class ParameterHintsUpdater {
     editorHints.forEach(editorHint -> {
       int offset = editorHint.getOffset();
       String presentationText = presentationManager.getHintText(editorHint);
-      ParameterHintsPass.HintData newHint = findAndRemoveMatchingHint(offset, presentationText, myNewHints);
+      ParameterHintsPass.HintData newHint = findAndRemoveMatchingHint(offset, presentationText, editorHint.isRelatedToPrecedingText(), 
+                                                                      myNewHints);
       String newText = newHint == null ? null : newHint.presentationText;
       if (!myForceImmediateUpdate && delayRemoval(editorHint)) {
         myEditor.putUserData(HINT_REMOVAL_DELAYED, Boolean.TRUE);
         return;
       }
       if (isPreserveHint(editorHint, newText)) return;
-      updates.add(new InlayUpdateInfo(offset, editorHint, newText, newHint != null && newHint.showAfterCaret));
+      updates.add(new InlayUpdateInfo(offset, editorHint, newText, newHint != null && newHint.relatesToPrecedingText));
     });
 
     Arrays.stream(myNewHints.keys()).forEach((offset) -> {
       for (ParameterHintsPass.HintData hint : myNewHints.get(offset)) {
-        updates.add(new InlayUpdateInfo(offset, null, hint.presentationText, hint.showAfterCaret));
+        updates.add(new InlayUpdateInfo(offset, null, hint.presentationText, hint.relatesToPrecedingText));
       }
     });
 
@@ -98,14 +99,16 @@ public class ParameterHintsUpdater {
   }
 
   @Nullable
-  private static ParameterHintsPass.HintData findAndRemoveMatchingHint(int offset, String presentationText, 
+  private static ParameterHintsPass.HintData findAndRemoveMatchingHint(int offset, String presentationText, boolean relatesToPrecedingText, 
                                                                        TIntObjectHashMap<List<ParameterHintsPass.HintData>> data) {
     List<ParameterHintsPass.HintData> newHintList = data.get(offset);
     ParameterHintsPass.HintData newHint = null;
     if (newHintList != null) {
       ParameterHintsPass.HintData lastHint = null;
       for (Iterator<ParameterHintsPass.HintData> iterator = newHintList.iterator(); iterator.hasNext(); ) {
-        lastHint = iterator.next();
+        ParameterHintsPass.HintData hint = iterator.next();
+        if (hint.relatesToPrecedingText != relatesToPrecedingText) continue;
+        lastHint = hint;
         if (Objects.equals(lastHint.presentationText, presentationText)) {
           newHint = lastHint;
           iterator.remove();
@@ -147,12 +150,14 @@ public class ParameterHintsUpdater {
       InlayUpdateInfo.Action action = info.action();
       if (action == InlayUpdateInfo.Action.ADD) {
         boolean useAnimation = !myForceImmediateUpdate && !firstTime && !isSameHintRemovedNear(newText, infoIndex) && !isInBulkMode;
-        Inlay inlay = myHintsManager.addHint(myEditor, info.offset, newText, useAnimation);
+        Inlay inlay = myHintsManager.addHint(myEditor, info.offset, info.relatesToPrecedingText, newText, useAnimation);
         if (inlay != null && !((DocumentEx)myEditor.getDocument()).isInBulkUpdate()) {
           VisualPosition inlayPosition = inlay.getVisualPosition();
-          VisualPosition visualPosition = new VisualPosition(inlayPosition.line, inlayPosition.column + (info.showAfterCaret ? 1 : 0));
+          VisualPosition visualPosition = new VisualPosition(inlayPosition.line, 
+                                                             inlayPosition.column + (info.relatesToPrecedingText ? 1 : 0));
           Caret caret = myEditor.getCaretModel().getCaretAt(visualPosition);
-          if (caret != null) caret.moveToVisualPosition(new VisualPosition(inlayPosition.line, inlayPosition.column + (info.showAfterCaret ? 0 : 1)));
+          if (caret != null) caret.moveToVisualPosition(new VisualPosition(inlayPosition.line, 
+                                                                           inlayPosition.column + (info.relatesToPrecedingText ? 0 : 1)));
         }
       }
       else if (action == InlayUpdateInfo.Action.DELETE) {
@@ -211,14 +216,14 @@ public class ParameterHintsUpdater {
     public final Inlay inlay;
     public final String newText;
     public final String oldText;
-    public final boolean showAfterCaret;
+    public final boolean relatesToPrecedingText;
 
-    public InlayUpdateInfo(int offset, @Nullable Inlay current, @Nullable String newText, boolean showAfterCaret) {
+    public InlayUpdateInfo(int offset, @Nullable Inlay current, @Nullable String newText, boolean relatesToPrecedingText) {
       this.offset = offset;
       this.inlay = current;
       this.newText = newText;
       this.oldText = getHintText();
-      this.showAfterCaret = showAfterCaret;
+      this.relatesToPrecedingText = relatesToPrecedingText;
     }
 
     public Action action() {

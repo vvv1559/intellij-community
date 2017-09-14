@@ -397,6 +397,16 @@ public class ControlFlowUtils {
     }
   }
 
+
+  @NotNull
+  public static PsiStatement[] unwrapBlock(@Nullable PsiStatement statement) {
+    PsiBlockStatement block = ObjectUtils.tryCast(statement, PsiBlockStatement.class);
+    if (block != null) {
+      return block.getCodeBlock().getStatements();
+    }
+    return statement == null ? PsiStatement.EMPTY_ARRAY : new PsiStatement[]{statement};
+  }
+
   public static boolean statementCompletesWithStatement(@NotNull PsiStatement containingStatement, @NotNull PsiStatement statement) {
     PsiElement statementToCheck = statement;
     while (true) {
@@ -755,7 +765,7 @@ public class ControlFlowUtils {
    */
   private static boolean isVariableReferencedBeforeLoopEntry(final ControlFlow flow,
                                                              final int start,
-                                                             final PsiLoopStatement loop,
+                                                             final PsiStatement loop,
                                                              final PsiVariable variable) {
     final int loopStart = flow.getStartOffset(loop);
     final int loopEnd = flow.getEndOffset(loop);
@@ -802,7 +812,7 @@ public class ControlFlowUtils {
    * @return initializer usage status for variable
    */
   @NotNull
-  public static InitializerUsageStatus getInitializerUsageStatus(PsiVariable var, PsiLoopStatement loop) {
+  public static InitializerUsageStatus getInitializerUsageStatus(PsiVariable var, PsiStatement loop) {
     if(!(var instanceof PsiLocalVariable) || var.getInitializer() == null) return UNKNOWN;
     if(isDeclarationJustBefore(var, loop)) return DECLARED_JUST_BEFORE;
     // Check that variable is declared in the same method or the same lambda expression
@@ -871,16 +881,26 @@ public class ControlFlowUtils {
 
   /**
    * @param expression expression to check
-   * @return true if given expression can be converted to statement without semantics change
+   * @return true if given expression is always executed and can be converted to a statement
    */
   public static boolean canExtractStatement(PsiExpression expression) {
+    return canExtractStatement(expression, true);
+  }
+
+  /**
+   * @param expression    expression to check
+   * @param checkExecuted if true, expression will be considered non-extractable if it is not always executed within its topmost expression
+   *                      (e.g. appears in then/else branches in ?: expression)
+   * @return true if given expression can be converted to a statement
+   */
+  public static boolean canExtractStatement(PsiExpression expression, boolean checkExecuted) {
     PsiElement cur = expression;
     PsiElement parent = cur.getParent();
     while(parent instanceof PsiExpression || parent instanceof PsiExpressionList) {
       if(parent instanceof PsiLambdaExpression) {
         return true;
       }
-      if(parent instanceof PsiPolyadicExpression) {
+      if (checkExecuted && parent instanceof PsiPolyadicExpression) {
         PsiPolyadicExpression polyadicExpression = (PsiPolyadicExpression)parent;
         IElementType type = polyadicExpression.getOperationTokenType();
         if ((type.equals(JavaTokenType.ANDAND) || type.equals(JavaTokenType.OROR)) && polyadicExpression.getOperands()[0] != cur) {
@@ -888,7 +908,7 @@ public class ControlFlowUtils {
           return false;
         }
       }
-      if(parent instanceof PsiConditionalExpression && ((PsiConditionalExpression)parent).getCondition() != cur) {
+      if (checkExecuted && parent instanceof PsiConditionalExpression && ((PsiConditionalExpression)parent).getCondition() != cur) {
         return false;
       }
       if(parent instanceof PsiMethodCallExpression) {
@@ -900,12 +920,25 @@ public class ControlFlowUtils {
       cur = parent;
       parent = cur.getParent();
     }
+    if (parent instanceof PsiStatement) {
+      PsiElement grandParent = parent.getParent();
+      if (checkExecuted && grandParent instanceof PsiForStatement && ((PsiForStatement)grandParent).getUpdate() == parent) {
+        return false;
+      }
+    }
     if(parent instanceof PsiReturnStatement || parent instanceof PsiExpressionStatement) return true;
     if(parent instanceof PsiLocalVariable) {
       PsiElement grandParent = parent.getParent();
       if(grandParent instanceof PsiDeclarationStatement && ((PsiDeclarationStatement)grandParent).getDeclaredElements().length == 1) {
         return true;
       }
+    }
+    if (parent instanceof PsiField) {
+      PsiElement prev = PsiTreeUtil.skipWhitespacesAndCommentsBackward(parent);
+      PsiElement next = PsiTreeUtil.skipWhitespacesAndCommentsForward(parent);
+      boolean multipleFieldsDeclaration = prev instanceof PsiJavaToken && ((PsiJavaToken)prev).getTokenType() == JavaTokenType.COMMA ||
+                                          next instanceof PsiJavaToken && ((PsiJavaToken)next).getTokenType() == JavaTokenType.COMMA;
+      return !multipleFieldsDeclaration;
     }
     if(parent instanceof PsiForeachStatement && ((PsiForeachStatement)parent).getIteratedValue() == cur) return true;
     if(parent instanceof PsiIfStatement && ((PsiIfStatement)parent).getCondition() == cur) return true;

@@ -26,7 +26,6 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.PsiElement;
-import com.intellij.psi.util.PsiUtilBase;
 import com.intellij.spellchecker.util.SpellCheckerBundle;
 import org.jetbrains.annotations.NotNull;
 
@@ -35,14 +34,15 @@ import java.util.List;
 
 public class ChangeTo extends ShowSuggestions implements SpellCheckerQuickFix {
 
+  public static final String FIX_NAME = SpellCheckerBundle.message("change.to");;
+
   public ChangeTo(String wordWithTypo) {
     super(wordWithTypo);
   }
 
-
   @NotNull
   public String getFamilyName() {
-    return SpellCheckerBundle.message("change.to");
+    return FIX_NAME;
   }
 
   @NotNull
@@ -54,11 +54,8 @@ public class ChangeTo extends ShowSuggestions implements SpellCheckerQuickFix {
   public void applyFix(@NotNull Project project, @NotNull ProblemDescriptor descriptor) {
     PsiElement element = descriptor.getPsiElement();
     if (element == null) return;
-    Editor editor = PsiUtilBase.findEditor(element);
-
-    if (editor == null) {
-      return;
-    }
+    final Editor editor = getEditor(element, project);
+    if (editor == null) return;
 
     TextRange textRange = ((ProblemDescriptorBase)descriptor).getTextRange();
     final int documentLength = editor.getDocument().getTextLength();
@@ -79,8 +76,5 @@ public class ChangeTo extends ShowSuggestions implements SpellCheckerQuickFix {
     items = lookupItems.toArray(items);
     LookupManager lookupManager = LookupManager.getInstance(project);
     lookupManager.showLookup(editor, items);
-
   }
-
-
 }

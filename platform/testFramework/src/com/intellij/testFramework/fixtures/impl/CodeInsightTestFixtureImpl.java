@@ -107,6 +107,7 @@ import com.intellij.psi.impl.source.tree.injected.InjectedLanguageUtil;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.psi.search.SearchScope;
 import com.intellij.psi.search.UsageSearchContext;
+import com.intellij.psi.stubs.StubTextInconsistencyException;
 import com.intellij.psi.stubs.StubUpdatingIndex;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.refactoring.move.moveFilesOrDirectories.MoveFilesOrDirectoriesProcessor;
@@ -199,7 +200,6 @@ public class CodeInsightTestFixtureImpl extends BaseFixture implements CodeInsig
                                                       @NotNull Editor editor,
                                                       @NotNull int[] toIgnore,
                                                       boolean canChangeDocument) {
-    ApplicationManager.getApplication().assertIsDispatchThread();
     Project project = file.getProject();
     ensureIndexesUpToDate(project);
     DaemonCodeAnalyzerImpl codeAnalyzer = (DaemonCodeAnalyzerImpl)DaemonCodeAnalyzer.getInstance(project);
@@ -212,8 +212,8 @@ public class CodeInsightTestFixtureImpl extends BaseFixture implements CodeInsig
       int oldDelay = settings.AUTOREPARSE_DELAY;
       try {
         settings.AUTOREPARSE_DELAY = 0;
-        List<HighlightInfo> infos =
-          codeAnalyzer.runPasses(file, editor.getDocument(), Collections.singletonList(textEditor), toIgnore, canChangeDocument, null);
+        List<HighlightInfo> infos = new ArrayList<>();
+        EdtTestUtil.runInEdtAndWait(() -> infos.addAll( codeAnalyzer.runPasses(file, editor.getDocument(), Collections.singletonList(textEditor), toIgnore, canChangeDocument, null)));
         infos.addAll(DaemonCodeAnalyzerEx.getInstanceEx(project).getFileLevelHighlights(project, file));
         return infos;
       }
@@ -237,8 +237,10 @@ public class CodeInsightTestFixtureImpl extends BaseFixture implements CodeInsig
 
   public static void ensureIndexesUpToDate(@NotNull Project project) {
     if (!DumbService.isDumb(project)) {
-      FileBasedIndex.getInstance().ensureUpToDate(StubUpdatingIndex.INDEX_ID, project, null);
-      FileBasedIndex.getInstance().ensureUpToDate(TodoIndex.NAME, project, null);
+      ReadAction.run(() -> {
+        FileBasedIndex.getInstance().ensureUpToDate(StubUpdatingIndex.INDEX_ID, project, null);
+        FileBasedIndex.getInstance().ensureUpToDate(TodoIndex.NAME, project, null);
+      });
     }
   }
 
@@ -506,7 +508,7 @@ public class CodeInsightTestFixtureImpl extends BaseFixture implements CodeInsig
 
   @Override
   public void testInspection(@NotNull String testDir, @NotNull InspectionToolWrapper toolWrapper) {
-    VirtualFile sourceDir = copyDirectoryToProject(new File(testDir, "src").getPath(), "src");
+    VirtualFile sourceDir = copyDirectoryToProject(new File(testDir, "src").getPath(), "");
     PsiDirectory psiDirectory = getPsiManager().findDirectory(sourceDir);
     assertNotNull(psiDirectory);
 
@@ -931,7 +933,8 @@ public class CodeInsightTestFixtureImpl extends BaseFixture implements CodeInsig
   public GutterMark findGutter(@NotNull final String filePath) {
     configureByFilesInner(filePath);
     CommonProcessors.FindFirstProcessor<GutterMark> processor = new CommonProcessors.FindFirstProcessor<>();
-    findGutters(processor);
+    doHighlighting();
+    processGuttersAtCaret(myEditor, getProject(), processor);
     return processor.getFoundValue();
   }
 
@@ -939,31 +942,24 @@ public class CodeInsightTestFixtureImpl extends BaseFixture implements CodeInsig
   @Override
   public List<GutterMark> findGuttersAtCaret() {
     CommonProcessors.CollectProcessor<GutterMark> processor = new CommonProcessors.CollectProcessor<>();
-    findGutters(processor);
+    doHighlighting();
+    processGuttersAtCaret(myEditor, getProject(), processor);
     return new ArrayList<>(processor.getResults());
   }
 
-  private void findGutters(Processor<GutterMark> processor) {
-    int offset = myEditor.getCaretModel().getOffset();
+  public static boolean processGuttersAtCaret(Editor editor, Project project, @NotNull Processor<GutterMark> processor) {
+    int offset = editor.getCaretModel().getOffset();
 
-    final Collection<HighlightInfo> infos = doHighlighting();
-    for (HighlightInfo info : infos) {
-      if (info.endOffset >= offset && info.startOffset <= offset) {
-        final GutterMark renderer = info.getGutterIconRenderer();
-        if (renderer != null && !processor.process(renderer)) {
-          return;
-        }
-      }
-    }
-    RangeHighlighter[] highlighters = DocumentMarkupModel.forDocument(myEditor.getDocument(), getProject(), true).getAllHighlighters();
+    RangeHighlighter[] highlighters = DocumentMarkupModel.forDocument(editor.getDocument(), project, true).getAllHighlighters();
     for (RangeHighlighter highlighter : highlighters) {
-      if (highlighter.getEndOffset() >= offset && highlighter.getStartOffset() <= offset) {
-        GutterMark renderer = highlighter.getGutterIconRenderer();
-        if (renderer != null && !processor.process(renderer)) {
-          return;
-        }
+      GutterMark renderer = highlighter.getGutterIconRenderer();
+      if (renderer != null &&
+          editor.getDocument().getLineNumber(offset) == editor.getDocument().getLineNumber(highlighter.getStartOffset()) &&
+          !processor.process(renderer)) {
+        return false;
       }
     }
+    return true;
   }
 
   @Override
@@ -1449,7 +1445,7 @@ public class CodeInsightTestFixtureImpl extends BaseFixture implements CodeInsig
 
   private long collectAndCheckHighlighting(@NotNull ExpectedHighlightingData data) {
     final Project project = getProject();
-    PsiDocumentManager.getInstance(project).commitAllDocuments();
+    EdtTestUtil.runInEdtAndWait(() -> PsiDocumentManager.getInstance(project).commitAllDocuments());
 
     PsiFileImpl file = (PsiFileImpl)getHostFile();
     FileElement hardRefToFileElement = file.calcTreeElement();//to load text
@@ -1497,7 +1493,7 @@ public class CodeInsightTestFixtureImpl extends BaseFixture implements CodeInsig
   @NotNull
   public List<HighlightInfo> doHighlighting() {
     final Project project = getProject();
-    PsiDocumentManager.getInstance(project).commitAllDocuments();
+    EdtTestUtil.runInEdtAndWait(() -> PsiDocumentManager.getInstance(project).commitAllDocuments());
 
     PsiFile file = getFile();
     Editor editor = getEditor();
@@ -1880,15 +1876,23 @@ public class CodeInsightTestFixtureImpl extends BaseFixture implements CodeInsig
     // overrides "getElementToMakeWritable" or has the following line:
     // if (!FileModificationService.getInstance().prepareFileForWrite(file)) return;
 
-    ReadonlyStatusHandlerImpl handler = (ReadonlyStatusHandlerImpl)ReadonlyStatusHandler.getInstance(file.getProject());
-    VirtualFile vFile = InjectedLanguageUtil.getTopLevelFile(file).getVirtualFile();
+    Project project = file.getProject();
+    ReadonlyStatusHandlerImpl handler = (ReadonlyStatusHandlerImpl)ReadonlyStatusHandler.getInstance(project);
+    VirtualFile vFile = Objects.requireNonNull(InjectedLanguageUtil.getTopLevelFile(file)).getVirtualFile();
     setReadOnly(vFile, true);
     handler.setClearReadOnlyInTests(true);
     AtomicBoolean result = new AtomicBoolean();
     try {
-      ApplicationManager.getApplication().invokeLater(
-        () -> result.set(ShowIntentionActionsHandler.chooseActionAndInvoke(file, editor, action, actionText)));
+      ApplicationManager.getApplication().invokeLater(() -> {
+        try {
+          result.set(ShowIntentionActionsHandler.chooseActionAndInvoke(file, editor, action, actionText));
+        }
+        catch (StubTextInconsistencyException e) {
+          PsiTestUtil.compareStubTexts(e);
+        } 
+      });
       UIUtil.dispatchAllInvocationEvents();
+      checkPsiTextConsistency(project, vFile);
     }
     catch (AssertionError e) {
       ExceptionUtil.rethrowUnchecked(ExceptionUtil.getRootCause(e));
@@ -1899,6 +1903,13 @@ public class CodeInsightTestFixtureImpl extends BaseFixture implements CodeInsig
       setReadOnly(vFile, false);
     }
     return result.get();
+  }
+
+  private static void checkPsiTextConsistency(Project project, VirtualFile vFile) {
+    PsiFile topLevelPsi = vFile.isValid() ? PsiManager.getInstance(project).findFile(vFile) : null;
+    if (topLevelPsi != null) {
+      PsiTestUtil.checkStubsMatchText(topLevelPsi);
+    }
   }
 
   private static void setReadOnly(VirtualFile vFile, boolean readOnlyStatus) {
@@ -1965,8 +1976,12 @@ public class CodeInsightTestFixtureImpl extends BaseFixture implements CodeInsig
     }
   }
 
+  @NotNull
+  public Disposable getProjectDisposable() {
+    return myProjectFixture.getTestRootDisposable();
+  }
+
   //<editor-fold desc="Deprecated stuff.">
-  @SuppressWarnings("unused")
   @Deprecated
   public static GlobalInspectionContextForTests createGlobalContextForTool(@NotNull AnalysisScope scope,
                                                                            @NotNull final Project project,

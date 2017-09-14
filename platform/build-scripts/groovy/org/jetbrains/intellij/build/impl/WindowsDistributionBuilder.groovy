@@ -20,6 +20,7 @@ import org.jetbrains.intellij.build.BuildContext
 import org.jetbrains.intellij.build.BuildOptions
 import org.jetbrains.intellij.build.JvmArchitecture
 import org.jetbrains.intellij.build.WindowsDistributionCustomizer
+import org.jetbrains.jps.model.library.JpsOrderRootType
 import org.jetbrains.jps.model.module.JpsModuleSourceRoot
 
 /**
@@ -129,7 +130,7 @@ class WindowsDistributionBuilder extends OsSpecificDistributionBuilder {
 
     def batName = "${buildContext.productProperties.baseFileName}.bat"
     buildContext.ant.copy(todir: "$winDistPath/bin") {
-      fileset(dir: "$buildContext.paths.communityHome/bin/scripts/win")
+      fileset(dir: "$buildContext.paths.communityHome/platform/build-scripts/resources/win/scripts")
 
       filterset(begintoken: "@@", endtoken: "@@") {
         filter(token: "product_full", value: fullName)
@@ -143,10 +144,8 @@ class WindowsDistributionBuilder extends OsSpecificDistributionBuilder {
       }
     }
 
-    if (batName != "idea.bat") {
-      //todo[nik] rename idea.bat in sources to something more generic
-      buildContext.ant.move(file: "$winDistPath/bin/idea.bat", tofile: "$winDistPath/bin/$batName")
-    }
+    buildContext.ant.move(file: "$winDistPath/bin/executable-template.bat", tofile: "$winDistPath/bin/$batName")
+
     String inspectScript = buildContext.productProperties.inspectCommandName
     if (inspectScript != "inspect") {
       String targetPath = "$winDistPath/bin/${inspectScript}.bat"
@@ -208,10 +207,10 @@ IDS_VM_OPTIONS=$vmOptions
         arg(value: outputPath)
         classpath {
           pathelement(location: "$communityHome/build/lib/launcher-generator.jar")
-          fileset(dir: "$communityHome/lib") {
-            include(name: "guava*.jar")
-            include(name: "jdom.jar")
-            include(name: "sanselan*.jar")
+          ["Guava", "JDOM", "commons-imaging"].each {
+            buildContext.project.libraryCollection.findLibrary(it).getFiles(JpsOrderRootType.COMPILED).each {
+              pathelement(location: it.absolutePath)
+            }
           }
           resourceModules.collectMany { it.sourceRoots }.each { JpsModuleSourceRoot root ->
             pathelement(location: root.file.absolutePath)

@@ -443,8 +443,8 @@ interface TxANotAnno {}
     checkPreferredItems(0, 'fooBar', '_fooBar', 'FooBar')
   }
 
-  void testDispreferUnderscoredCaseMismatch() {
-    checkPreferredItems(0, 'fooBar', '__FOO_BAR')
+  void testDispreferUnderscoredCaseMatch() {
+    checkPreferredItems(0, 'fooBar', '__foo_bar')
   }
 
   void testStatisticsMattersOnNextCompletion() {

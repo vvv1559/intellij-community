@@ -105,10 +105,12 @@ import java.util.concurrent.Phaser;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.function.Consumer;
 import java.util.stream.Stream;
 
 /**
@@ -287,6 +289,20 @@ public class FileBasedIndexImpl extends FileBasedIndex implements BaseComponent,
     }
   }
 
+  long getChangedFilesSize() {
+    Set<VirtualFile> changed = new THashSet<>();
+    AtomicLong changedFilesSize = new AtomicLong();
+
+    Consumer<VirtualFile> consumer = file -> {
+      if (file.isValid() && !file.isDirectory() && changed.add(file)) {
+        changedFilesSize.addAndGet(file.getLength());
+      }
+    };
+    myChangedFilesCollector.myVfsEventsMerger.getChangedFiles().forEach(consumer);
+    myChangedFilesCollector.myFilesToUpdate.values().forEach(consumer);
+    return changedFilesSize.get();
+  }
+
   public static boolean isProjectOrWorkspaceFile(@NotNull VirtualFile file, @Nullable FileType fileType) {
     return ProjectCoreUtil.isProjectOrWorkspaceFile(file, fileType);
   }
@@ -383,6 +399,7 @@ public class FileBasedIndexImpl extends FileBasedIndex implements BaseComponent,
           ContentHashesSupport.initContentHashesEnumerator();
           contentHashesEnumeratorOk = true;
         }
+        
         storage = new VfsAwareMapIndexStorage<>(
           IndexInfrastructure.getStorageFile(name),
           extension.getKeyDescriptor(),
@@ -1114,6 +1131,7 @@ public class FileBasedIndexImpl extends FileBasedIndex implements BaseComponent,
       // avoid rebuilding index in tests since we do it synchronously in requestRebuild and we can have readAction at hand
       return null;
     }
+    if (e instanceof ProcessCanceledException) return null;
     if (e instanceof IndexOutOfBoundsException) return e; // something wrong with direct byte buffer
     Throwable cause = e.getCause();
     if (cause instanceof StorageException || cause instanceof IOException ||
@@ -2021,7 +2039,7 @@ public class FileBasedIndexImpl extends FileBasedIndex implements BaseComponent,
     private final List<VirtualFile> myFiles = new ArrayList<>();
     @Nullable
     private final ProgressIndicator myProgressIndicator;
-    private final boolean myDoTraceForFilesToBeIndexed = LOG.isDebugEnabled();
+    private final boolean myDoTraceForFilesToBeIndexed = LOG.isTraceEnabled();
 
     private UnindexedFilesFinder(@Nullable ProgressIndicator indicator) {
       myProgressIndicator = indicator;
@@ -2079,7 +2097,7 @@ public class FileBasedIndexImpl extends FileBasedIndex implements BaseComponent,
               try {
                 if (needsFileContentLoading(indexId) && shouldIndexFile(file, indexId)) {
                   if (myDoTraceForFilesToBeIndexed) {
-                    LOG.info("Scheduling indexing of " + file + " by request of index " + indexId);
+                    LOG.trace("Scheduling indexing of " + file + " by request of index " + indexId);
                   }
                   synchronized (myFiles) {
                     myFiles.add(file);

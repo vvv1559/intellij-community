@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2017 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -30,7 +30,6 @@ import com.intellij.psi.PsiFile;
 import com.intellij.psi.util.PsiUtil;
 import com.intellij.testFramework.LightPlatformCodeInsightTestCase;
 import com.intellij.testFramework.LightPlatformTestCase;
-import com.intellij.testFramework.PsiTestUtil;
 import com.intellij.testFramework.fixtures.impl.CodeInsightTestFixtureImpl;
 import com.intellij.util.IncorrectOperationException;
 import com.intellij.util.ObjectUtils;
@@ -116,9 +115,7 @@ public abstract class LightQuickFixTestCase extends LightDaemonAnalyzerTestCase 
           fail("Action '" + text + "' is still available after its invocation in test " + testFullPath);
         }
       }
-      
-      PsiTestUtil.checkStubsMatchText(quickFix.getFile());
-      
+
       String expectedFilePath = ObjectUtils.notNull(quickFix.getBasePath(), "") + "/" + AFTER_PREFIX + testName;
       quickFix.checkResultByFile("In file :" + expectedFilePath, expectedFilePath, false);
 
@@ -224,6 +221,10 @@ public abstract class LightQuickFixTestCase extends LightDaemonAnalyzerTestCase 
     doTestFor(fileSuffix, createWrapper(testDataPath));
   }
 
+  protected ActionHint parseActionHintImpl(@NotNull PsiFile file, @NotNull String contents) {
+    return ActionHint.parse(file, contents);
+  }
+
   @NotNull
   protected QuickFixTestCase createWrapper() {
     return createWrapper(null);
@@ -251,7 +252,7 @@ public abstract class LightQuickFixTestCase extends LightDaemonAnalyzerTestCase 
       @NotNull
       @Override
       public ActionHint parseActionHintImpl(@NotNull PsiFile file, @NotNull String contents) {
-        return ActionHint.parse(file, contents);
+        return LightQuickFixTestCase.this.parseActionHintImpl(file, contents);
       }
 
       @Override

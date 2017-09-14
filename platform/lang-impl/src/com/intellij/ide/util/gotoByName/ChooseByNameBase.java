@@ -24,6 +24,7 @@ import com.intellij.find.findUsages.PsiElement2UsageTargetAdapter;
 import com.intellij.icons.AllIcons;
 import com.intellij.ide.DataManager;
 import com.intellij.ide.IdeBundle;
+import com.intellij.ide.IdeEventQueue;
 import com.intellij.ide.actions.CopyReferenceAction;
 import com.intellij.ide.actions.GotoFileAction;
 import com.intellij.ide.ui.laf.darcula.ui.DarculaTextBorder;
@@ -75,6 +76,7 @@ import com.intellij.usageView.UsageInfo;
 import com.intellij.usages.*;
 import com.intellij.usages.impl.UsageViewManagerImpl;
 import com.intellij.util.Alarm;
+import com.intellij.util.ArrayUtil;
 import com.intellij.util.Consumer;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.indexing.FileBasedIndex;
@@ -184,7 +186,7 @@ public abstract class ChooseByNameBase {
    * @param initialText initial text which will be in the lookup text field
    */
   protected ChooseByNameBase(Project project, @NotNull ChooseByNameModel model, String initialText, PsiElement context) {
-    this(project, model, new DefaultChooseByNameItemProvider(context), initialText, 0);
+    this(project, model, ChooseByNameModelEx.getItemProvider(model, context), initialText, 0);
   }
 
   @SuppressWarnings("UnusedDeclaration") // Used in MPS
@@ -866,6 +868,7 @@ public abstract class ChooseByNameBase {
         cancelListUpdater();
       }
     });
+    IdeEventQueue.getInstance().getPopupManager().closeAllPopups(false);
     myTextPopup.show(layeredPane);
   }
 
@@ -983,6 +986,9 @@ public abstract class ChooseByNameBase {
 
     Object[] oldElements = myListModel.getItems().toArray();
     Object[] newElements = elements.toArray();
+    if (ArrayUtil.contains(null, newElements)) {
+      LOG.error("Null after filtering elements by " + this);
+    }
     List<ModelDiff.Cmd> commands = ModelDiff.createDiffCmds(myListModel, oldElements, newElements);
 
     myTextField.setForeground(UIUtil.getTextFieldForeground());
@@ -1438,7 +1444,10 @@ public abstract class ChooseByNameBase {
     @Override
     public void onCanceled(@NotNull ProgressIndicator indicator) {
       LOG.assertTrue(myCalcElementsThread == this, myCalcElementsThread);
-      new CalcElementsThread(myPattern, myCheckboxState, myCallback, myModalityState).scheduleThread();
+
+      if (!myProject.isDisposed()) {
+        new CalcElementsThread(myPattern, myCheckboxState, myCallback, myModalityState).scheduleThread();
+      }
     }
 
     private void addElementsByPattern(@NotNull String pattern,
@@ -1451,6 +1460,10 @@ public abstract class ChooseByNameBase {
         indicator,
         o -> {
           if (indicator.isCanceled()) return false;
+          if (o == null) {
+            LOG.error("Null returned from " + myProvider + " with " + myModel + " in " + ChooseByNameBase.this);
+            return true;
+          }
           elements.add(o);
 
           if (isOverflow(elements)) {

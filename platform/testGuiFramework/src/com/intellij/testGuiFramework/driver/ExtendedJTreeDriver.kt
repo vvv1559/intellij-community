@@ -44,29 +44,47 @@ import javax.annotation.Nonnull
 import javax.swing.JPopupMenu
 import javax.swing.JTree
 import javax.swing.plaf.basic.BasicTreeUI
+import javax.swing.tree.DefaultTreeModel
+import javax.swing.tree.TreeNode
 import javax.swing.tree.TreePath
 
 /**
  * To avoid confusions of parsing path from one String let's accept only splitted path into array of strings
  */
-class ExtendedJTreeDriver(robot: Robot) : JTreeDriver(robot) {
+open class ExtendedJTreeDriver(robot: Robot) : JTreeDriver(robot) {
 
   private val pathFinder = ExtendedJTreePathFinder()
   private val location = JTreeLocation()
+  private val DEFAULT_FIND_PATH_ATTEMPTS: Int = 3
 
 
   fun clickPath(tree: JTree, pathStrings: List<String>, mouseClickInfo: MouseClickInfo)
     = clickPath(tree, pathStrings, mouseClickInfo.button(), mouseClickInfo.times())
 
-  fun clickPath(tree: JTree, pathStrings: List<String>, button: MouseButton = MouseButton.LEFT_BUTTON, times: Int = 1) {
+
+  fun clickPath(tree: JTree, pathStrings: List<String>, button: MouseButton = MouseButton.LEFT_BUTTON, times: Int = 1, attempts: Int = DEFAULT_FIND_PATH_ATTEMPTS) {
     val point = scrollToPath(tree, pathStrings)
     robot.click(tree, point, button, times)
+    //check that path is selected or click it again
+    if (!checkPathIsSelected(tree, pathStrings)) {
+      if (attempts == 0) throw Exception("Unable to click path in $DEFAULT_FIND_PATH_ATTEMPTS attempts due to it high mutability. Maybe this path is loading async.")
+      clickPath(tree, pathStrings, button, times, attempts - 1)
+    }
   }
 
   //XPath contains order number of similar nodes: clickXPath("test(1)", "Java") - here (1) means the first node
-  fun clickXPath(tree: JTree, xPathStrings: List<String>, button: MouseButton = MouseButton.LEFT_BUTTON, times: Int = 1) {
+  fun clickXPath(tree: JTree,
+                 xPathStrings: List<String>,
+                 button: MouseButton = MouseButton.LEFT_BUTTON,
+                 times: Int = 1,
+                 attempts: Int = 3) {
     val point = scrollToXPath(tree, xPathStrings)
     robot.click(tree, point, button, times)
+    //check that path is selected or click it again
+    if (!checkPathIsSelected(tree, xPathStrings, false)) {
+      if (attempts == 0) throw Exception("Unable to click path in $DEFAULT_FIND_PATH_ATTEMPTS attempts due to it high mutability. Maybe this path is loading async.")
+      clickXPath(tree, xPathStrings, button, times, attempts - 1)
+    }
   }
 
   fun checkPathExists(tree: JTree, pathStrings: List<String>) {
@@ -83,6 +101,16 @@ class ExtendedJTreeDriver(robot: Robot) : JTreeDriver(robot) {
   fun rightClickPath(tree: JTree, pathStrings: List<String>) {
     val p = scrollToPath(tree, pathStrings)
     rightClick(tree, p)
+  }
+
+  //works only if one item has been selected
+  private fun checkPathIsSelected(tree: JTree, pathStrings: List<String>, isUniquePath: Boolean = true): Boolean {
+    val selectedPaths = tree.selectionPaths
+    if (selectedPaths.size > 1) throw Exception("More than one row has been selected")
+    if (selectedPaths.isEmpty()) throw Exception("No one row has been selected at all")
+    val selectedPath = selectedPaths.first()
+    val matchedPath = matchingPathFor(tree = tree, pathStrings = pathStrings, isUniquePath = isUniquePath)
+    return matchedPath.lastPathComponent == selectedPath.lastPathComponent
   }
 
   fun expandPath(tree: JTree, pathStrings: List<String>) {
@@ -253,7 +281,7 @@ class ExtendedJTreeDriver(robot: Robot) : JTreeDriver(robot) {
           try {
             node = traverseChildren(tree, node, pathString) ?: throw pathNotFound(pathStrings)
           }
-          catch(e: LoadingNodeException) {      //if we met loading node let's tell it to caller and probably expand path to clarify this node
+          catch (e: LoadingNodeException) {      //if we met loading node let's tell it to caller and probably expand path to clarify this node
             e.treePath = TreePath(newPathValues.toTypedArray())
             throw e
           }
@@ -308,8 +336,9 @@ class ExtendedJTreeDriver(robot: Robot) : JTreeDriver(robot) {
 
       for (childIndex in 0..childCount - 1) {
         val child = model.getChild(node, childIndex)
-        if (child is LoadingNode) throw LoadingNodeException(child, null)
+        if (child is LoadingNode) throw LoadingNodeException(child, getPathToNode(tree, node))
         if (pathStrings.size == 1 && value(tree, child) == pathStrings[0]) {
+
           return TreePath(arrayOf<Any>(child))
         }
         else {
@@ -320,6 +349,13 @@ class ExtendedJTreeDriver(robot: Robot) : JTreeDriver(robot) {
         }
       }
       return null
+    }
+
+    fun getPathToNode(tree: JTree, node: Any): TreePath {
+      val treeModel = tree.model as DefaultTreeModel
+      var path = treeModel.getPathToRoot(node as TreeNode)
+      if (!tree.isRootVisible) path = path.sliceArray(1..path.size - 1)
+      return TreePath(path)
     }
 
     fun findMatchingXPath(tree: JTree, xPathStrings: List<String>): TreePath {
@@ -353,11 +389,13 @@ class ExtendedJTreeDriver(robot: Robot) : JTreeDriver(robot) {
           if (currentOrder == order) {
             if (xPathStrings.size == 1) {
               return TreePath(arrayOf<Any>(child))
-            } else {
+            }
+            else {
               val childResult = findMatchingXPath(tree, child, xPathStrings.subList(1, xPathStrings.size))
               if (childResult != null) return TreePath(arrayOf<Any>(child, *childResult.path))
             }
-          } else {
+          }
+          else {
             currentOrder++
           }
         }
@@ -383,8 +421,10 @@ class ExtendedJTreeDriver(robot: Robot) : JTreeDriver(robot) {
     }
 
     private fun value(tree: JTree, modelValue: Any): String {
-      return cellReader!!.valueAt(tree, modelValue)!!
+      return eraseZeroSpaceSymbols(cellReader!!.valueAt(tree, modelValue)!!)
     }
+
+    private fun eraseZeroSpaceSymbols(string: String): String = string.replace("\u200B", "")
 
     fun replaceCellReader(newCellReader: JTreeCellReader) {
       cellReader = newCellReader
@@ -399,7 +439,6 @@ class ExtendedJTreeDriver(robot: Robot) : JTreeDriver(robot) {
    * node that has as child LoadingNode
    */
   class LoadingNodeException(val node: Any, var treePath: TreePath?) : Exception("Meet loading node: $node")
-
 
   private fun childCount(tree: JTree, path: TreePath): Int {
     return computeOnEdt {
@@ -442,7 +481,10 @@ class ExtendedJTreeDriver(robot: Robot) : JTreeDriver(robot) {
   /**
    * we are trying to find TreePath for a tree, if we met loading node (LoadingTreeNode)
    */
-  private fun matchingPathFor(tree: JTree, pathStrings: List<String>, countDownAttempts: Int = 30, isUniquePath: Boolean = true): TreePath {
+  protected fun matchingPathFor(tree: JTree,
+                                pathStrings: List<String>,
+                                countDownAttempts: Int = 30,
+                                isUniquePath: Boolean = true): TreePath {
     if (countDownAttempts == 0) throw Exception("Unable to find path($pathStrings) for tree: $tree, attempts count exceeded")
     try {
       return computeOnEdtWithTry {

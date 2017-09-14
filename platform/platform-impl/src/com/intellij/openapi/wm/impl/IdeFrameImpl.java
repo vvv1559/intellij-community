@@ -29,10 +29,9 @@ import com.intellij.openapi.actionSystem.DataProvider;
 import com.intellij.openapi.actionSystem.ex.ActionManagerEx;
 import com.intellij.openapi.actionSystem.impl.MouseGestureManager;
 import com.intellij.openapi.application.Application;
-import com.intellij.openapi.application.ApplicationInfo;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.ApplicationNamesInfo;
 import com.intellij.openapi.application.ModalityState;
-import com.intellij.openapi.application.ex.ApplicationInfoEx;
 import com.intellij.openapi.application.ex.ApplicationManagerEx;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
@@ -54,6 +53,7 @@ import com.intellij.openapi.wm.impl.status.*;
 import com.intellij.openapi.wm.impl.welcomeScreen.WelcomeFrame;
 import com.intellij.ui.*;
 import com.intellij.ui.mac.MacMainFrameDecorator;
+import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.UIUtil;
 import com.intellij.util.ui.accessibility.AccessibleContextAccessor;
 import org.jetbrains.annotations.NotNull;
@@ -91,20 +91,17 @@ public class IdeFrameImpl extends JFrame implements IdeFrameEx, AccessibleContex
   private IdeFrameDecorator myFrameDecorator;
   private boolean myRestoreFullScreen;
 
-  public IdeFrameImpl(ApplicationInfoEx applicationInfoEx,
-                      ActionManagerEx actionManager,
-                      DataManager dataManager,
-                      Application application) {
-    super(applicationInfoEx.getFullApplicationName());
+  public IdeFrameImpl(ActionManagerEx actionManager, DataManager dataManager, Application application) {
+    super(ApplicationNamesInfo.getInstance().getFullProductName());
+
     myRootPane = createRootPane(actionManager, dataManager, application);
     setRootPane(myRootPane);
     setBackground(UIUtil.getPanelBackground());
     AppUIUtil.updateWindowIcon(this);
-    final Dimension size = ScreenUtil.getMainScreenBounds().getSize();
 
+    Dimension size = ScreenUtil.getMainScreenBounds().getSize();
     size.width = Math.min(1400, size.width - 20);
     size.height= Math.min(1000, size.height - 40);
-
     setSize(size);
     setLocationRelativeTo(null);
 
@@ -114,7 +111,7 @@ public class IdeFrameImpl extends JFrame implements IdeFrameEx, AccessibleContex
     setupCloseAction();
     MnemonicHelper.init(this);
 
-    myBalloonLayout = new BalloonLayoutImpl(myRootPane, new Insets(8, 8, 8, 8));
+    myBalloonLayout = new BalloonLayoutImpl(myRootPane, JBUI.insets(8));
 
     // to show window thumbnail under Macs
     // http://lists.apple.com/archives/java-dev/2009/Dec/msg00240.html
@@ -135,19 +132,14 @@ public class IdeFrameImpl extends JFrame implements IdeFrameEx, AccessibleContex
     PowerSupplyKit.checkPowerSupply();
   }
 
-  protected IdeRootPane createRootPane(ActionManagerEx actionManager,
-                                       DataManager dataManager,
-                                       Application application) {
+  protected IdeRootPane createRootPane(ActionManagerEx actionManager, DataManager dataManager, Application application) {
     return new IdeRootPane(actionManager, dataManager, application, this);
   }
 
   @NotNull
   @Override
   public Insets getInsets() {
-    if (SystemInfo.isMac && isInFullScreen()) {
-      return new Insets(0, 0, 0, 0);
-    }
-    return super.getInsets();
+    return SystemInfo.isMac && isInFullScreen() ? JBUI.emptyInsets() : super.getInsets();
   }
 
   @Override
@@ -164,6 +156,7 @@ public class IdeFrameImpl extends JFrame implements IdeFrameEx, AccessibleContex
   }
 
   @Override
+  @SuppressWarnings({"SSBasedInspection", "deprecation"})
   public void show() {
     super.show();
     SwingUtilities.invokeLater(() -> setFocusableWindowState(true));
@@ -220,16 +213,12 @@ public class IdeFrameImpl extends JFrame implements IdeFrameEx, AccessibleContex
   }
 
   @Override
-  public void setFrameTitle(final String text) {
+  public void setFrameTitle(String text) {
     super.setTitle(text);
   }
 
-  public void setFileTitle(final String fileTitle) {
-    setFileTitle(fileTitle, null);
-  }
-
   @Override
-  public void setFileTitle(@Nullable final String fileTitle, @Nullable File file) {
+  public void setFileTitle(@Nullable String fileTitle, @Nullable File file) {
     myFileTitle = fileTitle;
     myCurrentFile = file;
     updateTitle();
@@ -244,7 +233,7 @@ public class IdeFrameImpl extends JFrame implements IdeFrameEx, AccessibleContex
     updateTitle(this, myTitle, myFileTitle, myCurrentFile);
   }
 
-  public static void updateTitle(JFrame frame, final String title, final String fileTitle, final File currentFile) {
+  public static void updateTitle(@NotNull JFrame frame, @Nullable String title, @Nullable String fileTitle, @Nullable File currentFile) {
     if (myUpdatingTitle) return;
 
     try {
@@ -252,18 +241,11 @@ public class IdeFrameImpl extends JFrame implements IdeFrameEx, AccessibleContex
 
       frame.getRootPane().putClientProperty("Window.documentFile", currentFile);
 
-      final String applicationName = ((ApplicationInfoEx)ApplicationInfo.getInstance()).getFullApplicationName();
-      final Builder builder = new Builder();
-      if (SystemInfo.isMac) {
-        boolean addAppName = StringUtil.isEmpty(title) ||
-                             ProjectManager.getInstance().getOpenProjects().length == 0 ||
-                             ((ApplicationInfoEx)ApplicationInfo.getInstance()).isEAP() && !applicationName.endsWith("SNAPSHOT");
-        builder.append(fileTitle).append(title).append(addAppName ? applicationName : null);
-      } else {
-        builder.append(title).append(fileTitle).append(applicationName);
+      Builder builder = new Builder().append(title).append(fileTitle);
+      if (!SystemInfo.isMac || builder.isEmpty()) {
+        builder = builder.append(ApplicationNamesInfo.getInstance().getFullProductName());
       }
-
-      frame.setTitle(builder.sb.toString());
+      frame.setTitle(builder.toString());
     }
     finally {
       myUpdatingTitle = false;
@@ -282,13 +264,23 @@ public class IdeFrameImpl extends JFrame implements IdeFrameEx, AccessibleContex
   }
 
   private static final class Builder {
-    public StringBuilder sb = new StringBuilder();
+    private final StringBuilder sb = new StringBuilder();
 
-    public Builder append(@Nullable final String s) {
-      if (s == null || s.isEmpty()) return this;
-      if (sb.length() > 0) sb.append(" - ");
-      sb.append(s);
+    public Builder append(@Nullable String s) {
+      if (!StringUtil.isEmptyOrSpaces(s)) {
+        if (sb.length() > 0) sb.append(" - ");
+        sb.append(s);
+      }
       return this;
+    }
+
+    public boolean isEmpty() {
+      return sb.length() == 0;
+    }
+
+    @Override
+    public String toString() {
+      return sb.toString();
     }
   }
 
@@ -326,7 +318,10 @@ public class IdeFrameImpl extends JFrame implements IdeFrameEx, AccessibleContex
 
       if (myRootPane != null) {
         myRootPane.installNorthComponents(project);
-        project.getMessageBus().connect().subscribe(StatusBar.Info.TOPIC, myRootPane.getStatusBar());
+        StatusBar statusBar = myRootPane.getStatusBar();
+        if (statusBar != null) {
+          project.getMessageBus().connect().subscribe(StatusBar.Info.TOPIC, statusBar);
+        }
       }
 
       installDefaultProjectStatusBarWidgets(myProject);
@@ -390,6 +385,7 @@ public class IdeFrameImpl extends JFrame implements IdeFrameEx, AccessibleContex
       statusBar.removeWidget(readOnlyAttributePanel.ID());
       statusBar.removeWidget(insertOverwritePanel.ID());
 
+      //noinspection deprecation
       ((StatusBarEx)statusBar).removeCustomIndicationComponents();
     });
   }
@@ -482,7 +478,6 @@ public class IdeFrameImpl extends JFrame implements IdeFrameEx, AccessibleContex
 
   @Override
   public Rectangle suggestChildFrameBounds() {
-    //todo [kirillk] a dummy implementation
     final Rectangle b = getBounds();
     b.x += 100;
     b.width -= 200;
@@ -550,8 +545,7 @@ public class IdeFrameImpl extends JFrame implements IdeFrameEx, AccessibleContex
         builder.append(" - ");
       }
 
-      final String applicationName = ((ApplicationInfoEx)ApplicationInfo.getInstance()).getFullApplicationName();
-      builder.append(applicationName);
+      builder.append(ApplicationNamesInfo.getInstance().getFullProductName());
 
       return builder.toString();
     }

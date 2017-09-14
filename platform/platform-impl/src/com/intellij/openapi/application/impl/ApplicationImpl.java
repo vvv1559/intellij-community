@@ -22,7 +22,6 @@ import com.intellij.concurrency.JobScheduler;
 import com.intellij.diagnostic.LogEventException;
 import com.intellij.diagnostic.PerformanceWatcher;
 import com.intellij.diagnostic.ThreadDumper;
-import com.intellij.execution.CommandLineUtil;
 import com.intellij.execution.process.ProcessIOExecutorService;
 import com.intellij.ide.*;
 import com.intellij.ide.plugins.PluginManagerCore;
@@ -43,7 +42,6 @@ import com.intellij.openapi.diagnostic.Attachment;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.extensions.ExtensionPointName;
 import com.intellij.openapi.extensions.Extensions;
-import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.progress.*;
 import com.intellij.openapi.progress.impl.CoreProgressManager;
 import com.intellij.openapi.progress.util.PotemkinProgress;
@@ -132,18 +130,6 @@ public class ApplicationImpl extends PlatformComponentManagerImpl implements App
   private boolean myLoaded;
   private static final String WAS_EVER_SHOWN = "was.ever.shown";
 
-  private static final ModalityState ANY = new ModalityState() {
-    @Override
-    public boolean dominates(@NotNull ModalityState anotherState) {
-      return false;
-    }
-
-    @Override
-    public String toString() {
-      return "ANY";
-    }
-  };
-
   static {
     IdeaForkJoinWorkerThreadFactory.setupForkJoinCommonPool();
   }
@@ -177,7 +163,6 @@ public class ApplicationImpl extends PlatformComponentManagerImpl implements App
     myCommandLineMode = isCommandLine;
 
     myDoNotSave = isUnitTestMode || isHeadless;
-    CommandLineUtil.VERBOSE_COMMAND_LINE_MODE = isUnitTestMode;
 
     if (!isUnitTestMode && !isHeadless) {
       Disposer.register(this, Disposer.newDisposable(), "ui");
@@ -682,7 +667,7 @@ public class ApplicationImpl extends PlatformComponentManagerImpl implements App
     }
 
     if (holdsReadLock()) {
-      LOG.error("Calling invokeAndWait from read-action leads to possible deadlock.");
+      throw new IllegalStateException("Calling invokeAndWait from read-action leads to possible deadlock.");
     }
 
     LaterInvocator.invokeAndWait(myTransactionGuard.wrapLaterInvocation(runnable, modalityState), modalityState);
@@ -714,7 +699,7 @@ public class ApplicationImpl extends PlatformComponentManagerImpl implements App
   @Override
   @NotNull
   public ModalityState getAnyModalityState() {
-    return ANY;
+    return AnyModalityState.ANY;
   }
 
   @Override
@@ -1436,19 +1421,7 @@ public class ApplicationImpl extends PlatformComponentManagerImpl implements App
   public void saveAll() {
     if (myDoNotSave) return;
 
-    FileDocumentManager.getInstance().saveAllDocuments();
-
-    ProjectManager projectManager = ProjectManager.getInstance();
-    if (projectManager instanceof ProjectManagerEx) {
-      ((ProjectManagerEx)projectManager).flushChangedProjectFileAlarm();
-    }
-
-    Project[] openProjects = projectManager.getOpenProjects();
-    for (Project openProject : openProjects) {
-      openProject.save();
-    }
-
-    saveSettings();
+    StoreUtil.saveDocumentsAndProjectsAndApp();
   }
 
   @Override

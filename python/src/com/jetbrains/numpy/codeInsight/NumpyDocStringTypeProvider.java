@@ -60,7 +60,7 @@ public class NumpyDocStringTypeProvider extends PyTypeProviderBase {
   private static final Pattern NUMPY_ARRAY_PATTERN = Pattern.compile("(\\(\\.\\.\\..*\\))(.*)");
   public static String NDARRAY = "numpy.core.multiarray.ndarray";
 
-  private static String NDARRAY_OR_ITERABLE = NDARRAY + " or collections.Iterable";
+  private static String NDARRAY_OR_ITERABLE = NDARRAY + " or collections.Iterable or int or long or float";
 
   static {
     NUMPY_ALIAS_TO_REAL_TYPE.put("ndarray", NDARRAY);
@@ -95,7 +95,7 @@ public class NumpyDocStringTypeProvider extends PyTypeProviderBase {
     NUMPY_ALIAS_TO_REAL_TYPE.put("sequence", "collections.Iterable");
     NUMPY_ALIAS_TO_REAL_TYPE.put("set", "collections.Iterable");
     NUMPY_ALIAS_TO_REAL_TYPE.put("list", "collections.Iterable");
-    NUMPY_ALIAS_TO_REAL_TYPE.put("tuple", "collections.Iterable");
+    NUMPY_ALIAS_TO_REAL_TYPE.put("tuple", "collections.Iterable or tuple");
 
     NUMPY_ALIAS_TO_REAL_TYPE.put("ints", "int");
     NUMPY_ALIAS_TO_REAL_TYPE.put("non-zero int", "int");

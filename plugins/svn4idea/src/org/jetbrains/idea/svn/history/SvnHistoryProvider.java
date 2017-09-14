@@ -69,6 +69,8 @@ import java.util.Collections;
 import java.util.Date;
 import java.util.List;
 
+import static org.jetbrains.idea.svn.SvnUtil.getRelativeUrl;
+
 public class SvnHistoryProvider
   implements VcsHistoryProvider, VcsCacheableHistorySessionFactory<Boolean, SvnHistorySession> {
   private final SvnVcs myVcs;
@@ -235,12 +237,7 @@ public class SvnHistoryProvider
       logLoader = new LocalLoader(myVcs, committedPath, from, to, limit, peg, showMergeSources);
     }
 
-    try {
-      logLoader.preliminary();
-    }
-    catch (SVNException e) {
-      throw new VcsException(e);
-    }
+    logLoader.preliminary();
     logLoader.check();
     if (showMergeSources) {
       logLoader.initSupports15();
@@ -306,7 +303,7 @@ public class SvnHistoryProvider
       if (myException != null) throw myException;
     }
 
-    protected abstract void preliminary() throws SVNException;
+    protected abstract void preliminary();
 
     protected abstract void load();
   }
@@ -319,7 +316,7 @@ public class SvnHistoryProvider
     }
 
     @Override
-    protected void preliminary() throws SVNException {
+    protected void preliminary() {
       myInfo = myVcs.getInfo(myFile.getIOFile());
       if (myInfo == null || myInfo.getRepositoryRootURL() == null) {
         myException = new VcsException("File " + myFile.getPath() + " is not under version control");
@@ -334,13 +331,9 @@ public class SvnHistoryProvider
 
     @Override
     protected void load() {
-      String relativeUrl = myUrl;
-      final SVNURL repoRootURL = myInfo.getRepositoryRootURL();
-
-      final String root = repoRootURL.toString();
-      if (myUrl != null && myUrl.startsWith(root)) {
-        relativeUrl = myUrl.substring(root.length());
-      }
+      SVNURL repoRootURL = myInfo.getRepositoryRootURL();
+      String relativeUrl = getRelativeUrl(repoRootURL.toDecodedString(), myUrl);
+      
       if (myPI != null) {
         myPI.setText2(SvnBundle.message("progress.text2.changes.establishing.connection", myUrl));
       }
@@ -355,12 +348,6 @@ public class SvnHistoryProvider
           new MyLogEntryHandler(myVcs, myUrl, pegRevision, relativeUrl,
                                 createConsumerAdapter(myConsumer),
                                 repoRootURL, myFile.getCharset()));
-      }
-      catch (SVNCancelException e) {
-        //
-      }
-      catch (SVNException e) {
-        myException = new VcsException(e);
       }
       catch (VcsException e) {
         myException = e;
@@ -387,7 +374,7 @@ public class SvnHistoryProvider
     }
 
     @Override
-    protected void preliminary() throws SVNException {
+    protected void preliminary() {
       myUrl = myFile.getPath().replace('\\', '/');
     }
 
@@ -415,11 +402,7 @@ public class SvnHistoryProvider
         if (rootURL == null) {
           throw new VcsException("Could not find repository root for URL: " + myUrl);
         }
-        final String root = rootURL.toString();
-        String relativeUrl = myUrl;
-        if (myUrl.startsWith(root)) {
-          relativeUrl = myUrl.substring(root.length());
-        }
+        String relativeUrl = getRelativeUrl(rootURL.toDecodedString(), myUrl);
         SvnTarget target = SvnTarget.fromURL(svnurl, myPeg == null ? myFrom : myPeg);
         RepositoryLogEntryHandler handler =
           new RepositoryLogEntryHandler(myVcs, myUrl, SVNRevision.UNDEFINED, relativeUrl, createConsumerAdapter(myConsumer), rootURL);
@@ -439,17 +422,16 @@ public class SvnHistoryProvider
       }
     }
 
-    private void loadBackwards(SVNURL svnurl) throws SVNException, VcsException {
+    private void loadBackwards(SVNURL svnurl) throws VcsException {
       // this method is called when svnurl does not exist in latest repository revision - thus concrete old revision is used for "info"
       // command to get repository url
       Info info = myVcs.getInfo(svnurl, myPeg, myPeg);
-      final SVNURL rootURL = info != null ? info.getRepositoryRootURL() : null;
-      final String root = rootURL != null ? rootURL.toString() : "";
-      String relativeUrl = myUrl;
-      if (myUrl.startsWith(root)) {
-        relativeUrl = myUrl.substring(root.length());
+      if (info == null || info.getRepositoryRootURL() == null) {
+        throw new VcsException("Could not find repository root for URL: " + svnurl + " in revision " + myPeg);
       }
 
+      SVNURL rootURL = info.getRepositoryRootURL();
+      String relativeUrl = getRelativeUrl(rootURL.toDecodedString(), myUrl);
       final RepositoryLogEntryHandler repositoryLogEntryHandler =
         new RepositoryLogEntryHandler(myVcs, myUrl, SVNRevision.UNDEFINED, relativeUrl, revision -> myConsumer.consume(revision), rootURL);
       repositoryLogEntryHandler.setThrowCancelOnMeetPathCreation(true);
@@ -511,8 +493,7 @@ public class SvnHistoryProvider
                              final SVNRevision pegRevision,
                              String lastPath,
                              final ThrowableConsumer<VcsFileRevision, SVNException> result,
-                             SVNURL repoRootURL, Charset charset)
-      throws SVNException, VcsException {
+                             SVNURL repoRootURL, Charset charset) {
       myVcs = vcs;
       myLastPathCorrector = new SvnPathThroughHistoryCorrection(lastPath);
       myLastPath = lastPath;
@@ -638,8 +619,7 @@ public class SvnHistoryProvider
                                      final SVNRevision pegRevision,
                                      String lastPath,
                                      final ThrowableConsumer<VcsFileRevision, SVNException> result,
-                                     SVNURL repoRootURL)
-      throws VcsException, SVNException {
+                                     SVNURL repoRootURL) {
       super(vcs, url, pegRevision, lastPath, result, repoRootURL, null);
     }
 

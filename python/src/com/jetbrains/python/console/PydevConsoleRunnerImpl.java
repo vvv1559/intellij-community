@@ -149,7 +149,7 @@ public class PydevConsoleRunnerImpl implements PydevConsoleRunner {
   private boolean myEnableAfterConnection = true;
 
 
-  private static final long APPROPRIATE_TO_WAIT = 60000;
+  private static final long HANDSHAKE_TIMEOUT = 60000;
 
   private PyRemoteProcessHandlerBase myRemoteProcessHandlerBase;
 
@@ -619,7 +619,7 @@ public class PydevConsoleRunnerImpl implements PydevConsoleRunner {
       PythonConsoleView consoleView = myConsoleView;
       myProcessHandler.addProcessListener(new ProcessAdapter() {
         @Override
-        public void processTerminated(ProcessEvent event) {
+        public void processTerminated(@NotNull ProcessEvent event) {
           consoleView.setEditable(false);
         }
       });
@@ -690,13 +690,17 @@ public class PydevConsoleRunnerImpl implements PydevConsoleRunner {
         consoleView.setExecutionHandler(myConsoleExecuteActionHandler);
         myProcessHandler.addProcessListener(new ProcessAdapter() {
           @Override
-          public void onTextAvailable(ProcessEvent event, Key outputType) {
+          public void onTextAvailable(@NotNull ProcessEvent event, @NotNull Key outputType) {
             consoleView.print(event.getText(), outputType);
           }
         });
 
         if (myEnableAfterConnection) {
           enableConsoleExecuteAction();
+        }
+
+        if (statements2execute.length == 1 && statements2execute[0].isEmpty()) {
+          statements2execute[0] = "\t";
         }
 
         for (String statement : statements2execute) {
@@ -738,7 +742,7 @@ public class PydevConsoleRunnerImpl implements PydevConsoleRunner {
       }
       else {
         long now = System.currentTimeMillis();
-        if (now - started > APPROPRIATE_TO_WAIT) {
+        if (now - started > HANDSHAKE_TIMEOUT) {
           break;
         }
         else {

@@ -19,6 +19,7 @@ package org.jetbrains.plugins.groovy.lang.resolve
 import com.intellij.psi.*
 import com.intellij.psi.util.PropertyUtil
 import org.jetbrains.plugins.groovy.codeInspection.assignment.GroovyAssignabilityCheckInspection
+import org.jetbrains.plugins.groovy.lang.psi.GroovyFile
 import org.jetbrains.plugins.groovy.lang.psi.api.statements.GrVariable
 import org.jetbrains.plugins.groovy.lang.psi.api.statements.expressions.GrBinaryExpression
 import org.jetbrains.plugins.groovy.lang.psi.api.statements.expressions.GrNewExpression
@@ -434,8 +435,7 @@ class ResolveMethodTest extends GroovyResolveTestCase {
     myFixture.addClass("package java.math; public class BigDecimal {}")
     PsiReference ref = configureByFile("unboxBigDecimal/A.groovy")
     PsiElement resolved = ref.resolve()
-    assertTrue(resolved instanceof PsiMethod)
-    assertEquals(PsiType.DOUBLE, ((PsiMethod)resolved).returnType)
+    assertNull(resolved)
   }
 
   void testGrvy1157() {
@@ -2292,5 +2292,20 @@ class SomeClass extends List<Integer> {
 new SomeClass().si<caret>ze()
 ''', GrMethodImpl
 
+  }
+
+  void 'test prefer varargs in no-arg call'() {
+    def file = fixture.configureByText('_.groovy', '''\
+class A {
+  A(String... a) { println "varargs" }
+  A(A a) { println "single" }
+}
+
+new A()
+''') as GroovyFile
+    def expression = file.statements.last() as GrNewExpression
+    def resolved = expression.resolveMethod()
+    assert resolved instanceof GrMethod
+    assert resolved.isVarArgs()
   }
 }

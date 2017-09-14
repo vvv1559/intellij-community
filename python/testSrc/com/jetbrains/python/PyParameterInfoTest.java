@@ -446,7 +446,7 @@ public class PyParameterInfoTest extends LightMarkedTestCase {
       LanguageLevel.PYTHON35,
       () -> {
         final int offset = loadTest(1).get("<arg1>").getTextOffset();
-        final String expectedInfo = "a1: str, a2: Optional[str], a3: Union[str, int, None], a4: int, *args: int, **kwargs: int";
+        final String expectedInfo = "a1: str, a2: Optional[str]=None, a3: Union[str, int, None]=None, a4: int, *args: int, **kwargs: int";
 
         feignCtrlP(offset).check(expectedInfo, new String[]{"a1: str, "});
       }
@@ -820,6 +820,16 @@ public class PyParameterInfoTest extends LightMarkedTestCase {
     }
 
     @Override
+    public boolean isSingleOverload() {
+      return myItemsToShow.length == 1;
+    }
+
+    @Override
+    public boolean isSingleParameterInfo() {
+      return false;
+    }
+
+    @Override
     public void setHighlightedParameter(Object parameter) {
       // nothing, we don't use it
     }
@@ -862,6 +872,21 @@ public class PyParameterInfoTest extends LightMarkedTestCase {
     @Override
     public Object[] getObjectsToView() {
       return null; // we don't use it
+    }
+
+    @Override
+    public boolean isPreservedOnHintHidden() {
+      throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public void setPreservedOnHintHidden(boolean value) {
+      throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public boolean isInnermostContext() {
+      return false;
     }
 
     @Override

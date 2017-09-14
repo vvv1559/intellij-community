@@ -39,7 +39,6 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
-import javax.swing.border.EmptyBorder;
 import javax.swing.event.ListSelectionEvent;
 import javax.swing.event.ListSelectionListener;
 import javax.swing.event.PopupMenuEvent;
@@ -198,7 +197,6 @@ public class XFramesView extends XDebugView {
       (ActionToolbarImpl)ActionManager.getInstance().createActionToolbar(ActionPlaces.DEBUGGER_TOOLBAR, framesGroup, true);
     toolbar.setReservePlaceAutoPopupIcon(false);
     toolbar.setAddSeparatorFirst(true);
-    toolbar.getComponent().setBorder(new EmptyBorder(1, 0, 0, 0));
     return toolbar;
   }
 
@@ -300,8 +298,8 @@ public class XFramesView extends XDebugView {
       StackFramesListBuilder builder = getOrCreateBuilder(executionStack, session);
       builder.setToSelect(frameToSelect != null ? frameToSelect : mySelectedFrameIndex);
       myListenersEnabled = false;
-      builder.initModel(myFramesList.getModel());
-      myListenersEnabled = !builder.start();
+      boolean selected = builder.initModel(myFramesList.getModel());
+      myListenersEnabled = !builder.start() || selected;
     }
   }
 
@@ -316,6 +314,7 @@ public class XFramesView extends XDebugView {
   private void processFrameSelection(XDebugSession session, boolean force) {
     mySelectedFrameIndex = myFramesList.getSelectedIndex();
     myExecutionStacksWithSelection.put(mySelectedStack, mySelectedFrameIndex);
+    getOrCreateBuilder(mySelectedStack, session).setToSelect(null);
     
     Object selected = myFramesList.getSelectedValue();
     if (selected instanceof XStackFrame) {
@@ -441,12 +440,13 @@ public class XFramesView extends XDebugView {
       myRunning = false;
     }
 
-    private void selectCurrentFrame() {
+    private boolean selectCurrentFrame() {
       if (myToSelect instanceof XStackFrame) {
         if (!Objects.equals(myFramesList.getSelectedValue(), myToSelect) && myFramesList.getModel().contains(myToSelect)) {
           myFramesList.setSelectedValue(myToSelect, true);
           processFrameSelection(mySession, false);
           myListenersEnabled = true;
+          return true;
         }
         if (myAllFramesLoaded && myFramesList.getSelectedValue() == null) {
           LOG.error("Frame was not found, " + myToSelect.getClass() + " must correctly override equals");
@@ -460,12 +460,14 @@ public class XFramesView extends XDebugView {
           myFramesList.setSelectedIndex(selectedFrameIndex);
           processFrameSelection(mySession, false);
           myListenersEnabled = true;
+          return true;
         }
       }
+      return false;
     }
 
     @SuppressWarnings("unchecked")
-    public void initModel(final DefaultListModel model) {
+    public boolean initModel(final DefaultListModel model) {
       model.removeAllElements();
       myStackFrames.forEach(model::addElement);
       if (myErrorMessage != null) {
@@ -474,7 +476,7 @@ public class XFramesView extends XDebugView {
       else if (!myAllFramesLoaded) {
         model.addElement(null);
       }
-      selectCurrentFrame();
+      return selectCurrentFrame();
     }
   }
 }

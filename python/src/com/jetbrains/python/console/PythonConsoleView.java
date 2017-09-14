@@ -95,6 +95,7 @@ public class PythonConsoleView extends LanguageConsoleImpl implements Observable
 
   private XStandaloneVariablesView mySplitView;
   private ActionCallback myInitialized = new ActionCallback();
+  private boolean isShowVars = true;
 
   public PythonConsoleView(final Project project, final String title, final Sdk sdk) {
     super(project, title, PythonLanguage.getInstance());
@@ -115,6 +116,10 @@ public class PythonConsoleView extends LanguageConsoleImpl implements Observable
 
   public void setConsoleCommunication(final ConsoleCommunication communication) {
     getFile().putCopyableUserData(PydevConsoleRunner.CONSOLE_KEY, communication);
+
+    if (isShowVars && communication instanceof PydevConsoleCommunication) {
+      showVariables((PydevConsoleCommunication)communication);
+    }
   }
 
   private PyConsoleStartFolding createConsoleFolding() {
@@ -127,7 +132,7 @@ public class PythonConsoleView extends LanguageConsoleImpl implements Observable
 
   public void addConsoleFolding(boolean isDebugConsole) {
     try {
-      if (isDebugConsole && myExecuteActionHandler != null) {
+      if (isDebugConsole && myExecuteActionHandler != null && getEditor() != null) {
         PyConsoleStartFolding folding = createConsoleFolding();
         // in debug console we should add folding from the place where the folding was turned on
         folding.setStartLineOffset(getEditor().getDocument().getTextLength());
@@ -295,7 +300,10 @@ public class PythonConsoleView extends LanguageConsoleImpl implements Observable
     VirtualFile file = getVirtualFile();
     if (PyConsoleUtil.detectIPythonImported(text, outputType)) {
       PyConsoleUtil.markIPython(file);
-      getExecuteActionHandler().updateConsoleState();
+      PythonConsoleExecuteActionHandler handler = getExecuteActionHandler();
+      if (handler != null) {
+        handler.updateConsoleState();
+      }
     }
     if (PyConsoleUtil.detectIPythonAutomagicOn(text)) {
       PyConsoleUtil.setIPythonAutomagic(file, true);
@@ -487,5 +495,13 @@ public class PythonConsoleView extends LanguageConsoleImpl implements Observable
 
   public void initialized() {
     myInitialized.setDone();
+  }
+
+  public void setShowVars(boolean showVars) {
+    isShowVars = showVars;
+  }
+
+  public boolean isShowVars() {
+    return isShowVars;
   }
 }
